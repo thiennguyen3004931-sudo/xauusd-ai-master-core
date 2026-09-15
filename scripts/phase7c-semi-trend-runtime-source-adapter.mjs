@@ -167,6 +167,18 @@ function transformEntryResolutionLifecycle(source) {
     PHASE7C_PENDING_FVG_VALUE_TAIL,
     "pending-entry FVG value tail",
   );
+
+  // Rename the original accepted-but-not-yet-visible event before adding the
+  // genuine timeout warning. At this point the legacy source contains exactly
+  // one unresolved marker, so the transform cannot accidentally rename the
+  // timeout marker that is injected below.
+  output = replaceExactlyOnce(
+    output,
+    LEGACY_TRANSIENT_UNRESOLVED_EVENT,
+    PHASE7C_TRANSIENT_PENDING_EVENT,
+    "transient unresolved entry marker",
+  );
+
   output = replaceExactlyOnce(
     output,
     LEGACY_PENDING_EXPIRED_BLOCK,
@@ -179,21 +191,6 @@ function transformEntryResolutionLifecycle(source) {
     PHASE7C_PENDING_RECOVERED_BLOCK,
     "pending-entry recovery block",
   );
-
-  // After the timeout warning has been injected there are two legacy unresolved
-  // markers: the original transient marker first and the genuine timeout marker
-  // second. Rename only the first one so Telegram stays quiet while MT5 position
-  // visibility is still settling; the timeout retains the existing warning card.
-  const transientIndex = output.indexOf(LEGACY_TRANSIENT_UNRESOLVED_EVENT);
-  if (transientIndex < 0) {
-    throw new Error(
-      "SEMI Trend runtime source adapter could not locate transient unresolved entry marker.",
-    );
-  }
-  output =
-    output.slice(0, transientIndex) +
-    PHASE7C_TRANSIENT_PENDING_EVENT +
-    output.slice(transientIndex + LEGACY_TRANSIENT_UNRESOLVED_EVENT.length);
 
   if (
     countOccurrences(output, PHASE7C_TRANSIENT_PENDING_EVENT) !== 1 ||
