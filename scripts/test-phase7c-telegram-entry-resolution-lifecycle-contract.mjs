@@ -154,6 +154,22 @@ test("Trend runtime adapter converts transient unresolved state into recoverable
   assert.match(recoveryWindow, /recoveredFromPending: true/);
 });
 
+test("runtime transform attaches pending and unresolved events to the correct lifecycle blocks", () => {
+  const legacySource = fs.readFileSync(controllerPath, "utf8");
+  const source = transformPhase7CSemiTrendRuntimeSource(legacySource);
+
+  assert.match(
+    source,
+    /if \(!opened\) \{[\s\S]*?journal\("ENTRY_ACCEPTED_POSITION_PENDING_RESOLUTION"/,
+    "accepted-but-not-yet-visible position must remain a transient pending event",
+  );
+  assert.match(
+    source,
+    /journal\("PENDING_ENTRY_EXPIRED_NO_POSITION"[\s\S]*?journal\("ENTRY_ACCEPTED_POSITION_NOT_RESOLVED"/,
+    "only the actual pending-entry expiry block may emit the unresolved warning",
+  );
+});
+
 test("pending Trend recovery matches the broker TP actually sent when fixed TP is enabled", () => {
   const source = fs.readFileSync(controllerPath, "utf8");
   const matcherStart = source.indexOf("function matchPendingTrendPosition(");
