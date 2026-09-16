@@ -108,6 +108,7 @@ jobs:
           }
 
       - name: Build workspace
+        id: build_workspace
         run: pnpm build
 
       - name: Phase7C entry resolution contract
@@ -124,6 +125,14 @@ jobs:
         id: broader_regression
         continue-on-error: true
         run: pnpm test
+
+      - name: M7 source-complete acceptance
+        env:
+          M7_PRIVATE_BUILD_OUTCOME: ${{ steps.build_workspace.outcome }}
+          M7_MASTER_REGRESSION_OUTCOME: ${{ steps.broader_regression.outcome }}
+          M7_PUBLIC_CONTRACT_OUTCOME: ${{ steps.m6_public_contract.outcome }}
+          M7_PRODUCTION_CUTOVER: NOT_PERFORMED
+        run: node scripts/security/accept-master-core-split.mjs
 
       - name: Diff hygiene
         run: git diff --check
