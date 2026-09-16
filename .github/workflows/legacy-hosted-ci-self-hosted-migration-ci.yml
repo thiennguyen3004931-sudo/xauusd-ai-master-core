@@ -1,0 +1,45 @@
+name: Legacy Hosted CI Self-Hosted Migration CI
+
+on:
+  push:
+    branches:
+      - fix/legacy-hosted-ci-self-hosted-migration
+    paths:
+      - "scripts/security/legacy-hosted-ci-self-hosted-migration.test.mjs"
+      - ".github/workflows/legacy-hosted-ci-self-hosted-migration-ci.yml"
+      - ".github/workflows/phase7c-canonical-pr-gate.yml"
+      - ".github/workflows/public-private-boundary-ci.yml"
+      - ".github/workflows/phase7c-web-live-arm-demo-auto-ci.yml"
+      - ".github/workflows/phase7c-live-arm-orphan-reconciliation-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  migration-contract:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          $actualHead = (git rev-parse HEAD).Trim()
+          Write-Host "CHECKED_OUT_HEAD=$actualHead"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actualHead -ne $env:EXPECTED_HEAD) { exit 1 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Legacy hosted CI migration contract
+        run: node --test scripts/security/legacy-hosted-ci-self-hosted-migration.test.mjs
+      - name: Diff hygiene
+        if: always()
+        run: git diff --check
