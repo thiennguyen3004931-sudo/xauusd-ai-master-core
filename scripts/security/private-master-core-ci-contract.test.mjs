@@ -72,8 +72,8 @@ test("private Master/Core CI uses built-in Windows PowerShell and writes outputs
   const powershellSteps = source.match(/shell:\s*powershell\b/g) ?? [];
   assert.equal(
     powershellSteps.length,
-    5,
-    "all five Windows-specific steps must use built-in Windows PowerShell",
+    6,
+    "all six Windows-specific steps must use built-in Windows PowerShell",
   );
   assert.match(
     source,
