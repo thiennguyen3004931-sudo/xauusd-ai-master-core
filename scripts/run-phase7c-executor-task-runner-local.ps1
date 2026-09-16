@@ -707,6 +707,15 @@ function Recover-SupervisorIfNeeded {
   if ($script:desiredExecutorState -ne "RUNNING") { return }
   if (Test-SupervisorAlive) { return }
 
+  $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  if ($script:nextRecoveryAt -ne 0L -and $now -lt $script:nextRecoveryAt) { return }
+
+  if (-not (Ensure-Phase7CBotPause "system-lifecycle-broker-recovery")) {
+    $script:nextRecoveryAt = $now + ([long]$RestartDelaySeconds * 1000L)
+    Set-BrokerState "BLOCKED" "REJECT_BOT_NOT_PAUSED" "Cannot confirm PAUSE during supervisor recovery."
+    return
+  }
+
   $existingSupervisorPid = Get-Phase7CExistingSupervisorPid
   if ($null -ne $existingSupervisorPid) {
     $script:supervisorPid = [int]$existingSupervisorPid
@@ -716,21 +725,13 @@ function Recover-SupervisorIfNeeded {
     return
   }
 
-  $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   if ($script:nextRecoveryAt -eq 0L) {
     $script:nextRecoveryAt = $now + ([long]$RestartDelaySeconds * 1000L)
-    [void](Ensure-Phase7CBotPause "system-lifecycle-broker-recovery")
     Set-BrokerState "ERROR_RETRYING" "FAIL_SUPERVISOR_EXITED" "Supervisor exited unexpectedly; recovery is PAUSE-only."
     return
   }
-  if ($now -lt $script:nextRecoveryAt) { return }
 
   try {
-    if (-not (Ensure-Phase7CBotPause "system-lifecycle-broker-recovery")) {
-      $script:nextRecoveryAt = $now + ([long]$RestartDelaySeconds * 1000L)
-      Set-BrokerState "BLOCKED" "REJECT_BOT_NOT_PAUSED" "Cannot confirm PAUSE during supervisor recovery."
-      return
-    }
     $config = Read-Phase7CCanonicalLaunchConfig
     $context = Get-BrokerSafetyContext $config
     $gate = Test-Phase7CLifecycleBrokerSafetyGate -Action "START" -Context $context
