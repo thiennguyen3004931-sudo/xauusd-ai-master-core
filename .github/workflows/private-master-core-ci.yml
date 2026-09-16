@@ -16,6 +16,7 @@ jobs:
   private-master-core:
     name: private-master-core-self-hosted
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 45
 
     steps:
@@ -23,13 +24,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Runner identity
         shell: pwsh
         run: |
           Write-Host "RUNNER_OS=$env:RUNNER_OS"
           Write-Host "RUNNER_ARCH=$env:RUNNER_ARCH"
-          Write-Host "GITHUB_SHA=$env:GITHUB_SHA"
+          $actualHead = git rev-parse HEAD
+          Write-Host "CHECKED_OUT_HEAD=$actualHead"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
