@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   assertMasterCoreAcceptance,
   evaluateMasterCoreAcceptance,
+  hasPublicContractDependencyEvidence,
 } from "./accept-master-core-split.mjs";
 
 test("M7 private acceptance fails closed on contract drift or tracked signing key", () => {
@@ -36,6 +37,26 @@ test("M7 private acceptance refuses to claim source completion after production 
   assert.throws(
     () => assertMasterCoreAcceptance(verdicts),
     /M7_PRIVATE_ACCEPTANCE_FAILED:PRODUCTION_CUTOVER=PERFORMED/,
+  );
+});
+
+test("M7 treats a verified M6 contract lock as private dependency evidence", () => {
+  assert.equal(
+    hasPublicContractDependencyEvidence({
+      publicContractLockVerified: true,
+      directReferencePresent: false,
+    }),
+    true,
+  );
+});
+
+test("M7 dependency evidence fails closed without lock proof or a direct reference", () => {
+  assert.equal(
+    hasPublicContractDependencyEvidence({
+      publicContractLockVerified: false,
+      directReferencePresent: false,
+    }),
+    false,
   );
 });
 
