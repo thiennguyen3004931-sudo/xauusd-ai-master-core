@@ -28,11 +28,19 @@ jobs:
 
       - name: Runner identity
         shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           Write-Host "RUNNER_OS=$env:RUNNER_OS"
           Write-Host "RUNNER_ARCH=$env:RUNNER_ARCH"
-          $actualHead = git rev-parse HEAD
+          Write-Host "RUNNER_NAME=$env:RUNNER_NAME"
+          $actualHead = (git rev-parse HEAD).Trim()
           Write-Host "CHECKED_OUT_HEAD=$actualHead"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actualHead -ne $env:EXPECTED_HEAD) {
+            Write-Error "CHECKED_OUT_HEAD_MISMATCH"
+            exit 1
+          }
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
