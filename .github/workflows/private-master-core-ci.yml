@@ -58,6 +58,21 @@ jobs:
       - name: Tracked-secret boundary
         run: node scripts/security/check-private-secrets.mjs --tracked
 
+      - name: M2 provenance status
+        id: m2_provenance
+        shell: pwsh
+        run: |
+          if ((Test-Path "scripts/security/verify-private-bootstrap.mjs") -and
+              (Test-Path "security/private-bootstrap-attestation.json")) {
+            node scripts/security/verify-private-bootstrap.mjs security/private-bootstrap-attestation.json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            "state=PASS" >> $env:GITHUB_OUTPUT
+            Write-Host "M3_PROVENANCE=PASS"
+          } else {
+            "state=BLOCKED" >> $env:GITHUB_OUTPUT
+            Write-Host "M3_PROVENANCE=BLOCKED_M2_NOT_IMPLEMENTED"
+          }
+
       - name: Build workspace
         run: pnpm build
 
@@ -71,17 +86,10 @@ jobs:
           scripts/phase7c-trade-notifier-synthetic.test.mjs
           scripts/test-phase7c-hold-telegram-dedupe-contract.mjs
 
-      - name: M2 provenance status
-        shell: pwsh
-        run: |
-          if ((Test-Path "scripts/security/verify-private-bootstrap.mjs") -and
-              (Test-Path "security/private-bootstrap-attestation.json")) {
-            node scripts/security/verify-private-bootstrap.mjs security/private-bootstrap-attestation.json
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            Write-Host "M3_PROVENANCE=PASS"
-          } else {
-            Write-Host "M3_PROVENANCE=BLOCKED_M2_NOT_IMPLEMENTED"
-          }
+      - name: Broader private regression evidence
+        id: broader_regression
+        continue-on-error: true
+        run: pnpm test
 
       - name: Diff hygiene
         run: git diff --check
@@ -100,3 +108,21 @@ jobs:
       - name: Self-hosted CI infrastructure verdict
         shell: pwsh
         run: Write-Host "SELF_HOSTED_CI_INFRA=PASS"
+
+      - name: Full M3 acceptance verdict
+        shell: pwsh
+        run: |
+          $provenance = "${{ steps.m2_provenance.outputs.state }}"
+          $broader = "${{ steps.broader_regression.outcome }}"
+
+          if ($provenance -ne "PASS") {
+            Write-Host "M3_PRIVATE_CI=BLOCKED_M2_PROVENANCE"
+            exit 0
+          }
+
+          if ($broader -ne "success") {
+            Write-Host "M3_PRIVATE_CI=BLOCKED_BROADER_REGRESSION"
+            exit 0
+          }
+
+          Write-Host "M3_PRIVATE_CI=GREEN"
