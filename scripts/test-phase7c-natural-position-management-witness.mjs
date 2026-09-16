@@ -111,13 +111,13 @@ test("FastMove trigger is established only by persisted attempt or exact-ticket 
   const fromJournal = witness({
     trendJournal: [
       {
-        event: "FAST_MOVE_PROFIT_LOCK_TIGHTEN",
+        type: "FAST_MOVE_PROFIT_LOCK_TIGHTEN",
         ticket: "304783904",
         peakPrice: 4404.2,
         stopLoss: 4394.2,
       },
       {
-        event: "FAST_MOVE_PROFIT_LOCK_TIGHTEN",
+        type: "FAST_MOVE_PROFIT_LOCK_TIGHTEN",
         ticket: "other-ticket",
         peakPrice: 9999,
         stopLoss: 9990,
@@ -136,7 +136,7 @@ test("M5 handoff is proven from durable flag plus exact-ticket handoff journal; 
     trendState: { managed: managed({ fastMoveHandedOffToM5: true }) },
     trendJournal: [
       {
-        event: "FAST_MOVE_HANDOFF_M5_STRUCTURE",
+        type: "FAST_MOVE_HANDOFF_M5_STRUCTURE",
         ticket: "304783904",
         structurePrice: 4399.1,
         pivotM5CloseTime: 1788956500000,
@@ -165,7 +165,7 @@ test("successful canonical tighten events are exposed as proof evidence without 
   const result = witness({
     trendJournal: [
       {
-        event: "M5_STRUCTURAL_SL_TIGHTEN",
+        type: "M5_STRUCTURAL_SL_TIGHTEN",
         ticket: "304783904",
         previousStopLoss: 4386.52,
         stopLoss: 4392.52,
