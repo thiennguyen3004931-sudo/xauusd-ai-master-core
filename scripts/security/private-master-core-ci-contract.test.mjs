@@ -65,6 +65,26 @@ test("private Master/Core CI coalesces PR runs and does not duplicate them on br
   assert.match(source, /cancel-in-progress:\s*true/);
 });
 
+test("private Master/Core CI uses built-in Windows PowerShell and writes outputs as UTF-8", () => {
+  const source = readWorkflow();
+
+  assert.doesNotMatch(source, /shell:\s*pwsh\b/);
+  const powershellSteps = source.match(/shell:\s*powershell\b/g) ?? [];
+  assert.equal(
+    powershellSteps.length,
+    5,
+    "all five Windows-specific steps must use built-in Windows PowerShell",
+  );
+  assert.match(
+    source,
+    /"state=PASS"\s*\|\s*Out-File\s+-FilePath\s+\$env:GITHUB_OUTPUT\s+-Encoding\s+utf8\s+-Append/,
+  );
+  assert.match(
+    source,
+    /"state=BLOCKED"\s*\|\s*Out-File\s+-FilePath\s+\$env:GITHUB_OUTPUT\s+-Encoding\s+utf8\s+-Append/,
+  );
+});
+
 test("private Master/Core CI pins toolchain and runs the approved scoped gates", () => {
   const source = readWorkflow();
 
