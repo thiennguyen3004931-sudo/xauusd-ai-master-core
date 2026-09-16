@@ -58,6 +58,9 @@ jobs:
       - name: Tracked-secret boundary
         run: node scripts/security/check-private-secrets.mjs --tracked
 
+      - name: Private bootstrap provenance tests
+        run: node --test scripts/security/verify-private-bootstrap.test.mjs
+
       - name: M2 provenance status
         id: m2_provenance
         shell: pwsh
