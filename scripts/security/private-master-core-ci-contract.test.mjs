@@ -35,14 +35,23 @@ test("private Master/Core CI targets only the dedicated self-hosted Windows runn
   );
 });
 
-test("private Master/Core CI checks out the exact trusted head", () => {
+test("private Master/Core CI checks out and verifies the exact trusted head", () => {
   const source = readWorkflow();
 
   assert.match(
     source,
     /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\|\|\s*github\.sha\s*\}\}/,
   );
+  assert.match(
+    source,
+    /EXPECTED_HEAD:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\|\|\s*github\.sha\s*\}\}/,
+  );
+  assert.match(source, /RUNNER_NAME=\$env:RUNNER_NAME/);
   assert.match(source, /git rev-parse HEAD/);
+  assert.match(
+    source,
+    /if \(\$actualHead -ne \$env:EXPECTED_HEAD\) \{[\s\S]*?CHECKED_OUT_HEAD_MISMATCH[\s\S]*?exit 1[\s\S]*?\}/,
+  );
 });
 
 test("private Master/Core CI pins toolchain and runs the approved scoped gates", () => {
