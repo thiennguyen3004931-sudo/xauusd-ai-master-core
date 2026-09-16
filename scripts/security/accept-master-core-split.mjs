@@ -82,7 +82,8 @@ function trackedSecretPresent(paths) {
 
 function publicContractDependencyEvidence(paths) {
   return paths.some((filePath) => {
-    if (!isTextPath(filePath)) return false;
+    const isPrivateRuntimePath = filePath.startsWith("apps/") || filePath.startsWith("packages/");
+    if (!isPrivateRuntimePath || !isTextPath(filePath)) return false;
     if (GOVERNED_PACKAGE_PATHS.some((prefix) => filePath.startsWith(`${prefix}/`))) return false;
     const text = fs.readFileSync(path.join(repoRoot, filePath), "utf8");
     return [...PUBLIC_PACKAGES].some((packageName) => text.includes(packageName));
