@@ -23,8 +23,8 @@ export function createContext(direction: "BULLISH" | "BEARISH" = "BULLISH"): Sig
     mitigated: false,
   }];
   const gaps: FairValueGap[] = [{
-    high: bullish ? 2349 : 2357,
-    low: bullish ? 2347 : 2355,
+    high: bullish ? 2349 : 2354,
+    low: bullish ? 2347 : 2352,
     bullish,
     filled: false,
   }];
@@ -129,7 +129,10 @@ export function createContext(direction: "BULLISH" | "BEARISH" = "BULLISH"): Sig
     latest: {
       timestamp: now,
       close,
-      sma: { "20": bullish ? 2348 : 2352 },
+      sma: {
+        "20": bullish ? 2348 : 2352,
+        "200": bullish ? 2340 : 2360,
+      },
       ema: bullish ? { "20": 2348, "50": 2345 } : { "20": 2352, "50": 2355 },
       atr: 5,
       rsi: bullish ? 61 : 39,

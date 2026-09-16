@@ -213,7 +213,10 @@ export function transformPhase7CSemiTrendRuntimeSource(source) {
     throw new Error("SEMI Trend runtime source adapter requires non-empty TypeScript source.");
   }
 
-  let output = source;
+  // Git may materialize tracked TypeScript as CRLF on Windows self-hosted runners.
+  // Normalize only text line endings before exact template matching; runtime logic
+  // and generated statements remain unchanged.
+  let output = source.replace(/\r\n?/g, "\n");
   const semiManagePositionCall = output.includes(
     "await managePosition(managedPosition, quote, spec, m15, m5);",
   )
