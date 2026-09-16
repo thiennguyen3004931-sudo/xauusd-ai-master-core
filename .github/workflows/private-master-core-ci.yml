@@ -88,6 +88,10 @@ jobs:
       - name: M7 private acceptance tests
         run: node --test scripts/security/accept-master-core-split.test.mjs
 
+      - name: M8 private cutover preflight contract
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/security/preflight-private-cutover.contract.test.ps1
+
       - name: M6 public contract lock
         id: m6_public_contract
         run: node scripts/security/verify-public-contract-lock.mjs security/public-contract.lock.json
