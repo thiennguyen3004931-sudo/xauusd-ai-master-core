@@ -1,0 +1,23 @@
+name: Phase7C Broker Desired State TDD
+
+on:
+  push:
+    branches:
+      - fix/phase7c-broker-desired-state-persistence
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-source-contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Desired-state source contract - PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-broker-desired-state-persistence-source.ps1
+      - name: Desired-state source contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-broker-desired-state-persistence-source.ps1
