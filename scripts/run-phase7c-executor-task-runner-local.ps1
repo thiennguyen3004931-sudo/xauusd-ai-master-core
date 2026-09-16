@@ -167,6 +167,7 @@ foreach ($directory in @($runtimeDir, $attemptsRoot, $brokerRoot, $inboxDir, $st
 $requestPath = Join-Path $inboxDir "request.json"
 $statusPath = Join-Path $stateDir "status.json"
 $heartbeatPath = Join-Path $stateDir "heartbeat.json"
+$desiredExecutorStatePath = Join-Path $stateDir "desired-executor-state.json"
 $brokerLogPath = Join-Path $logsDir "broker.log"
 $runnerLockPath = Join-Path $runtimeDir "startup-runner.lock"
 
@@ -215,6 +216,38 @@ $script:nextRecoveryAt = 0L
 function Append-BrokerLog([string]$Message) {
   $stamp = [DateTimeOffset]::Now.ToString("o")
   Add-Content -LiteralPath $brokerLogPath -Value "[$stamp] $Message" -Encoding utf8
+}
+
+function Read-DurableDesiredExecutorState {
+  if (-not (Test-Path -LiteralPath $desiredExecutorStatePath)) { return "STOPPED" }
+  try {
+    $state = Get-Content -LiteralPath $desiredExecutorStatePath -Raw | ConvertFrom-Json
+    if ([int]$state.version -ne 1) { throw "desired executor state version must be 1." }
+    $desired = ([string]$state.desiredExecutorState).Trim().ToUpperInvariant()
+    if ($desired -notin @("RUNNING", "STOPPED")) { throw "desired executor state must be RUNNING or STOPPED." }
+    return $desired
+  } catch {
+    Append-BrokerLog "Durable desired executor state invalid; fail closed to STOPPED. $($_.Exception.Message)"
+    return "STOPPED"
+  }
+}
+
+function Write-DurableDesiredExecutorState([string]$State) {
+  $normalized = ([string]$State).Trim().ToUpperInvariant()
+  if ($normalized -notin @("RUNNING", "STOPPED")) {
+    throw "Durable desired executor state must be RUNNING or STOPPED."
+  }
+  try {
+    Write-Phase7CJsonAtomic -Path $desiredExecutorStatePath -Value ([pscustomobject]@{
+      version = 1
+      desiredExecutorState = $normalized
+      updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    }) -Depth 4
+  } catch {
+    # Never leave a stale RUNNING intent after a failed persistence attempt.
+    Remove-Item -LiteralPath $desiredExecutorStatePath -Force -ErrorAction SilentlyContinue
+    throw
+  }
 }
 
 function Write-BrokerHeartbeat {
@@ -340,6 +373,32 @@ function Get-BrokerSafetyContext($Config) {
 function Test-SupervisorAlive {
   if ($null -eq $script:supervisorPid) { return $false }
   return $null -ne (Get-Process -Id ([int]$script:supervisorPid) -ErrorAction SilentlyContinue)
+}
+
+function Get-Phase7CExistingSupervisorPid {
+  $supervisorPidPath = Join-Path $runtimeDir "supervisor.pid"
+  if (-not (Test-Path -LiteralPath $supervisorPidPath -PathType Leaf)) { return $null }
+  try {
+    $candidatePid = [int](Get-Content -LiteralPath $supervisorPidPath -Raw).Trim()
+    if ($candidatePid -le 0) { return $null }
+    $liveProcess = Get-Process -Id $candidatePid -ErrorAction SilentlyContinue
+    if ($null -eq $liveProcess) { return $null }
+    $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $candidatePid" -ErrorAction Stop
+    if ($null -eq $processInfo) { return $null }
+    $processName = ([string]$processInfo.Name).Trim().ToLowerInvariant()
+    if ($processName -notin @("powershell.exe", "pwsh.exe")) { return $null }
+    $canonicalSupervisorLeaf = "run-phase7c-executors-local.ps1"
+    if (-not [string]::Equals([System.IO.Path]::GetFileName($Supervisor), $canonicalSupervisorLeaf, [System.StringComparison]::OrdinalIgnoreCase)) { return $null }
+    $commandLine = [string]$processInfo.CommandLine
+    if ([string]::IsNullOrWhiteSpace($commandLine)) { return $null }
+    $canonicalSupervisorPath = [System.IO.Path]::GetFullPath($Supervisor).Replace('/', '\')
+    $normalizedCommandLine = $commandLine.Replace('/', '\')
+    if ($normalizedCommandLine.IndexOf($canonicalSupervisorPath, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { return $null }
+    return $candidatePid
+  } catch {
+    Append-BrokerLog "Existing supervisor adoption probe failed; refusing unproven PID. $($_.Exception.Message)"
+    return $null
+  }
 }
 
 function Stop-Phase7CExecutorRuntime($Config) {
@@ -559,6 +618,7 @@ function Process-BrokerRequest {
         Set-BrokerState "BLOCKED" ([string]$stopResult.reasonCode) ([string]$stopResult.message)
         return
       }
+      Write-DurableDesiredExecutorState "STOPPED"
       $script:desiredExecutorState = "STOPPED"
       $status = if ($stopResult.reasonCode -eq "NOOP_ALREADY_STOPPED") { "NOOP" } else { "SUCCEEDED" }
       Complete-Request $requestId $action $status ([string]$stopResult.reasonCode) ([string]$stopResult.message) $startedAt
@@ -567,6 +627,7 @@ function Process-BrokerRequest {
     }
 
     if ($action -eq "START" -and (Test-SupervisorAlive)) {
+      Write-DurableDesiredExecutorState "RUNNING"
       $script:desiredExecutorState = "RUNNING"
       Complete-Request $requestId $action "NOOP" "NOOP_ALREADY_RUNNING" "Executor supervisor is already running." $startedAt
       Set-BrokerState "RUNNING" "NOOP_ALREADY_RUNNING"
@@ -630,6 +691,7 @@ function Process-BrokerRequest {
       return
     }
 
+    Write-DurableDesiredExecutorState "RUNNING"
     $script:desiredExecutorState = "RUNNING"
     $reasonCode = if ($action -eq "RESTART") { "OK_RESTARTED" } else { "OK_STARTED" }
     Complete-Request $requestId $action "SUCCEEDED" $reasonCode ([string]$startResult.message) $startedAt
@@ -646,20 +708,30 @@ function Recover-SupervisorIfNeeded {
   if (Test-SupervisorAlive) { return }
 
   $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  if ($script:nextRecoveryAt -ne 0L -and $now -lt $script:nextRecoveryAt) { return }
+
+  if (-not (Ensure-Phase7CBotPause "system-lifecycle-broker-recovery")) {
+    $script:nextRecoveryAt = $now + ([long]$RestartDelaySeconds * 1000L)
+    Set-BrokerState "BLOCKED" "REJECT_BOT_NOT_PAUSED" "Cannot confirm PAUSE during supervisor recovery."
+    return
+  }
+
+  $existingSupervisorPid = Get-Phase7CExistingSupervisorPid
+  if ($null -ne $existingSupervisorPid) {
+    $script:supervisorPid = [int]$existingSupervisorPid
+    $script:nextRecoveryAt = 0L
+    Append-BrokerLog "Adopted surviving canonical executor supervisor PID=$existingSupervisorPid after lifecycle broker cold-start."
+    Set-BrokerState "RUNNING" "NOOP_ALREADY_RUNNING"
+    return
+  }
+
   if ($script:nextRecoveryAt -eq 0L) {
     $script:nextRecoveryAt = $now + ([long]$RestartDelaySeconds * 1000L)
-    [void](Ensure-Phase7CBotPause "system-lifecycle-broker-recovery")
     Set-BrokerState "ERROR_RETRYING" "FAIL_SUPERVISOR_EXITED" "Supervisor exited unexpectedly; recovery is PAUSE-only."
     return
   }
-  if ($now -lt $script:nextRecoveryAt) { return }
 
   try {
-    if (-not (Ensure-Phase7CBotPause "system-lifecycle-broker-recovery")) {
-      $script:nextRecoveryAt = $now + ([long]$RestartDelaySeconds * 1000L)
-      Set-BrokerState "BLOCKED" "REJECT_BOT_NOT_PAUSED" "Cannot confirm PAUSE during supervisor recovery."
-      return
-    }
     $config = Read-Phase7CCanonicalLaunchConfig
     $context = Get-BrokerSafetyContext $config
     $gate = Test-Phase7CLifecycleBrokerSafetyGate -Action "START" -Context $context
@@ -685,9 +757,10 @@ function Recover-SupervisorIfNeeded {
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER=LIFECYCLE_BROKER"
 Write-Host "PHASE7C_LIFECYCLE_BROKER_ROOT=$brokerRoot"
 Write-Host "PHASE7C_LIFECYCLE_BROKER_PID=$PID"
-Write-Host "PHASE7C_LIFECYCLE_BROKER_BOOT=IDLE|DESIRED=STOPPED|MODE=PAUSE"
-Append-BrokerLog "Lifecycle broker starting. PID=$PID desiredExecutorState=STOPPED"
 [void](Ensure-Phase7CBotPause "system-lifecycle-broker-boot")
+$script:desiredExecutorState = Read-DurableDesiredExecutorState
+Write-Host "PHASE7C_LIFECYCLE_BROKER_BOOT=IDLE|DESIRED=$($script:desiredExecutorState)|MODE=PAUSE"
+Append-BrokerLog "Lifecycle broker starting. PID=$PID desiredExecutorState=$($script:desiredExecutorState)"
 $script:brokerState = "IDLE"
 Write-BrokerStatus
 Write-BrokerHeartbeat

@@ -1,0 +1,33 @@
+name: Phase7C Broker Desired State TDD
+
+on:
+  push:
+    branches:
+      - fix/phase7c-broker-desired-state-persistence
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-source-contract:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Runner identity
+        shell: powershell
+        run: |
+          $actualHead = (git rev-parse HEAD).Trim()
+          Write-Host "CHECKED_OUT_HEAD=$actualHead"
+          Write-Host "EXPECTED_HEAD=${{ github.sha }}"
+          if ($actualHead -ne "${{ github.sha }}") {
+            Write-Error "CHECKED_OUT_HEAD_MISMATCH"
+            exit 1
+          }
+      - name: Desired-state source contract - Windows PowerShell 5.1
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-phase7c-broker-desired-state-persistence-source.ps1
