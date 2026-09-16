@@ -27,24 +27,6 @@ jobs:
           Write-Host "EXPECTED_HEAD=${{ github.sha }}"
           Write-Host "ACTUAL_HEAD=$actual"
           if ($actual -ne "${{ github.sha }}") { exit 1 }
-      - name: Probe WSL without mutation
-        shell: powershell
-        run: |
-          $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
-          if ($null -eq $wsl) {
-            Write-Host "CAPABILITY_WSL=NO"
-            exit 0
-          }
-          Write-Host "CAPABILITY_WSL_COMMAND=YES"
-          $distros = @(wsl.exe -l -q 2>$null | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-          if ($LASTEXITCODE -ne 0 -or $distros.Count -eq 0) {
-            Write-Host "CAPABILITY_WSL_DISTRO=NO"
-            exit 0
-          }
-          Write-Host "CAPABILITY_WSL_DISTRO=YES"
-          $distros | ForEach-Object { Write-Host "WSL_DISTRO=$_" }
-          wsl.exe sh -lc 'uname -a; command -v node || true; node --version 2>/dev/null || true; command -v git || true; git --version 2>/dev/null || true'
-          if ($LASTEXITCODE -eq 0) { Write-Host "CAPABILITY_WSL_EXEC=YES" } else { Write-Host "CAPABILITY_WSL_EXEC=NO"; exit 1 }
       - name: Bootstrap portable PowerShell 7.6.6
         shell: powershell
         run: |
@@ -97,6 +79,33 @@ jobs:
           git --version
           python --version
           node --version
+      - name: Probe WSL with bounded execution
+        shell: powershell
+        run: |
+          $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+          if ($null -eq $wsl) {
+            Write-Host "CAPABILITY_WSL=NO"
+            exit 0
+          }
+          Write-Host "CAPABILITY_WSL_COMMAND=YES"
+          $stdout = Join-Path $env:RUNNER_TEMP 'wsl-list.out'
+          $stderr = Join-Path $env:RUNNER_TEMP 'wsl-list.err'
+          $p = Start-Process -FilePath 'wsl.exe' -ArgumentList '-l','-q' -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if (-not $p.WaitForExit(10000)) {
+            try { $p.Kill() } catch {}
+            Write-Host "CAPABILITY_WSL_LIST=TIMEOUT"
+            exit 0
+          }
+          $distros = @()
+          if (Test-Path $stdout) {
+            $distros = @(Get-Content $stdout | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          }
+          if ($p.ExitCode -ne 0 -or $distros.Count -eq 0) {
+            Write-Host "CAPABILITY_WSL_DISTRO=NO"
+            exit 0
+          }
+          Write-Host "CAPABILITY_WSL_DISTRO=YES"
+          $distros | ForEach-Object { Write-Host "WSL_DISTRO=$_" }
       - name: Diff hygiene
         shell: powershell
         run: git diff --check
