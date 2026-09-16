@@ -18,11 +18,23 @@ concurrency:
 jobs:
   canonical-linux:
     name: canonical-pr-linux
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 45
     steps:
-      - name: Checkout
+      - name: Checkout exact head
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actualHead = (git rev-parse HEAD).Trim()
+          Write-Host "CHECKED_OUT_HEAD=$actualHead"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actualHead -ne $env:EXPECTED_HEAD) { exit 1 }
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -88,11 +100,23 @@ jobs:
 
   canonical-windows:
     name: canonical-pr-windows
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 30
     steps:
-      - name: Checkout
+      - name: Checkout exact head
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actualHead = (git rev-parse HEAD).Trim()
+          Write-Host "CHECKED_OUT_HEAD=$actualHead"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actualHead -ne $env:EXPECTED_HEAD) { exit 1 }
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
