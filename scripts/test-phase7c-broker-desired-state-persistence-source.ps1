@@ -49,9 +49,11 @@ Assert-True ($runner -match '(?s)while\s*\(\$true\).*?Recover-SupervisorIfNeeded
 
 # A broker cold-start loses the in-memory supervisor PID while the canonical
 # supervisor/process tree can still be alive. Durable RUNNING must first adopt a
-# proven canonical survivor instead of launching a duplicate supervisor.
+# proven canonical survivor instead of launching a duplicate supervisor, but only
+# after recovery has positively confirmed PAUSE.
 Assert-True ($runner -match '(?s)function\s+Get-Phase7CExistingSupervisorPid.*?supervisor\.pid.*?Get-Process.*?Get-CimInstance\s+Win32_Process.*?run-phase7c-executors-local\.ps1') "Existing-supervisor adoption must verify live PID evidence and canonical PowerShell command line"
 Assert-True ($runner -match '(?s)function\s+Recover-SupervisorIfNeeded.*?Get-Phase7CExistingSupervisorPid.*?\$script:supervisorPid\s*=.*?Set-BrokerState\s+"RUNNING".*?return.*?Start-Phase7CExecutorRuntime') "Recovery must adopt a proven surviving supervisor before any new supervisor launch"
+Assert-True ($runner -match '(?s)function\s+Recover-SupervisorIfNeeded.*?Ensure-Phase7CBotPause\s+"system-lifecycle-broker-recovery".*?Get-Phase7CExistingSupervisorPid') "Recovery must confirm PAUSE before adopting a surviving supervisor"
 
 # Persist successful operator intent before publishing successful/idempotent request completion.
 Assert-True ($runner -match '(?s)if\s*\(\$action\s*-eq\s*"STOP"\).*?Write-DurableDesiredExecutorState\s+"STOPPED".*?\$script:desiredExecutorState\s*=\s*"STOPPED".*?Complete-Request') "Successful STOP must persist STOPPED before request completion"
