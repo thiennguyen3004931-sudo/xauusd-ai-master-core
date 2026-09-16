@@ -29,6 +29,20 @@ test("private Master/Core CI targets only the dedicated self-hosted Windows runn
   );
   assert.doesNotMatch(source, /ubuntu-latest|windows-latest|macos-latest/);
   assert.match(source, /permissions:\s*\n\s*contents:\s*read/);
+  assert.match(
+    source,
+    /if:\s*github\.event_name\s*!=\s*[\"']pull_request[\"']\s*\|\|\s*github\.event\.pull_request\.head\.repo\.full_name\s*==\s*github\.repository/,
+  );
+});
+
+test("private Master/Core CI checks out the exact trusted head", () => {
+  const source = readWorkflow();
+
+  assert.match(
+    source,
+    /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\|\|\s*github\.sha\s*\}\}/,
+  );
+  assert.match(source, /git rev-parse HEAD/);
 });
 
 test("private Master/Core CI pins toolchain and runs the approved scoped gates", () => {
