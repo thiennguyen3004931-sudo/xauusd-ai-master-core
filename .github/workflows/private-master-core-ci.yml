@@ -28,7 +28,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Runner identity
-        shell: pwsh
+        shell: powershell
         env:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
@@ -72,16 +72,16 @@ jobs:
 
       - name: M2 provenance status
         id: m2_provenance
-        shell: pwsh
+        shell: powershell
         run: |
           if ((Test-Path "scripts/security/verify-private-bootstrap.mjs") -and
               (Test-Path "security/private-bootstrap-attestation.json")) {
             node scripts/security/verify-private-bootstrap.mjs security/private-bootstrap-attestation.json
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            "state=PASS" >> $env:GITHUB_OUTPUT
+            "state=PASS" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             Write-Host "M3_PROVENANCE=PASS"
           } else {
-            "state=BLOCKED" >> $env:GITHUB_OUTPUT
+            "state=BLOCKED" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             Write-Host "M3_PROVENANCE=BLOCKED_M2_NOT_IMPLEMENTED"
           }
 
@@ -107,7 +107,7 @@ jobs:
         run: git diff --check
 
       - name: Tracked worktree cleanliness
-        shell: pwsh
+        shell: powershell
         run: |
           $status = git status --porcelain --untracked-files=no
           if ($status) {
@@ -118,11 +118,11 @@ jobs:
           Write-Host "TRACKED_WORKTREE_CLEAN=TRUE"
 
       - name: Self-hosted CI infrastructure verdict
-        shell: pwsh
+        shell: powershell
         run: Write-Host "SELF_HOSTED_CI_INFRA=PASS"
 
       - name: Full M3 acceptance verdict
-        shell: pwsh
+        shell: powershell
         run: |
           $provenance = "${{ steps.m2_provenance.outputs.state }}"
           $broader = "${{ steps.broader_regression.outcome }}"
