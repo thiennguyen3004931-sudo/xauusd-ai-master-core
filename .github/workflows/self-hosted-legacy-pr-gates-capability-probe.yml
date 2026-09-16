@@ -13,7 +13,7 @@ permissions:
 jobs:
   capability-probe:
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout exact head
         uses: actions/checkout@v4
@@ -27,23 +27,76 @@ jobs:
           Write-Host "EXPECTED_HEAD=${{ github.sha }}"
           Write-Host "ACTUAL_HEAD=$actual"
           if ($actual -ne "${{ github.sha }}") { exit 1 }
-      - name: Collect runner capabilities
+      - name: Probe WSL without mutation
         shell: powershell
         run: |
-          function Probe-Command([string]$Name, [scriptblock]$VersionCommand) {
-            $cmd = Get-Command $Name -ErrorAction SilentlyContinue
-            if ($null -eq $cmd) {
-              Write-Host ("CAPABILITY_{0}=NO" -f $Name.ToUpper())
-              return
-            }
-            Write-Host ("CAPABILITY_{0}=YES" -f $Name.ToUpper())
-            & $VersionCommand
+          $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+          if ($null -eq $wsl) {
+            Write-Host "CAPABILITY_WSL=NO"
+            exit 0
           }
-
+          Write-Host "CAPABILITY_WSL_COMMAND=YES"
+          $distros = @(wsl.exe -l -q 2>$null | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if ($LASTEXITCODE -ne 0 -or $distros.Count -eq 0) {
+            Write-Host "CAPABILITY_WSL_DISTRO=NO"
+            exit 0
+          }
+          Write-Host "CAPABILITY_WSL_DISTRO=YES"
+          $distros | ForEach-Object { Write-Host "WSL_DISTRO=$_" }
+          wsl.exe sh -lc 'uname -a; command -v node || true; node --version 2>/dev/null || true; command -v git || true; git --version 2>/dev/null || true'
+          if ($LASTEXITCODE -eq 0) { Write-Host "CAPABILITY_WSL_EXEC=YES" } else { Write-Host "CAPABILITY_WSL_EXEC=NO"; exit 1 }
+      - name: Bootstrap portable PowerShell 7.6.6
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.6-win-x64.zip'
+          $dir = Join-Path $env:RUNNER_TEMP 'powershell-7.6.6'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/PowerShell-7.6.6-win-x64.zip' -OutFile $zip
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash
+          Write-Host "POWERSHELL_ZIP_SHA256=$hash"
+          if ($hash -ne '02FE458BE20493FBDF43F61EA20610B811EE6C738AB1676C61B9CFCD1A33C860') { throw 'PowerShell ZIP SHA256 mismatch' }
+          if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+          Expand-Archive -Path $zip -DestinationPath $dir -Force
+          $pwsh = Join-Path $dir 'pwsh.exe'
+          & $pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "PORTABLE_PWSH=$pwsh"
+          "PORTABLE_PWSH=$pwsh" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Execute PowerShell 7 probe through portable runtime
+        shell: powershell
+        run: |
+          & $env:PORTABLE_PWSH -NoLogo -NoProfile -Command 'Write-Host "PORTABLE_PWSH_EXEC=PASS"; $PSVersionTable.PSVersion'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bootstrap native Gitleaks 8.24.2
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'gitleaks_8.24.2_windows_x64.zip'
+          $dir = Join-Path $env:RUNNER_TEMP 'gitleaks-8.24.2'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/gitleaks/gitleaks/releases/download/v8.24.2/gitleaks_8.24.2_windows_x64.zip' -OutFile $zip
+          if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+          Expand-Archive -Path $zip -DestinationPath $dir -Force
+          $exe = Join-Path $dir 'gitleaks.exe'
+          & $exe version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "NATIVE_GITLEAKS=$exe"
+          "NATIVE_GITLEAKS=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Exercise native Gitleaks full-history command shape
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/security | Out-Null
+          & $env:NATIVE_GITLEAKS detect --source=. --redact --log-opts='--all' --report-format=json --report-path=artifacts/security/gitleaks-probe.json --exit-code=0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path 'artifacts/security/gitleaks-probe.json')) { throw 'Gitleaks report missing' }
+          Write-Host "NATIVE_GITLEAKS_FULL_HISTORY=PASS"
+      - name: Existing native capabilities
+        shell: powershell
+        run: |
           Write-Host "CAPABILITY_WINDOWS_POWERSHELL=YES"
           $PSVersionTable.PSVersion
-          Probe-Command "pwsh" { pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' }
-          Probe-Command "git" { git --version }
-          Probe-Command "python" { python --version }
-          Probe-Command "node" { node --version }
-          Probe-Command "docker" { docker version }
+          git --version
+          python --version
+          node --version
+      - name: Diff hygiene
+        shell: powershell
+        run: git diff --check
