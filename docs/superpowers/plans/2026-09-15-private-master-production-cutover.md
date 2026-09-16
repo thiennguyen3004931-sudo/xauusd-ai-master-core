@@ -20,6 +20,8 @@ HTTP_METHODS=GET_ONLY during preflight
 
 The cutover itself is a separate, explicit production mutation and MUST NOT run unless every preflight gate below is PASS.
 
+The preflight must not checkout, pull, fetch, reset, switch, or rewrite the production source worktree before CUTOVER_READY=TRUE.
+
 ## Canonical source and runtime contracts
 
 Canonical private repository:
@@ -34,11 +36,15 @@ Accepted M7 baseline merge:
 144c123dd7905a4c52522435747572448d798d84
 ```
 
-Canonical runtime-source attestation:
+The approved target is verified from a separate candidate checkout. The currently running production source is addressed only through the explicit `RuntimeProjectRoot` boundary. The candidate checkout and `RuntimeProjectRoot` MUST be different directories.
+
+Canonical runtime-source attestation is consumed read-only through the localhost control API:
 
 ```text
-scripts/lib/phase7c-runtime-source-attestation.ps1
+GET /api/v1/phase7c/runtime-source-attestation
 ```
+
+The endpoint is backed by the canonical Phase7C runtime-source attestation implementation, but the candidate preflight MUST NOT dot-source the production attestation library or read production attestation files through candidate-relative paths.
 
 Canonical production recovery/deploy path:
 
@@ -56,7 +62,7 @@ M8 MUST NOT invoke the guarded LIVE account switch merely to perform a source cu
 
 ## Phase 1 — source-complete gate
 
-Target source MUST satisfy all of the following before production mutation:
+The separate candidate checkout MUST satisfy all of the following before production mutation:
 
 ```text
 ORIGIN=canonical private repository
@@ -73,16 +79,13 @@ The M8 preflight fails closed if any condition is missing or mismatched.
 
 Before changing production source, the currently running runtime generation MUST be internally coherent.
 
-The canonical deployment manifest is read from:
+`RuntimeProjectRoot` points at the current production project root. Its runtime configuration and environment paths are resolved from that explicit boundary, not from the candidate checkout. The runtime-source generation itself is verified through the localhost GET API so the evidence is produced by the currently running API process.
 
-```text
-.runtime/phase7c-source-attestation/deployment.json
-```
-
-All canonical runtime component attestations MUST match the same deployment identity:
+All canonical runtime components MUST report the same exact deployment identity:
 
 ```text
 api
+web
 lifecycle-broker
 supervisor
 trend
@@ -91,7 +94,14 @@ telegram
 regime-notifier
 ```
 
-For every component, the canonical runtime-source library must prove the same:
+Required API verdict:
+
+```text
+overall=EXACT_MATCH
+every required component verdict=EXACT_MATCH
+```
+
+The deployment identity returned by the API supplies the current production:
 
 ```text
 deploymentId
@@ -99,14 +109,14 @@ sourceCommit
 sourceTree
 ```
 
-Required verdict:
+Required terminal verdict:
 
 ```text
 CURRENT_RUNTIME_COMPONENT_ATTESTATION=EXACT
 CURRENT_RUNTIME_SOURCE_COHERENCE=PASS
 ```
 
-A missing or stale component attestation blocks cutover. M8 does not repair or synthesize evidence.
+A missing, stale, mismatched, unknown, or duplicate component blocks cutover. M8 does not repair or synthesize evidence.
 
 ## Phase 3 — production safety gate
 
@@ -128,13 +138,16 @@ No test order is allowed to create evidence.
 
 ## Phase 4 — run read-only M8 preflight
 
-Run from canonical private `main` after the exact approved candidate has been merged and checked out locally:
+Run from the separate canonical private `main` candidate checkout after the exact approved candidate has been merged. Supply the existing production project root explicitly; do not run the candidate from inside the production worktree.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
   -ExpectedCommit <APPROVED_PRIVATE_MAIN_SHA> `
-  -ExpectedTree <APPROVED_PRIVATE_MAIN_TREE>
+  -ExpectedTree <APPROVED_PRIVATE_MAIN_TREE> `
+  -RuntimeProjectRoot <CURRENT_PRODUCTION_PROJECT_ROOT>
 ```
+
+`WorkDir` defaults to `.runtime` relative to `RuntimeProjectRoot`. If an absolute `WorkDir` is supplied, it still must match the canonical production executor configuration.
 
 Expected terminal verdicts:
 
@@ -149,6 +162,8 @@ ARM_MUTATION=NONE
 ORDER_MUTATION=NONE
 POSITION_MUTATION=NONE
 LIVE_TEST_ORDER=NONE
+CANDIDATE_SOURCE_ROOT=<SEPARATE_CANDIDATE_CHECKOUT>
+RUNTIME_PROJECT_ROOT=<CURRENT_PRODUCTION_PROJECT_ROOT>
 TARGET_SOURCE_VERIFIED=PASS
 CURRENT_RUNTIME_SOURCE_COHERENCE=PASS
 RUNTIME_SAFETY_STATE=PASS
@@ -251,7 +266,7 @@ M8 is complete only when all of the following are proven with fresh evidence:
 PRIVATE_MAIN=exact approved merged commit
 PRIVATE_TREE=exact approved tree
 CURRENT/RUNNING_DEPLOYMENT=target private commit/tree
-ALL_7_COMPONENT_ATTESTATIONS=EXACT
+ALL_8_COMPONENT_ATTESTATIONS=EXACT
 BOT_MODE=PAUSE
 LIVE_EXECUTION_ARMED=FALSE
 XAUUSD_POSITIONS=0
