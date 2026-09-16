@@ -1,0 +1,65 @@
+name: Ops Phase7C M8 Private Cutover Read-Only Preflight 20260916
+
+on:
+  push:
+    branches:
+      - ops/phase7c-m8-private-preflight-20260916
+    paths:
+      - '.github/workflows/ops-phase7c-m8-private-preflight-20260916.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  m8-private-cutover-readonly-preflight:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout canonical private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify exact candidate source
+        shell: powershell
+        env:
+          EXPECTED_HEAD: 62e93ce5545195dd6bf78570c9b5fc0f4b253399
+          EXPECTED_TREE: cadcd3720c139b341617649e9a3744c2dc54eaf1
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $branch = (git branch --show-current).Trim()
+          $dirty = @(git status --porcelain)
+          Write-Host "CANDIDATE_HEAD=$head"
+          Write-Host "CANDIDATE_TREE=$tree"
+          Write-Host "CANDIDATE_BRANCH=$branch"
+          Write-Host "CANDIDATE_DIRTY_COUNT=$(@($dirty | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count)"
+          if ($head -ne $env:EXPECTED_HEAD) { throw "CANDIDATE_HEAD_MISMATCH" }
+          if ($tree -ne $env:EXPECTED_TREE) { throw "CANDIDATE_TREE_MISMATCH" }
+          if ($branch -ne 'main') { throw "CANDIDATE_BRANCH_NOT_MAIN" }
+          if (@($dirty | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -ne 0) { throw "CANDIDATE_WORKTREE_DIRTY" }
+
+      - name: M8 private cutover read-only preflight
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+            -ExpectedCommit "62e93ce5545195dd6bf78570c9b5fc0f4b253399" `
+            -ExpectedTree "cadcd3720c139b341617649e9a3744c2dc54eaf1" `
+            -RuntimeProjectRoot "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master" `
+            -WorkDir ".runtime" `
+            -ControlApiUrl "http://127.0.0.1:3711"
+
+      - name: Mutation boundary verdict
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "PRODUCTION_CUTOVER=NOT_PERFORMED"
+          Write-Host "TASK_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
