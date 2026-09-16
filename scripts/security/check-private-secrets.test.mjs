@@ -26,13 +26,21 @@ test("tracked private-key, credential, and secret filenames are rejected", () =>
   }
 });
 
-test("safe documentation, explicit examples, and checker source are allowed", () => {
+test("safe documentation, env templates, remediation metadata, and checker source are allowed", () => {
   for (const filePath of [
     "docs/public/SECURITY-BOUNDARY.md",
     "docs/private/SELF-HOSTED-CI.md",
     "config/app.env.example",
+    ".env.phase7b-telegram.example",
+    "packages/mt5-broker/bridge/.env.phase7b-demo.example",
+    "packages/mt5-broker/bridge/.env.phase7b-live.example",
+    "config/app.env.sample",
+    ".env.local.sample",
     "scripts/security/check-private-secrets.mjs",
     "scripts/security/check-private-secrets.test.mjs",
+    "scripts/security/validate-credential-remediation.mjs",
+    "scripts/security/validate-credential-remediation.test.mjs",
+    "security/credential-remediation.json",
   ]) {
     assert.equal(inspectTrackedPath(filePath), "ALLOW", filePath);
   }
@@ -57,6 +65,16 @@ test("high-confidence secret content signatures are rejected", () => {
       "REJECT",
     );
   }
+});
+
+test("allowed env template paths do not bypass content signature scanning", () => {
+  const classicGitHubToken = "ghp_" + "C".repeat(36);
+
+  assert.equal(inspectTrackedPath(".env.phase7b-demo.example"), "ALLOW");
+  assert.equal(
+    inspectTrackedContent(".env.phase7b-demo.example", classicGitHubToken),
+    "REJECT",
+  );
 });
 
 test("documentation that mentions token prefixes without real values is allowed", () => {
