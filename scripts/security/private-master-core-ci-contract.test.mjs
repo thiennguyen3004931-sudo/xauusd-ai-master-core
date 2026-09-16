@@ -84,6 +84,19 @@ test("private Master/Core CI keeps infrastructure PASS separate from full M3 acc
   assert.match(source, /M3_PRIVATE_CI=GREEN/);
 });
 
+test("blocked M3 verdicts fail the GitHub check instead of returning success", () => {
+  const source = readWorkflow();
+
+  assert.match(
+    source,
+    /if \(\$provenance -ne "PASS"\) \{[\s\S]*?M3_PRIVATE_CI=BLOCKED_M2_PROVENANCE[\s\S]*?exit 1[\s\S]*?\}/,
+  );
+  assert.match(
+    source,
+    /if \(\$broader -ne "success"\) \{[\s\S]*?M3_PRIVATE_CI=BLOCKED_BROADER_REGRESSION[\s\S]*?exit 1[\s\S]*?\}/,
+  );
+});
+
 test("private Master/Core CI contains no production mutation or secret wiring", () => {
   const source = readWorkflow();
 
