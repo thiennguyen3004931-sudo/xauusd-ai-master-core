@@ -74,16 +74,8 @@ jobs:
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path 'artifacts/security' | Out-Null
-          $arguments = @(
-            'detect',
-            '--source=.',
-            '--redact',
-            '--log-opts=--all',
-            '--report-format=json',
-            '--report-path=artifacts/security/gitleaks.json',
-            '--exit-code=0'
-          )
-          & $env:GITLEAKS_EXE @arguments
+          $gitleaks = $env:GITLEAKS_EXE
+          & $gitleaks detect --source=. --redact '--log-opts=--all' --report-format=json --report-path=artifacts/security/gitleaks.json --exit-code=0
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Validate credential remediation coverage
         run: node scripts/security/validate-credential-remediation.mjs artifacts/security/gitleaks.json security/credential-remediation.json
