@@ -4,36 +4,36 @@
 
 This design refines M3 from the approved Public / Private Repository Split so private CI can execute on `thiennguyen3004931-sudo/xauusd-ai-master-core` without depending on GitHub-hosted runner minutes.
 
-Current blocker: GitHub Actions workflow runs are created for the private repository, but jobs terminate before any step executes (`steps=[]`). Therefore CI source correctness is not the proven failure; runner execution itself is not happening.
+At design inception, private GitHub Actions runs were being created but jobs terminated before any step executed (`steps=[]`). The implemented solution adds one repository-level Windows self-hosted runner and one canonical private Master/Core workflow. Exact-head runtime evidence now proves that the runner executes the full M3 gate successfully.
 
-This design adds one repository-level Windows self-hosted runner and one canonical private Master/Core workflow. It is source/CI infrastructure only and does not authorize production rollout or trading-runtime mutation.
+This remains source/CI infrastructure only. It does not authorize production rollout or trading-runtime mutation.
 
 ## 2. Relationship to the existing repository-split plan
 
-The existing split plan already defines M3 Task 5 with these canonical responsibilities:
+The existing split plan defines M3 responsibilities including:
 
 - `scripts/security/check-private-secrets.mjs`;
 - `scripts/security/check-private-secrets.test.mjs`;
 - `.github/workflows/private-master-core-ci.yml`;
-- provenance verification;
+- private bootstrap provenance verification;
 - tracked-secret verification;
 - build and regression verification.
 
-This design does not replace or weaken those requirements. It adds the missing runner architecture needed for those checks to execute after GitHub-hosted minutes became unavailable.
+This design does not replace or weaken those requirements. It adds the runner architecture and exact-head verification required to execute them without GitHub-hosted runner minutes.
 
-Two status levels are therefore distinguished:
+Two status levels remain distinct:
 
 ```text
 SELF_HOSTED_CI_INFRA=PASS
 ```
 
-means the private workflow is actually assigned to the self-hosted runner and executes real steps.
+means the private workflow is assigned to the self-hosted runner and real steps execute successfully.
 
 ```text
 M3_PRIVATE_CI=GREEN
 ```
 
-requires the broader existing M3 contract as well: provenance, tracked-secret boundary, build, and accepted regression gates all pass. A green runner alone is not M3 completion.
+requires the broader M3 contract as well: provenance, tracked-secret boundary, build, accepted regression gates, diff hygiene, and tracked-worktree cleanliness all pass. A green runner alone is not M3 completion.
 
 ## 3. Scope
 
@@ -48,8 +48,9 @@ requires the broader existing M3 contract as well: provenance, tracked-secret bo
 - workspace build;
 - Phase7C targeted ownership/lifecycle regression;
 - Telegram lifecycle regression;
-- private bootstrap provenance verification when the M2 attestation files are present;
-- tracked-secret boundary implementation and verification from the existing split plan;
+- root `pnpm test` as broader private regression evidence;
+- private bootstrap provenance verification;
+- tracked-secret boundary implementation and verification;
 - diff hygiene and exact-head evidence;
 - documentation for runner registration, service lifecycle, verification, and safe removal.
 
@@ -62,7 +63,8 @@ requires the broader existing M3 contract as well: provenance, tracked-secret bo
 - migration of every legacy workflow to self-hosted;
 - weakening or deleting unrelated failing tests;
 - changing trading strategy, +6/+10, FastMove, M5, SEMI, Trend, Sideway, or risk behavior;
-- storing production credentials, signing keys, MT5 secrets, Telegram secrets, or customer secrets on the runner for CI convenience.
+- storing production credentials, signing keys, MT5 secrets, Telegram secrets, or customer secrets on the runner for CI convenience;
+- making root `pnpm lint` an M3 acceptance requirement while its separately known tracked `apps/web/.ignored_node_modules` blocker remains unresolved.
 
 ## 4. Chosen architecture
 
@@ -81,14 +83,15 @@ PRIVATE REPOSITORY
 Dedicated Windows development runner
       |
       +--> checkout exact head
-      +--> Node 24
       +--> pnpm 10.18.0
+      +--> Node 24
       +--> frozen install
       +--> provenance / tracked-secret gates
       +--> workspace build
       +--> scoped Phase7C regressions
-      +--> broader M3 regression gate
-      +--> diff hygiene
+      +--> root pnpm test broader regression
+      +--> diff hygiene / tracked-worktree cleanliness
+      +--> fail-closed M3 verdict
 ```
 
 The runner is repository-scoped, not organization-scoped. It is installed on a development workstation, not on the production bot host.
@@ -135,49 +138,63 @@ permissions:
   contents: read
 ```
 
-No deployment environment, repository secret, production credential, signing key, or write permission is permitted in this first M3 workflow.
+No deployment environment, repository secret, production credential, signing key, or write permission is permitted in this M3 workflow.
 
-The workflow execution order is:
+The canonical execution order is:
 
-1. checkout exact PR/head with full history where provenance comparison requires it;
-2. print only non-sensitive runner OS/architecture/name metadata;
-3. setup Node.js 24;
-4. setup pnpm 10.18.0;
+1. checkout the exact trusted PR/head with full history;
+2. verify checked-out HEAD equals the expected head and print only non-sensitive runner OS/architecture/name metadata;
+3. setup pnpm 10.18.0;
+4. setup Node.js 24;
 5. `pnpm install --frozen-lockfile`;
 6. run the static workflow contract test;
 7. run tracked-secret tests and tracked-secret scan;
-8. run private bootstrap attestation verification when M2 files are present; if the required M2 verifier/attestation is absent, the final M3 verdict must remain blocked rather than being silently skipped;
+8. run private bootstrap attestation tests and repository-backed provenance verification;
 9. `pnpm build`;
 10. run `scripts/test-phase7c-telegram-entry-resolution-lifecycle-contract.mjs`;
 11. run Telegram regression suite:
     - `scripts/test-phase7c-telegram-lifecycle-observability-contract.mjs`;
     - `scripts/phase7c-trade-notifier-synthetic.test.mjs`;
     - `scripts/test-phase7c-hold-telegram-dedupe-contract.mjs`;
-12. run the broader accepted private regression gate required by the repository-split M3 plan;
+12. run root `pnpm test` as broader private regression evidence;
 13. `git diff --check`;
-14. verify no unexpected tracked worktree mutation remains.
+14. verify no unexpected tracked worktree mutation remains;
+15. emit `SELF_HOSTED_CI_INFRA=PASS` only after the infrastructure path has executed;
+16. emit `M3_PRIVATE_CI=GREEN` only when M2 provenance and the true broader regression `outcome` are both successful.
 
-## 7. Known baseline failures and gate semantics
+The broader regression step may use `continue-on-error: true` only so later diagnostic/verdict steps still execute. The final M3 verdict must read `steps.broader_regression.outcome`, not the post-continue conclusion, and must exit non-zero when the outcome is not `success`.
 
-Two unrelated baseline defects were proven while verifying PR #1:
+## 7. Baseline regression resolution and gate semantics
 
-- after a successful workspace build, root `pnpm test` currently reaches `@xauusd/signal-engine` and fails two existing `SignalPipeline` expectations (`WAIT` versus BUY/SELL);
-- root `pnpm lint` currently fails because `apps/web/.ignored_node_modules` is tracked and ESLint traverses a TanStack package-local ESLint config that imports `@tanstack/eslint-config`.
+During exact-head verification, root `pnpm test` reached `@xauusd/signal-engine` and two existing `SignalPipeline` expectations returned `WAIT` instead of BUY/SELL.
 
-These defects are not caused by the Phase7C ownership fix and are not fixed in this M3 runner change.
+Investigation proved the production pipeline and thresholds were behaving as designed. The shared strong-confluence test fixture had drifted from the current contract:
 
-They must not be hidden or converted to ignored successes. The workflow may use the already accepted scoped Phase7C/Telegram regressions to prove runner execution during bring-up, but `M3_PRIVATE_CI=GREEN` cannot be claimed until the broader M3 regression contract is either green or the repository-split plan is explicitly revised in a separate approved change.
+- MA200 data required by MA20/MA50/MA200 confluence was missing;
+- the bearish FVG was outside the accepted pullback distance (`> 0.5 ATR`).
+
+The minimal repair was test-only:
+
+```text
+packages/signal-engine/tests/fixtures.ts
+```
+
+It added directionally aligned MA200 fixture data and moved the bearish FVG into the accepted pullback range. No `SignalPipeline`, strategy rule, threshold, executor, order, risk, or production runtime logic was changed.
+
+After that alignment, exact-head root `pnpm test` passed and the fail-closed Full M3 acceptance verdict passed.
+
+Root `pnpm lint` still has a separately known blocker because `apps/web/.ignored_node_modules` is tracked and ESLint traverses a TanStack package-local config importing `@tanstack/eslint-config`. This lint defect is not hidden, but it is not part of the approved M3 acceptance gate.
 
 ## 8. Tracked-secret boundary
 
-The existing M3 plan requires:
+Canonical files:
 
 ```text
 scripts/security/check-private-secrets.mjs
 scripts/security/check-private-secrets.test.mjs
 ```
 
-The test is written RED first. The implementation must reject tracked private-key/credential material by path and approved content signatures without printing secret values.
+The implementation rejects tracked private-key/credential material by path and high-confidence content signatures without printing secret values. Explicit `.env` example/sample templates are allowed by path but are still scanned for high-confidence secret content.
 
 Minimum workflow commands:
 
@@ -190,48 +207,61 @@ The runner workflow must not dump environment variables or secret-bearing files.
 
 ## 9. Provenance dependency
 
-M3 depends on M2 bootstrap provenance. The existing split plan requires:
+Canonical provenance files:
 
 ```text
 security/private-bootstrap-attestation.json
 scripts/security/verify-private-bootstrap.mjs
 scripts/security/verify-private-bootstrap.test.mjs
+scripts/security/write-private-bootstrap-attestation.mjs
 ```
 
-If these files are not yet accepted, the self-hosted runner can still be brought online and can prove `SELF_HOSTED_CI_INFRA=PASS`, but `M3_PRIVATE_CI=GREEN` remains blocked.
+The attestation records the accepted public bootstrap commit/tree and the identical private bootstrap commit/tree. Verification is fail-closed when:
 
-Once present, the canonical workflow must run:
+- repository identities differ from the canonical public/private repositories;
+- commit IDs differ;
+- tree IDs differ;
+- attestation values are malformed;
+- the recorded private bootstrap tree does not match the actual Git object;
+- the private bootstrap commit is not an ancestor of current HEAD.
+
+The canonical workflow runs:
 
 ```powershell
+node --test scripts/security/verify-private-bootstrap.test.mjs
 node scripts/security/verify-private-bootstrap.mjs security/private-bootstrap-attestation.json
 ```
 
-and fail closed on any provenance mismatch.
+and blocks Full M3 acceptance on any provenance failure.
 
 ## 10. TDD / contract-first implementation
 
-Create:
+Canonical contract test:
 
 ```text
 scripts/security/private-master-core-ci-contract.test.mjs
 ```
 
-before creating the workflow. The RED test must require:
+The contract requires:
 
 - `.github/workflows/private-master-core-ci.yml` exists;
 - `runs-on` contains `self-hosted`, `Windows`, `X64`, `xauusd-core-ci`;
 - `contents: read` is present;
+- exact trusted-head checkout and mismatch failure are present;
 - Node is exactly 24;
 - pnpm is exactly 10.18.0;
 - install is exactly `pnpm install --frozen-lockfile`;
 - tracked-secret gate is invoked;
-- private bootstrap verifier is represented as a mandatory final-M3 dependency;
+- private bootstrap verifier is a mandatory Full M3 dependency;
 - `pnpm build` is invoked;
 - Phase7C targeted contract is invoked;
 - all three Telegram regression files are invoked;
+- root `pnpm test` broader regression is represented;
+- blocked M3 verdicts fail the GitHub check and inspect the true broader `outcome`;
 - `git diff --check` is invoked;
 - GitHub-hosted labels such as `ubuntu-latest`, `windows-latest`, and `macos-latest` are absent;
-- production mutation commands and secret injection are absent.
+- production mutation commands and secret injection are absent;
+- Windows-specific steps use built-in `powershell`, not a PowerShell 7 dependency.
 
 Implementation sequence:
 
@@ -242,25 +272,29 @@ RED static contract
 -> register runner
 -> actual GitHub job with non-empty steps
 -> scoped CI evidence
--> broader M3 gates
+-> broader M3 regression
+-> exact-head fail-closed Full M3 verdict
 ```
 
 ## 11. Trigger strategy
 
-The workflow uses these exact triggers:
+The canonical workflow uses these triggers only:
 
 - `pull_request` targeting `main`;
-- `push` to `feat/m3-self-hosted-private-ci` during bring-up;
-- `workflow_dispatch` for operator verification after the workflow exists on the default branch.
+- `workflow_dispatch` for explicit operator verification when available.
 
-No public-repository or fork trigger is configured.
+A branch `push` trigger is intentionally absent to avoid duplicate self-hosted runs for the same PR update. PR runs are coalesced with concurrency and `cancel-in-progress: true`.
+
+Fork PRs are blocked from the self-hosted job by requiring either a non-PR event or a PR whose head repository is the same repository as the target.
+
+No public-repository trigger is configured.
 
 ## 12. Security model
 
 A self-hosted runner executes repository code on its host. Therefore:
 
 - only trusted changes in this private repository may execute on it;
-- no public/fork PR is allowed onto this runner;
+- public/fork PRs are not allowed onto this runner;
 - no production secrets are stored on the host for CI;
 - `GITHUB_TOKEN` remains read-only;
 - registration token is transient setup data and is never written to Git history, logs, screenshots, or documentation;
@@ -289,11 +323,11 @@ Any command whose effect is not demonstrably source/build/test/read-only is excl
 
 `SELF_HOSTED_CI_INFRA=PASS` requires all of:
 
-1. repository-level runner is `ONLINE`;
-2. runner has label `xauusd-core-ci`;
+1. repository-level runner executes the job;
+2. runner carries label `xauusd-core-ci`;
 3. workflow is assigned to that runner;
 4. GitHub job step list is non-empty;
-5. checkout/setup/test steps actually execute;
+5. exact-head checkout/setup/test steps execute;
 6. static workflow contract passes;
 7. no production mutation or secret exposure occurs.
 
@@ -307,19 +341,37 @@ Any command whose effect is not demonstrably source/build/test/read-only is excl
 4. workspace build passes;
 5. Phase7C targeted suite passes;
 6. Telegram regression passes;
-7. broader accepted private regression gate passes;
+7. root `pnpm test` broader private regression passes;
 8. `git diff --check` passes;
 9. no unexpected tracked worktree mutation remains;
-10. existing PR #1 is not merged until relevant private CI evidence is green;
-11. production remains untouched.
+10. production remains untouched.
 
-An offline runner, queued/unassigned job, empty step list, failed provenance, failed secret boundary, failed regression, or failed diff hygiene means the corresponding gate remains not green.
+An offline/unassigned runner, empty step list, exact-head mismatch, failed provenance, failed secret boundary, failed build/regression, dirty tracked worktree, or failed diff hygiene means the corresponding gate remains not green.
+
+### Accepted exact-head evidence
+
+The first fully accepted exact-head run before this documentation alignment was:
+
+```text
+EXACT_HEAD=0860508bb05639d8be79b9a9a94495766ef80a7f
+SELF_HOSTED_RUN_ID=35055266991
+RUNNER=XAUUSD-CORE-CI-WIN
+JOB_CONCLUSION=SUCCESS
+BROAD_PRIVATE_REGRESSION=PASS
+SELF_HOSTED_CI_INFRA=PASS
+FULL_M3_ACCEPTANCE=PASS
+M3_PRIVATE_CI=GREEN
+```
+
+Any subsequent documentation/source commit becomes the new exact head and must re-run the same canonical gate before replacing this evidence.
 
 ## 15. Legacy workflow policy
 
 This change does not mass-edit existing workflows.
 
 After the canonical private Master/Core gate executes successfully, legacy workflows may be migrated or consolidated only in separate reviewed changes. Existing tests are not weakened merely to make old workflows green.
+
+Legacy workflow failures outside the canonical M3 workflow are not silently reclassified as M3 success; they remain separate migration/consolidation work.
 
 ## 16. Rollback and removal
 
@@ -334,8 +386,6 @@ Rollback must not require any bot restart, MT5 change, trading-mode change, sche
 
 ## 17. Completion definition
 
-This design is implemented when the private repository has one canonical self-hosted execution path that can prove exact-head CI execution without GitHub-hosted minutes.
+This design is implemented when the private repository has one canonical self-hosted execution path that proves exact-head CI execution without GitHub-hosted minutes and satisfies the broader M3 provenance/secret/build/regression contract.
 
-The runner layer may become green before the broader M3 status. M3 itself is complete only when the pre-existing repository-split M3 requirements are green as well.
-
-M3 does not authorize M4 public sanitization unless the broader split acceptance sequence is satisfied, and it never authorizes production cutover.
+M3 does not authorize public-repository sanitization, production cutover, or trading-runtime changes by itself.
