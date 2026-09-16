@@ -70,6 +70,9 @@ jobs:
       - name: Private bootstrap provenance tests
         run: node --test scripts/security/verify-private-bootstrap.test.mjs
 
+      - name: M6 public contract lock tests
+        run: node --test scripts/security/verify-public-contract-lock.test.mjs
+
       - name: M2 provenance status
         id: m2_provenance
         shell: powershell
