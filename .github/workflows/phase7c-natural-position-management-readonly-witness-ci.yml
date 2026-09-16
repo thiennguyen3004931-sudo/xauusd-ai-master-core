@@ -1,0 +1,36 @@
+name: Phase7C Natural Position Management Read-Only Witness CI
+
+on:
+  push:
+    branches:
+      - feat/natural-position-management-readonly-witness
+    paths:
+      - "scripts/phase7c-natural-position-management-witness.mjs"
+      - "scripts/test-phase7c-natural-position-management-witness.mjs"
+      - ".github/workflows/phase7c-natural-position-management-readonly-witness-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/phase7c-natural-position-management-witness.mjs"
+      - "scripts/test-phase7c-natural-position-management-witness.mjs"
+      - ".github/workflows/phase7c-natural-position-management-readonly-witness-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  witness-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Natural position management witness contract
+        run: node --test scripts/test-phase7c-natural-position-management-witness.mjs
+      - name: Diff hygiene
+        run: git diff --check
