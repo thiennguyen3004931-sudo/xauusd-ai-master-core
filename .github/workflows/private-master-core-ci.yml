@@ -120,12 +120,12 @@ jobs:
 
           if ($provenance -ne "PASS") {
             Write-Host "M3_PRIVATE_CI=BLOCKED_M2_PROVENANCE"
-            exit 0
+            exit 1
           }
 
           if ($broader -ne "success") {
             Write-Host "M3_PRIVATE_CI=BLOCKED_BROADER_REGRESSION"
-            exit 0
+            exit 1
           }
 
           Write-Host "M3_PRIVATE_CI=GREEN"
