@@ -41,6 +41,24 @@ jobs:
           if ($branch -ne 'main') { throw "CANDIDATE_BRANCH_NOT_MAIN" }
           if (@($dirty | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -ne 0) { throw "CANDIDATE_WORKTREE_DIRTY" }
 
+      - name: Strict current-production read-only snapshot
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'production-readonly-output.txt'
+          $exitPath = Join-Path $env:RUNNER_TEMP 'production-readonly-exit-code.txt'
+          Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $exitPath -Force -ErrorAction SilentlyContinue
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\preflight-phase7c-production-readonly-local.ps1 `
+            -ProjectRoot "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master" `
+            -ExpectedMainCommit "ff2b64ecb3e1ccfc2a9b321b7b5459f3d7a0d0a2" `
+            -TimeoutSeconds 12 2>&1 | Tee-Object -FilePath $outputPath
+          $code = $LASTEXITCODE
+          if ($null -eq $code) { $code = 1 }
+          Set-Content -LiteralPath $exitPath -Value ([string]$code) -Encoding ascii
+          Write-Host "PRODUCTION_READONLY_EXIT_CODE=$code"
+          if ($code -ne 0) { exit $code }
+
       - name: M8 private cutover read-only preflight capture
         id: m8
         shell: powershell
@@ -63,12 +81,14 @@ jobs:
           "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           if ($code -ne 0) { exit $code }
 
-      - name: Upload M8 diagnostic artifact
+      - name: Upload read-only diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: m8-private-cutover-readonly-${{ github.run_id }}
+          name: phase7c-readonly-diagnostics-${{ github.run_id }}
           path: |
+            ${{ runner.temp }}/production-readonly-output.txt
+            ${{ runner.temp }}/production-readonly-exit-code.txt
             ${{ runner.temp }}/m8-preflight-output.txt
             ${{ runner.temp }}/m8-preflight-exit-code.txt
           if-no-files-found: error
@@ -79,6 +99,7 @@ jobs:
         shell: powershell
         run: |
           Write-Host "PRODUCTION_CUTOVER=NOT_PERFORMED"
+          Write-Host "GIT_MUTATION=NONE"
           Write-Host "TASK_MUTATION=NONE"
           Write-Host "PROCESS_MUTATION=NONE"
           Write-Host "MODE_MUTATION=NONE"
