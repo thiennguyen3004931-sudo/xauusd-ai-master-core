@@ -124,9 +124,26 @@ test("private Master/Core CI keeps infrastructure PASS separate from full M3 acc
   assert.match(source, /M3_PRIVATE_CI=GREEN/);
 });
 
-test("blocked M3 verdicts fail the GitHub check instead of returning success", () => {
+test("blocked M3 verdicts fail the GitHub check and expose the true broader outcome", () => {
   const source = readWorkflow();
 
+  assert.match(
+    source,
+    /\$broader\s*=\s*"\$\{\{\s*steps\.broader_regression\.outcome\s*\}\}"/,
+  );
+  assert.doesNotMatch(
+    source,
+    /\$broader\s*=\s*"\$\{\{\s*steps\.broader_regression\.conclusion\s*\}\}"/,
+  );
+  assert.match(
+    source,
+    /\$broaderConclusion\s*=\s*"\$\{\{\s*steps\.broader_regression\.conclusion\s*\}\}"/,
+  );
+  assert.match(source, /BROAD_PRIVATE_REGRESSION_OUTCOME=\$broader/);
+  assert.match(
+    source,
+    /BROAD_PRIVATE_REGRESSION_CONCLUSION=\$broaderConclusion/,
+  );
   assert.match(
     source,
     /if \(\$provenance -ne "PASS"\) \{[\s\S]*?M3_PRIVATE_CI=BLOCKED_M2_PROVENANCE[\s\S]*?exit 1[\s\S]*?\}/,
