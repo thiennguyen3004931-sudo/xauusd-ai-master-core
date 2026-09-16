@@ -1,0 +1,99 @@
+name: Private Master Core Self-Hosted CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - feat/m3-self-hosted-private-ci
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  private-master-core:
+    name: private-master-core-self-hosted
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Runner identity
+        shell: pwsh
+        run: |
+          Write-Host "RUNNER_OS=$env:RUNNER_OS"
+          Write-Host "RUNNER_ARCH=$env:RUNNER_ARCH"
+          Write-Host "GITHUB_SHA=$env:GITHUB_SHA"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Static private CI contract
+        run: node --test scripts/security/private-master-core-ci-contract.test.mjs
+
+      - name: Tracked-secret boundary tests
+        run: node --test scripts/security/check-private-secrets.test.mjs
+
+      - name: Tracked-secret boundary
+        run: node scripts/security/check-private-secrets.mjs --tracked
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Phase7C entry resolution contract
+        run: node --test scripts/test-phase7c-telegram-entry-resolution-lifecycle-contract.mjs
+
+      - name: Telegram lifecycle regression
+        run: >-
+          node --test
+          scripts/test-phase7c-telegram-lifecycle-observability-contract.mjs
+          scripts/phase7c-trade-notifier-synthetic.test.mjs
+          scripts/test-phase7c-hold-telegram-dedupe-contract.mjs
+
+      - name: M2 provenance status
+        shell: pwsh
+        run: |
+          if ((Test-Path "scripts/security/verify-private-bootstrap.mjs") -and
+              (Test-Path "security/private-bootstrap-attestation.json")) {
+            node scripts/security/verify-private-bootstrap.mjs security/private-bootstrap-attestation.json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Write-Host "M3_PROVENANCE=PASS"
+          } else {
+            Write-Host "M3_PROVENANCE=BLOCKED_M2_NOT_IMPLEMENTED"
+          }
+
+      - name: Diff hygiene
+        run: git diff --check
+
+      - name: Tracked worktree cleanliness
+        shell: pwsh
+        run: |
+          $status = git status --porcelain --untracked-files=no
+          if ($status) {
+            Write-Error "TRACKED_WORKTREE_DIRTY"
+            Write-Host $status
+            exit 1
+          }
+          Write-Host "TRACKED_WORKTREE_CLEAN=TRUE"
+
+      - name: Self-hosted CI infrastructure verdict
+        shell: pwsh
+        run: Write-Host "SELF_HOSTED_CI_INFRA=PASS"
