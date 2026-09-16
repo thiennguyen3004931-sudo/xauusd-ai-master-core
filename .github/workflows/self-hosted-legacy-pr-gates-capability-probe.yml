@@ -27,24 +27,23 @@ jobs:
           Write-Host "EXPECTED_HEAD=${{ github.sha }}"
           Write-Host "ACTUAL_HEAD=$actual"
           if ($actual -ne "${{ github.sha }}") { exit 1 }
-      - name: PowerShell 7 capability
-        shell: pwsh
+      - name: Collect runner capabilities
+        shell: powershell
         run: |
+          function Probe-Command([string]$Name, [scriptblock]$VersionCommand) {
+            $cmd = Get-Command $Name -ErrorAction SilentlyContinue
+            if ($null -eq $cmd) {
+              Write-Host ("CAPABILITY_{0}=NO" -f $Name.ToUpper())
+              return
+            }
+            Write-Host ("CAPABILITY_{0}=YES" -f $Name.ToUpper())
+            & $VersionCommand
+          }
+
+          Write-Host "CAPABILITY_WINDOWS_POWERSHELL=YES"
           $PSVersionTable.PSVersion
-      - name: Windows PowerShell 5.1 capability
-        shell: powershell
-        run: |
-          $PSVersionTable.PSVersion
-      - name: Git capability
-        shell: powershell
-        run: git --version
-      - name: Python capability
-        shell: powershell
-        run: python --version
-      - name: Node capability
-        shell: powershell
-        run: node --version
-      - name: Docker capability required by repository-boundary gate
-        shell: powershell
-        run: |
-          docker version
+          Probe-Command "pwsh" { pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' }
+          Probe-Command "git" { git --version }
+          Probe-Command "python" { python --version }
+          Probe-Command "node" { node --version }
+          Probe-Command "docker" { docker version }
