@@ -54,6 +54,17 @@ test("private Master/Core CI checks out and verifies the exact trusted head", ()
   );
 });
 
+test("private Master/Core CI coalesces PR runs and does not duplicate them on branch push", () => {
+  const source = readWorkflow();
+
+  assert.doesNotMatch(source, /^\s{2}push:\s*$/m);
+  assert.match(
+    source,
+    /concurrency:\s*\n\s*group:\s*private-master-core-\$\{\{\s*github\.event\.pull_request\.number\s*\|\|\s*github\.ref\s*\}\}/,
+  );
+  assert.match(source, /cancel-in-progress:\s*true/);
+});
+
 test("private Master/Core CI pins toolchain and runs the approved scoped gates", () => {
   const source = readWorkflow();
 
