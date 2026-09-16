@@ -4,10 +4,11 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches:
-      - feat/m3-self-hosted-private-ci
   workflow_dispatch:
+
+concurrency:
+  group: private-master-core-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
