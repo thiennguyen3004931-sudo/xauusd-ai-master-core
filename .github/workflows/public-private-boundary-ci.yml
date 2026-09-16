@@ -52,15 +52,14 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = '8.24.2'
-          $asset = "gitleaks_${version}_windows_x64.zip"
-          $baseUri = "https://github.com/gitleaks/gitleaks/releases/download/v$version"
-          $toolDir = Join-Path $env:RUNNER_TEMP "gitleaks-$version"
+          $asset = 'gitleaks_8.24.2_windows_x64.zip'
+          $baseUri = 'https://github.com/gitleaks/gitleaks/releases/download/v8.24.2'
+          $toolDir = Join-Path $env:RUNNER_TEMP 'gitleaks-8.24.2'
           $zipPath = Join-Path $toolDir $asset
           New-Item -ItemType Directory -Force -Path $toolDir | Out-Null
           Invoke-WebRequest -Uri "$baseUri/$asset" -OutFile $zipPath
-          $checksums = (Invoke-WebRequest -Uri "$baseUri/gitleaks_${version}_checksums.txt").Content
-          $checksumLine = ($checksums -split "`n" | Where-Object { $_.Trim() -match "gitleaks_8\.24\.2_windows_x64\.zip$" } | Select-Object -First 1)
+          $checksums = (Invoke-WebRequest -Uri "$baseUri/gitleaks_8.24.2_checksums.txt").Content
+          $checksumLine = ($checksums -split "`n" | Where-Object { $_.Trim() -match 'gitleaks_8\.24\.2_windows_x64\.zip$' } | Select-Object -First 1)
           if (-not $checksumLine) { Write-Error 'GITLEAKS_CHECKSUM_NOT_FOUND'; exit 1 }
           $expectedSha = (($checksumLine.Trim() -split '\s+')[0]).ToLowerInvariant()
           $actualSha = (Get-FileHash -Algorithm SHA256 -Path $zipPath).Hash.ToLowerInvariant()
