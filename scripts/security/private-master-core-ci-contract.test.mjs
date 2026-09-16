@@ -63,6 +63,7 @@ test("private Master/Core CI pins toolchain and runs the approved scoped gates",
   assert.match(source, /scripts\/phase7c-trade-notifier-synthetic\.test\.mjs/);
   assert.match(source, /scripts\/test-phase7c-hold-telegram-dedupe-contract\.mjs/);
   assert.match(source, /scripts\/security\/check-private-secrets\.mjs --tracked/);
+  assert.match(source, /node --test scripts\/security\/verify-private-bootstrap\.test\.mjs/);
   assert.match(source, /git diff --check/);
 });
 
