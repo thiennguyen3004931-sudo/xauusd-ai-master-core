@@ -13,7 +13,7 @@ permissions:
 jobs:
   capability-probe:
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout exact head
         uses: actions/checkout@v4
@@ -71,6 +71,40 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path 'artifacts/security/gitleaks-probe.json')) { throw 'Gitleaks report missing' }
           Write-Host "NATIVE_GITLEAKS_FULL_HISTORY=PASS"
+      - name: Prove Linux Node 24 and pnpm 10.18.0 in WSL Ubuntu
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repoLinux = (wsl.exe -d Ubuntu -- wslpath -a $PWD.Path).Trim()
+          if (-not $repoLinux) { throw 'Unable to resolve repository path in WSL' }
+          Write-Host "WSL_REPO=$repoLinux"
+          $script = @'
+          set -euo pipefail
+          NODE_VERSION=v24.18.0
+          ROOT=/tmp/xauusd-ci-node-$NODE_VERSION
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT"
+          cd "$ROOT"
+          curl -fsSLO "https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION-linux-x64.tar.xz"
+          curl -fsSLO "https://nodejs.org/dist/$NODE_VERSION/SHASUMS256.txt"
+          grep " node-$NODE_VERSION-linux-x64.tar.xz$" SHASUMS256.txt | sha256sum -c -
+          tar -xJf "node-$NODE_VERSION-linux-x64.tar.xz"
+          export PATH="$ROOT/node-$NODE_VERSION-linux-x64/bin:$PATH"
+          node --version
+          npm --version
+          corepack --version
+          cd "__REPO_LINUX__"
+          corepack pnpm --version
+          test "$(corepack pnpm --version)" = "10.18.0"
+          git --version
+          echo WSL_LINUX_NODE_PNPM=PASS
+          '@
+          $script = $script.Replace('__REPO_LINUX__', $repoLinux.Replace("'", "'\''"))
+          $tempScript = Join-Path $env:RUNNER_TEMP 'wsl-node-pnpm-probe.sh'
+          [System.IO.File]::WriteAllText($tempScript, $script, [System.Text.UTF8Encoding]::new($false))
+          $tempLinux = (wsl.exe -d Ubuntu -- wslpath -a $tempScript).Trim()
+          wsl.exe -d Ubuntu -- bash $tempLinux
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Existing native capabilities
         shell: powershell
         run: |
@@ -79,33 +113,6 @@ jobs:
           git --version
           python --version
           node --version
-      - name: Probe WSL with bounded execution
-        shell: powershell
-        run: |
-          $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
-          if ($null -eq $wsl) {
-            Write-Host "CAPABILITY_WSL=NO"
-            exit 0
-          }
-          Write-Host "CAPABILITY_WSL_COMMAND=YES"
-          $stdout = Join-Path $env:RUNNER_TEMP 'wsl-list.out'
-          $stderr = Join-Path $env:RUNNER_TEMP 'wsl-list.err'
-          $p = Start-Process -FilePath 'wsl.exe' -ArgumentList '-l','-q' -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-          if (-not $p.WaitForExit(10000)) {
-            try { $p.Kill() } catch {}
-            Write-Host "CAPABILITY_WSL_LIST=TIMEOUT"
-            exit 0
-          }
-          $distros = @()
-          if (Test-Path $stdout) {
-            $distros = @(Get-Content $stdout | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-          }
-          if ($p.ExitCode -ne 0 -or $distros.Count -eq 0) {
-            Write-Host "CAPABILITY_WSL_DISTRO=NO"
-            exit 0
-          }
-          Write-Host "CAPABILITY_WSL_DISTRO=YES"
-          $distros | ForEach-Object { Write-Host "WSL_DISTRO=$_" }
       - name: Diff hygiene
         shell: powershell
         run: git diff --check
