@@ -41,15 +41,38 @@ jobs:
           if ($branch -ne 'main') { throw "CANDIDATE_BRANCH_NOT_MAIN" }
           if (@($dirty | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -ne 0) { throw "CANDIDATE_WORKTREE_DIRTY" }
 
-      - name: M8 private cutover read-only preflight
+      - name: M8 private cutover read-only preflight capture
+        id: m8
         shell: powershell
+        continue-on-error: true
         run: |
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+          $outputPath = Join-Path $env:RUNNER_TEMP 'm8-preflight-output.txt'
+          $exitPath = Join-Path $env:RUNNER_TEMP 'm8-preflight-exit-code.txt'
+          Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $exitPath -Force -ErrorAction SilentlyContinue
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
             -ExpectedCommit "62e93ce5545195dd6bf78570c9b5fc0f4b253399" `
             -ExpectedTree "cadcd3720c139b341617649e9a3744c2dc54eaf1" `
             -RuntimeProjectRoot "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master" `
             -WorkDir ".runtime" `
-            -ControlApiUrl "http://127.0.0.1:3711"
+            -ControlApiUrl "http://127.0.0.1:3711" 2>&1 | Tee-Object -FilePath $outputPath
+          $code = $LASTEXITCODE
+          if ($null -eq $code) { $code = 1 }
+          Set-Content -LiteralPath $exitPath -Value ([string]$code) -Encoding ascii
+          Write-Host "M8_EXIT_CODE=$code"
+          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if ($code -ne 0) { exit $code }
+
+      - name: Upload M8 diagnostic artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m8-private-cutover-readonly-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/m8-preflight-output.txt
+            ${{ runner.temp }}/m8-preflight-exit-code.txt
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Mutation boundary verdict
         if: always()
@@ -60,6 +83,17 @@ jobs:
           Write-Host "PROCESS_MUTATION=NONE"
           Write-Host "MODE_MUTATION=NONE"
           Write-Host "ARM_MUTATION=NONE"
+          Write-Host "AUTO_MUTATION=NONE"
           Write-Host "ORDER_MUTATION=NONE"
           Write-Host "POSITION_MUTATION=NONE"
           Write-Host "LIVE_TEST_ORDER=NONE"
+
+      - name: Preserve M8 fail-closed conclusion
+        if: always()
+        shell: powershell
+        run: |
+          $exitPath = Join-Path $env:RUNNER_TEMP 'm8-preflight-exit-code.txt'
+          if (-not (Test-Path -LiteralPath $exitPath)) { throw 'M8_EXIT_CODE_MISSING' }
+          $code = [int]((Get-Content -LiteralPath $exitPath -Raw).Trim())
+          Write-Host "M8_FINAL_EXIT_CODE=$code"
+          if ($code -ne 0) { throw "M8_PREFLIGHT_FAIL_CLOSED_EXIT_$code" }
