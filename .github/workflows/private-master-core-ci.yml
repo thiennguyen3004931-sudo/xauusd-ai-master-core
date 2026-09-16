@@ -58,6 +58,23 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: M6 bootstrap public contract candidate
+        run: |
+          $line = git ls-remote https://github.com/thiennguyen3004931-sudo/xauusd-ai-master.git refs/heads/main
+          $publicCommit = ($line -split "\s+")[0]
+          if ($publicCommit -notmatch '^[0-9a-f]{40}$') {
+            Write-Error "PUBLIC_CONTRACT_MAIN_RESOLUTION_FAILED"
+            exit 1
+          }
+          git fetch --no-tags --depth=1 https://github.com/thiennguyen3004931-sudo/xauusd-ai-master.git $publicCommit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $candidate = Join-Path $env:RUNNER_TEMP "public-contract.generated.json"
+          node scripts/security/write-public-contract-lock.mjs $publicCommit $candidate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "PUBLIC_CONTRACT_GENERATED_BEGIN"
+          Get-Content $candidate
+          Write-Host "PUBLIC_CONTRACT_GENERATED_END"
+
       - name: Static private CI contract
         run: node --test scripts/security/private-master-core-ci-contract.test.mjs
 
