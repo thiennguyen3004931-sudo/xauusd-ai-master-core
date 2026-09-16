@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory = $true)] [string]$ExpectedCommit,
   [string]$ExpectedTree = "",
+  [Parameter(Mandatory = $true)] [string]$RuntimeProjectRoot,
   [string]$WorkDir = ".runtime",
   [string]$ControlApiUrl = "http://127.0.0.1:3711"
 )
@@ -9,20 +10,29 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$RuntimeSourceLibrary = Join-Path $ProjectRoot "scripts\lib\phase7c-runtime-source-attestation.ps1"
-$AccountLibrary = Join-Path $ProjectRoot "scripts\lib\phase7c-account-mode.ps1"
-$ExecutorConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
-$M7AcceptanceScript = Join-Path $ProjectRoot "scripts\security\accept-master-core-split.mjs"
-$CanonicalDeployScript = Join-Path $ProjectRoot "scripts\recover-phase7c-runtime-ready-stable-deploy-local.ps1"
+$CandidateSourceRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+$AccountLibrary = Join-Path $CandidateSourceRoot "scripts\lib\phase7c-account-mode.ps1"
+$M7AcceptanceScript = Join-Path $CandidateSourceRoot "scripts\security\accept-master-core-split.mjs"
+$CanonicalDeployScript = Join-Path $CandidateSourceRoot "scripts\recover-phase7c-runtime-ready-stable-deploy-local.ps1"
 $CanonicalM7Merge = "144c123dd7905a4c52522435747572448d798d84"
 $ExpectedPrivateOrigin = "thiennguyen3004931-sudo/xauusd-ai-master-core"
+$RequiredRuntimeComponents = @(
+  'api',
+  'web',
+  'lifecycle-broker',
+  'supervisor',
+  'trend',
+  'sideway',
+  'telegram',
+  'regime-notifier'
+)
 
 function Write-Verdict([string]$Name, [string]$Value) {
   Write-Host "$Name=$Value"
 }
 
 function Invoke-Git([string[]]$Arguments) {
-  $output = & git -C $ProjectRoot @Arguments 2>&1
+  $output = & git -C $CandidateSourceRoot @Arguments 2>&1
   if ($LASTEXITCODE -ne 0) {
     throw "git $($Arguments -join ' ') failed: $($output -join ' ')"
   }
@@ -44,11 +54,27 @@ function Invoke-ApiGet([string]$Path) {
   return Invoke-RestMethod -Uri "$($ControlApiUrl.TrimEnd('/'))$Path" -Method Get -TimeoutSec 8
 }
 
-function Resolve-ProjectPath([string]$Path) {
+function Resolve-PathFromRoot([string]$Root, [string]$Path) {
   if ([System.IO.Path]::IsPathRooted($Path)) {
     return [System.IO.Path]::GetFullPath($Path)
   }
-  return [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot $Path))
+  return [System.IO.Path]::GetFullPath((Join-Path $Root $Path))
+}
+
+function Assert-LoopbackControlApi([string]$Url) {
+  $uri = $null
+  try {
+    $uri = [System.Uri]$Url
+  } catch {
+    throw "ControlApiUrl must be a valid absolute localhost HTTP URL. actual=$Url"
+  }
+  if (-not $uri.IsAbsoluteUri -or $uri.Scheme -ne 'http') {
+    throw "ControlApiUrl must use absolute localhost HTTP. actual=$Url"
+  }
+  $hostName = ([string]$uri.DnsSafeHost).ToLowerInvariant()
+  if ($hostName -notin @('127.0.0.1', 'localhost', '::1')) {
+    throw "ControlApiUrl must remain localhost-only. actualHost=$hostName"
+  }
 }
 
 function Read-BridgeArray([string]$Base, [hashtable]$Headers, [string]$Path) {
@@ -83,13 +109,27 @@ try {
     $ExpectedTree = $ExpectedTree.ToLowerInvariant()
   }
 
-  foreach ($required in @($RuntimeSourceLibrary, $AccountLibrary, $ExecutorConfigPath, $M7AcceptanceScript, $CanonicalDeployScript)) {
+  if ([string]::IsNullOrWhiteSpace($RuntimeProjectRoot)) {
+    throw "RuntimeProjectRoot is required and must point at the current production project root."
+  }
+  if (-not (Test-Path -LiteralPath $RuntimeProjectRoot -PathType Container)) {
+    throw "RuntimeProjectRoot is missing: $RuntimeProjectRoot"
+  }
+  $RuntimeProjectRootResolved = (Resolve-Path -LiteralPath $RuntimeProjectRoot).Path
+  if ([string]::Equals($CandidateSourceRoot, $RuntimeProjectRootResolved, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Candidate source root must be separate from RuntimeProjectRoot. root=$CandidateSourceRoot"
+  }
+
+  Write-Verdict "CANDIDATE_SOURCE_ROOT" $CandidateSourceRoot
+  Write-Verdict "RUNTIME_PROJECT_ROOT" $RuntimeProjectRootResolved
+
+  $ExecutorConfigPath = Join-Path $RuntimeProjectRootResolved ".runtime\phase7c-executor-task-config.json"
+  foreach ($required in @($AccountLibrary, $ExecutorConfigPath, $M7AcceptanceScript, $CanonicalDeployScript)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
       throw "M8 required canonical file is missing: $required"
     }
   }
 
-  . $RuntimeSourceLibrary
   . $AccountLibrary
 
   $head = (Invoke-Git @('rev-parse', 'HEAD')).ToLowerInvariant()
@@ -114,7 +154,7 @@ try {
     throw "Private cutover origin is not the canonical private repository. origin=$origin"
   }
 
-  & git -C $ProjectRoot merge-base --is-ancestor $CanonicalM7Merge HEAD *> $null
+  & git -C $CandidateSourceRoot merge-base --is-ancestor $CanonicalM7Merge HEAD *> $null
   if ($LASTEXITCODE -ne 0) {
     throw "Expected private target does not contain the accepted M7 merge baseline $CanonicalM7Merge."
   }
@@ -131,8 +171,8 @@ try {
     throw "Executor task config version 2 is required."
   }
 
-  $configuredWorkDir = Resolve-ProjectPath ([string]$executorConfig.workDir)
-  $requestedWorkDir = Resolve-ProjectPath $WorkDir
+  $configuredWorkDir = Resolve-PathFromRoot -Root $RuntimeProjectRootResolved -Path ([string]$executorConfig.workDir)
+  $requestedWorkDir = Resolve-PathFromRoot -Root $RuntimeProjectRootResolved -Path $WorkDir
   if (-not [string]::Equals($configuredWorkDir, $requestedWorkDir, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "WorkDir does not match canonical executor config. configured=$configuredWorkDir requested=$requestedWorkDir"
   }
@@ -144,21 +184,70 @@ try {
   if ([string]::IsNullOrWhiteSpace($configuredControlApiUrl)) {
     throw "Executor task config controlApiUrl is missing."
   }
+  Assert-LoopbackControlApi -Url $ControlApiUrl
   if (-not [string]::Equals($configuredControlApiUrl, $ControlApiUrl.TrimEnd('/'), [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "ControlApiUrl does not match canonical executor config. configured=$configuredControlApiUrl requested=$ControlApiUrl"
   }
 
-  $runtimeDeployment = Read-Phase7CRuntimeSourceDeployment -RuntimeRoot $requestedWorkDir
-  $runtimeStatus = Get-Phase7CRuntimeSourceGenerationAttestationStatus -RuntimeRoot $requestedWorkDir -TargetDeployment $runtimeDeployment
-  if (-not [bool]$runtimeStatus.exactMatch) {
-    $components = @($runtimeStatus.mismatchComponents) -join ','
-    $reasons = @($runtimeStatus.reasonCodes) -join ','
-    throw "Current runtime generation attestation is not exact. components=$components reasons=$reasons"
+  $runtimeAttestation = Invoke-ApiGet "/api/v1/phase7c/runtime-source-attestation"
+  if ($null -eq $runtimeAttestation) {
+    throw "Canonical runtime-source attestation API returned no evidence."
+  }
+  if ([string]$runtimeAttestation.source -ne 'PHASE7C_RUNTIME_SOURCE_ATTESTATION') {
+    throw "Unexpected runtime-source attestation source. actual=$($runtimeAttestation.source)"
+  }
+  if (-not [bool]$runtimeAttestation.readOnly) {
+    throw "Runtime-source attestation API must report readOnly=true."
+  }
+  if ([string]$runtimeAttestation.overall -ne 'EXACT_MATCH') {
+    $runtimeVerdicts = @($runtimeAttestation.components | ForEach-Object { "$($_.component):$($_.verdict)" }) -join ','
+    throw "Current runtime generation attestation is not EXACT_MATCH. overall=$($runtimeAttestation.overall) components=$runtimeVerdicts"
   }
 
-  Write-Verdict "CURRENT_RUNTIME_DEPLOYMENT_ID" ([string]$runtimeDeployment.deploymentId)
-  Write-Verdict "CURRENT_RUNTIME_SOURCE_COMMIT" ([string]$runtimeDeployment.sourceCommit)
-  Write-Verdict "CURRENT_RUNTIME_SOURCE_TREE" ([string]$runtimeDeployment.sourceTree)
+  $runtimeDeployment = $runtimeAttestation.deployment
+  if ($null -eq $runtimeDeployment) {
+    throw "Runtime-source attestation is missing deployment identity."
+  }
+  $runtimeCommit = ([string]$runtimeDeployment.sourceCommit).ToLowerInvariant()
+  $runtimeTree = ([string]$runtimeDeployment.sourceTree).ToLowerInvariant()
+  $runtimeDeploymentId = ([string]$runtimeDeployment.deploymentId).ToLowerInvariant()
+  if ($runtimeCommit -notmatch '^[0-9a-f]{40}$' -or $runtimeTree -notmatch '^[0-9a-f]{40}$' -or $runtimeDeploymentId -notmatch '^[0-9a-f]{32}$') {
+    throw "Runtime-source attestation deployment identity is invalid."
+  }
+
+  foreach ($component in $RequiredRuntimeComponents) {
+    $matches = @($runtimeAttestation.components | Where-Object { [string]$_.component -eq $component })
+    if ($matches.Count -ne 1) {
+      throw "Runtime-source attestation must contain exactly one '$component' component. actual=$($matches.Count)"
+    }
+    $componentEvidence = $matches[0]
+    if ([string]$componentEvidence.verdict -ne 'EXACT_MATCH') {
+      throw "Runtime-source component is not EXACT_MATCH. component=$component verdict=$($componentEvidence.verdict)"
+    }
+    if (-not [string]::Equals([string]$componentEvidence.sourceCommit, $runtimeCommit, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "Runtime-source component commit mismatch. component=$component"
+    }
+    if (-not [string]::Equals([string]$componentEvidence.deploymentId, $runtimeDeploymentId, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "Runtime-source component deploymentId mismatch. component=$component"
+    }
+  }
+
+  if ($null -eq $runtimeAttestation.safety -or -not [bool]$runtimeAttestation.safety.readOnly) {
+    throw "Runtime-source attestation safety contract must be read-only."
+  }
+  foreach ($property in @('modeMutation', 'armMutation', 'autoGate', 'lifecycleGate', 'orderMutation', 'positionMutation', 'strategyMutation', 'autoRetune')) {
+    $safetyProperty = $runtimeAttestation.safety.PSObject.Properties[$property]
+    if ($null -eq $safetyProperty) {
+      throw "Runtime-source attestation safety field is missing: $property"
+    }
+    if ([bool]$safetyProperty.Value) {
+      throw "Runtime-source attestation safety field must remain false: $property"
+    }
+  }
+
+  Write-Verdict "CURRENT_RUNTIME_DEPLOYMENT_ID" $runtimeDeploymentId
+  Write-Verdict "CURRENT_RUNTIME_SOURCE_COMMIT" $runtimeCommit
+  Write-Verdict "CURRENT_RUNTIME_SOURCE_TREE" $runtimeTree
   Write-Verdict "CURRENT_RUNTIME_COMPONENT_ATTESTATION" "EXACT"
   Write-Verdict "CURRENT_RUNTIME_SOURCE_COHERENCE" "PASS"
 
@@ -185,7 +274,7 @@ try {
   Write-Verdict "LIFECYCLE_RUNNING" "TRUE"
   Write-Verdict "LIFECYCLE_READY" "TRUE"
 
-  $envFile = Resolve-ProjectPath ([string]$executorConfig.envFile)
+  $envFile = Resolve-PathFromRoot -Root $RuntimeProjectRootResolved -Path ([string]$executorConfig.envFile)
   $accountMode = ConvertTo-Phase7CAccountMode ([string]$executorConfig.accountMode)
   $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode $accountMode -RequireTrading
   $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
@@ -206,8 +295,8 @@ try {
   Write-Verdict "XAUUSD_PENDING_ORDERS" "0"
 
   $targetAlreadyRunning =
-    [string]::Equals([string]$runtimeDeployment.sourceCommit, $head, [System.StringComparison]::OrdinalIgnoreCase) -and
-    [string]::Equals([string]$runtimeDeployment.sourceTree, $tree, [System.StringComparison]::OrdinalIgnoreCase)
+    [string]::Equals($runtimeCommit, $head, [System.StringComparison]::OrdinalIgnoreCase) -and
+    [string]::Equals($runtimeTree, $tree, [System.StringComparison]::OrdinalIgnoreCase)
 
   Write-Verdict "TARGET_ALREADY_RUNNING" ($(if ($targetAlreadyRunning) { 'TRUE' } else { 'FALSE' }))
   Write-Verdict "TARGET_SOURCE_VERIFIED" "PASS"
