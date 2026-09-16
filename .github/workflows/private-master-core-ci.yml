@@ -126,6 +126,9 @@ jobs:
         run: |
           $provenance = "${{ steps.m2_provenance.outputs.state }}"
           $broader = "${{ steps.broader_regression.outcome }}"
+          $broaderConclusion = "${{ steps.broader_regression.conclusion }}"
+          Write-Host "BROAD_PRIVATE_REGRESSION_OUTCOME=$broader"
+          Write-Host "BROAD_PRIVATE_REGRESSION_CONCLUSION=$broaderConclusion"
 
           if ($provenance -ne "PASS") {
             Write-Host "M3_PRIVATE_CI=BLOCKED_M2_PROVENANCE"
