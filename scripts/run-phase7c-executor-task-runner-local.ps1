@@ -375,6 +375,32 @@ function Test-SupervisorAlive {
   return $null -ne (Get-Process -Id ([int]$script:supervisorPid) -ErrorAction SilentlyContinue)
 }
 
+function Get-Phase7CExistingSupervisorPid {
+  $supervisorPidPath = Join-Path $runtimeDir "supervisor.pid"
+  if (-not (Test-Path -LiteralPath $supervisorPidPath -PathType Leaf)) { return $null }
+  try {
+    $candidatePid = [int](Get-Content -LiteralPath $supervisorPidPath -Raw).Trim()
+    if ($candidatePid -le 0) { return $null }
+    $liveProcess = Get-Process -Id $candidatePid -ErrorAction SilentlyContinue
+    if ($null -eq $liveProcess) { return $null }
+    $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $candidatePid" -ErrorAction Stop
+    if ($null -eq $processInfo) { return $null }
+    $processName = ([string]$processInfo.Name).Trim().ToLowerInvariant()
+    if ($processName -notin @("powershell.exe", "pwsh.exe")) { return $null }
+    $canonicalSupervisorLeaf = "run-phase7c-executors-local.ps1"
+    if (-not [string]::Equals([System.IO.Path]::GetFileName($Supervisor), $canonicalSupervisorLeaf, [System.StringComparison]::OrdinalIgnoreCase)) { return $null }
+    $commandLine = [string]$processInfo.CommandLine
+    if ([string]::IsNullOrWhiteSpace($commandLine)) { return $null }
+    $canonicalSupervisorPath = [System.IO.Path]::GetFullPath($Supervisor).Replace('/', '\')
+    $normalizedCommandLine = $commandLine.Replace('/', '\')
+    if ($normalizedCommandLine.IndexOf($canonicalSupervisorPath, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { return $null }
+    return $candidatePid
+  } catch {
+    Append-BrokerLog "Existing supervisor adoption probe failed; refusing unproven PID. $($_.Exception.Message)"
+    return $null
+  }
+}
+
 function Stop-Phase7CExecutorRuntime($Config) {
   # Missing PID files are not proof that the executor runtime is gone.
   # The canonical stopper is idempotent and also reconciles bounded orphan
@@ -680,6 +706,15 @@ function Process-BrokerRequest {
 function Recover-SupervisorIfNeeded {
   if ($script:desiredExecutorState -ne "RUNNING") { return }
   if (Test-SupervisorAlive) { return }
+
+  $existingSupervisorPid = Get-Phase7CExistingSupervisorPid
+  if ($null -ne $existingSupervisorPid) {
+    $script:supervisorPid = [int]$existingSupervisorPid
+    $script:nextRecoveryAt = 0L
+    Append-BrokerLog "Adopted surviving canonical executor supervisor PID=$existingSupervisorPid after lifecycle broker cold-start."
+    Set-BrokerState "RUNNING" "NOOP_ALREADY_RUNNING"
+    return
+  }
 
   $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   if ($script:nextRecoveryAt -eq 0L) {
