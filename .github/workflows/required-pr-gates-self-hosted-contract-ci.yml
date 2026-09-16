@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: required-pr-gates-self-hosted-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   required-pr-gates-self-hosted-contract:
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
