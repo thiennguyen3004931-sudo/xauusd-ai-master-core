@@ -65,11 +65,22 @@ RUNNER_NAME=XAUUSD-CORE-CI-WIN
 RUNNER_LABEL=xauusd-core-ci
 ```
 
-Acceptance requires actual executed steps, including checkout, Node setup, pnpm setup, frozen install, build, scoped Phase7C tests, Telegram regressions, tracked-secret gate, `git diff --check`, and the final `SELF_HOSTED_CI_INFRA=PASS` line.
+Acceptance requires actual executed steps, including checkout, Node setup, pnpm setup, frozen install, static workflow contract, tracked-secret tests and scan, private-bootstrap provenance tests and verifier, build, scoped Phase7C tests, Telegram regressions, broader private regression evidence, `git diff --check`, tracked-worktree cleanliness, and the final verdict steps.
 
 A queued job, offline runner, label mismatch, immediate failure before steps, or empty step execution does not prove infrastructure PASS.
 
-`SELF_HOSTED_CI_INFRA=PASS` is not equivalent to `M3_PRIVATE_CI=GREEN`. M3 remains blocked until the approved M2 private bootstrap provenance attestation is implemented and verified.
+`SELF_HOSTED_CI_INFRA=PASS` is not equivalent to `M3_PRIVATE_CI=GREEN`.
+
+The branch contains the M2 bootstrap attestation/verifier. The self-hosted run must execute those checks successfully before M2 provenance counts as runtime CI evidence. Full M3 acceptance also requires the broader private regression to pass. The workflow therefore reports the outcomes separately:
+
+```text
+SELF_HOSTED_CI_INFRA=PASS
+M3_PRIVATE_CI=BLOCKED_M2_PROVENANCE
+M3_PRIVATE_CI=BLOCKED_BROADER_REGRESSION
+M3_PRIVATE_CI=GREEN
+```
+
+Only one `M3_PRIVATE_CI` verdict is emitted by a completed run. Infrastructure PASS may coexist with a blocked full-M3 verdict; this is intentional and prevents runner availability from being mistaken for full repository acceptance.
 
 ## Service mode
 
