@@ -191,3 +191,21 @@ test("pending Trend recovery matches the broker TP actually sent when fixed TP i
     "pending-position TP comparison must use the derived broker TP expectation",
   );
 });
+
+test("runtime adapter accepts CRLF controller source", () => {
+  const legacySource = fs
+    .readFileSync(controllerPath, "utf8")
+    .replace(/\r?\n/g, "\r\n");
+
+  assert.match(legacySource, /\r\n/);
+
+  const source = transformPhase7CSemiTrendRuntimeSource(legacySource);
+
+  assert.match(source, /journal\("ENTRY_ACCEPTED_POSITION_PENDING_RESOLUTION"/);
+  assert.match(source, /\r\n/);
+  assert.equal(
+    source.replace(/\r\n/g, "").includes("\n"),
+    false,
+    "CRLF input should remain CRLF after transformation",
+  );
+});
