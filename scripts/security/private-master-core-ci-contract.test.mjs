@@ -66,6 +66,23 @@ test("private Master/Core CI pins toolchain and runs the approved scoped gates",
   assert.match(source, /git diff --check/);
 });
 
+test("private Master/Core CI keeps infrastructure PASS separate from full M3 acceptance", () => {
+  const source = readWorkflow();
+
+  assert.match(
+    source,
+    /node scripts\/security\/verify-private-bootstrap\.mjs security\/private-bootstrap-attestation\.json/,
+  );
+  assert.match(source, /id:\s*m2_provenance/);
+  assert.match(source, /id:\s*broader_regression/);
+  assert.match(source, /continue-on-error:\s*true/);
+  assert.match(source, /run:\s*pnpm test/);
+  assert.match(source, /SELF_HOSTED_CI_INFRA=PASS/);
+  assert.match(source, /M3_PRIVATE_CI=BLOCKED_M2_PROVENANCE/);
+  assert.match(source, /M3_PRIVATE_CI=BLOCKED_BROADER_REGRESSION/);
+  assert.match(source, /M3_PRIVATE_CI=GREEN/);
+});
+
 test("private Master/Core CI contains no production mutation or secret wiring", () => {
   const source = readWorkflow();
 
