@@ -1,0 +1,64 @@
+name: Legacy Hosted CI Self-Hosted Capability Probe
+
+on:
+  push:
+    branches:
+      - fix/legacy-hosted-ci-self-hosted-migration
+    paths:
+      - ".github/workflows/legacy-hosted-ci-self-hosted-capability-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  capability-probe:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          $actualHead = (git rev-parse HEAD).Trim()
+          Write-Host "CHECKED_OUT_HEAD=$actualHead"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actualHead -ne $env:EXPECTED_HEAD) { exit 1 }
+
+      - name: Probe runner capabilities
+        shell: powershell
+        run: |
+          $commands = @("git", "node", "npm", "pnpm", "python", "pwsh", "powershell", "docker", "bash")
+          foreach ($command in $commands) {
+            $resolved = Get-Command $command -ErrorAction SilentlyContinue
+            if ($resolved) {
+              Write-Host "$command=FOUND path=$($resolved.Source)"
+            } else {
+              Write-Host "$command=MISSING"
+            }
+          }
+
+          $docker = Get-Command docker -ErrorAction SilentlyContinue
+          if ($docker) {
+            docker version
+            Write-Host "DOCKER_VERSION_EXIT=$LASTEXITCODE"
+          } else {
+            Write-Host "DOCKER_VERSION_EXIT=NOT_AVAILABLE"
+          }
+
+          $bash = Get-Command bash -ErrorAction SilentlyContinue
+          if ($bash) {
+            bash --version
+            Write-Host "BASH_VERSION_EXIT=$LASTEXITCODE"
+          } else {
+            Write-Host "BASH_VERSION_EXIT=NOT_AVAILABLE"
+          }
+
+      - name: Diff hygiene
+        run: git diff --check
