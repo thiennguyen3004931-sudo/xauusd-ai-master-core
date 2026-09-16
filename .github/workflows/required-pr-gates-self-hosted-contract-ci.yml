@@ -1,0 +1,41 @@
+name: Required PR Gates Self-Hosted Contract CI
+
+on:
+  push:
+    branches:
+      - fix/required-pr-gates-self-hosted
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  required-pr-gates-self-hosted-contract:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actualHead = (git rev-parse HEAD).Trim()
+          Write-Host "CHECKED_OUT_HEAD=$actualHead"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actualHead -ne $env:EXPECTED_HEAD) { exit 1 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Required PR gates self-hosted contract
+        run: node --test scripts/test-required-pr-gates-self-hosted-contract.mjs
+      - name: Diff hygiene
+        run: git diff --check
