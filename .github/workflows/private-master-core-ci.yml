@@ -58,6 +58,18 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: M6 fetch pinned public contract
+        run: |
+          $lock = Get-Content "security/public-contract.lock.json" -Raw | ConvertFrom-Json
+          $publicCommit = [string]$lock.publicCommit
+          if ($publicCommit -notmatch '^[0-9a-f]{40}$') {
+            Write-Error "PUBLIC_CONTRACT_COMMIT_INVALID"
+            exit 1
+          }
+          git fetch --no-tags --depth=1 https://github.com/thiennguyen3004931-sudo/xauusd-ai-master.git $publicCommit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "M6_PUBLIC_FETCH_COMMIT=$publicCommit"
+
       - name: Static private CI contract
         run: node --test scripts/security/private-master-core-ci-contract.test.mjs
 
@@ -69,6 +81,13 @@ jobs:
 
       - name: Private bootstrap provenance tests
         run: node --test scripts/security/verify-private-bootstrap.test.mjs
+
+      - name: M6 public contract lock tests
+        run: node --test scripts/security/verify-public-contract-lock.test.mjs
+
+      - name: M6 public contract lock
+        id: m6_public_contract
+        run: node scripts/security/verify-public-contract-lock.mjs security/public-contract.lock.json
 
       - name: M2 provenance status
         id: m2_provenance
@@ -125,13 +144,20 @@ jobs:
         shell: powershell
         run: |
           $provenance = "${{ steps.m2_provenance.outputs.state }}"
+          $m6 = "${{ steps.m6_public_contract.outcome }}"
           $broader = "${{ steps.broader_regression.outcome }}"
           $broaderConclusion = "${{ steps.broader_regression.conclusion }}"
+          Write-Host "M6_PUBLIC_CONTRACT_OUTCOME=$m6"
           Write-Host "BROAD_PRIVATE_REGRESSION_OUTCOME=$broader"
           Write-Host "BROAD_PRIVATE_REGRESSION_CONCLUSION=$broaderConclusion"
 
           if ($provenance -ne "PASS") {
             Write-Host "M3_PRIVATE_CI=BLOCKED_M2_PROVENANCE"
+            exit 1
+          }
+
+          if ($m6 -ne "success") {
+            Write-Host "M3_PRIVATE_CI=BLOCKED_M6_PUBLIC_CONTRACT"
             exit 1
           }
 

@@ -107,6 +107,27 @@ test("private Master/Core CI pins toolchain and runs the approved scoped gates",
   assert.match(source, /git diff --check/);
 });
 
+test("private Master/Core CI enforces the M6 one-way public contract lock", () => {
+  const source = readWorkflow();
+
+  assert.match(source, /- name:\s*M6 fetch pinned public contract/);
+  assert.match(source, /security\/public-contract\.lock\.json/);
+  assert.match(
+    source,
+    /git fetch --no-tags --depth=1 https:\/\/github\.com\/thiennguyen3004931-sudo\/xauusd-ai-master\.git \$publicCommit/,
+  );
+  assert.doesNotMatch(source, /git fetch[^\n]*refs\/heads\/main/);
+  assert.match(
+    source,
+    /node --test scripts\/security\/verify-public-contract-lock\.test\.mjs/,
+  );
+  assert.match(source, /id:\s*m6_public_contract/);
+  assert.match(
+    source,
+    /node scripts\/security\/verify-public-contract-lock\.mjs security\/public-contract\.lock\.json/,
+  );
+});
+
 test("private Master/Core CI keeps infrastructure PASS separate from full M3 acceptance", () => {
   const source = readWorkflow();
 
@@ -115,18 +136,29 @@ test("private Master/Core CI keeps infrastructure PASS separate from full M3 acc
     /node scripts\/security\/verify-private-bootstrap\.mjs security\/private-bootstrap-attestation\.json/,
   );
   assert.match(source, /id:\s*m2_provenance/);
+  assert.match(source, /id:\s*m6_public_contract/);
   assert.match(source, /id:\s*broader_regression/);
   assert.match(source, /continue-on-error:\s*true/);
   assert.match(source, /run:\s*pnpm test/);
   assert.match(source, /SELF_HOSTED_CI_INFRA=PASS/);
   assert.match(source, /M3_PRIVATE_CI=BLOCKED_M2_PROVENANCE/);
+  assert.match(source, /M3_PRIVATE_CI=BLOCKED_M6_PUBLIC_CONTRACT/);
   assert.match(source, /M3_PRIVATE_CI=BLOCKED_BROADER_REGRESSION/);
   assert.match(source, /M3_PRIVATE_CI=GREEN/);
 });
 
-test("blocked M3 verdicts fail the GitHub check and expose the true broader outcome", () => {
+test("blocked M3 verdicts fail the GitHub check and expose the true gate outcomes", () => {
   const source = readWorkflow();
 
+  assert.match(
+    source,
+    /\$m6\s*=\s*"\$\{\{\s*steps\.m6_public_contract\.outcome\s*\}\}"/,
+  );
+  assert.match(source, /M6_PUBLIC_CONTRACT_OUTCOME=\$m6/);
+  assert.match(
+    source,
+    /if \(\$m6 -ne "success"\) \{[\s\S]*?M3_PRIVATE_CI=BLOCKED_M6_PUBLIC_CONTRACT[\s\S]*?exit 1[\s\S]*?\}/,
+  );
   assert.match(
     source,
     /\$broader\s*=\s*"\$\{\{\s*steps\.broader_regression\.outcome\s*\}\}"/,
