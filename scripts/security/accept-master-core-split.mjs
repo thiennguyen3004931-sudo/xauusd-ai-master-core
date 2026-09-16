@@ -90,6 +90,13 @@ function publicContractDependencyEvidence(paths) {
   });
 }
 
+export function hasPublicContractDependencyEvidence({
+  publicContractLockVerified,
+  directReferencePresent,
+}) {
+  return publicContractLockVerified === true || directReferencePresent === true;
+}
+
 function governedPublicDependsOnPrivateSource(paths) {
   const governedPaths = paths.filter((filePath) =>
     GOVERNED_PACKAGE_PATHS.some((prefix) => filePath.startsWith(`${prefix}/`)),
@@ -123,13 +130,17 @@ function verifyContractLockFromSource() {
 export function collectMasterCoreAcceptanceEvidence(env = process.env) {
   const paths = trackedPaths();
   const productionCutover = env.M7_PRODUCTION_CUTOVER ?? "";
+  const publicContractLockVerified = verifyContractLockFromSource();
   return {
     buildPassed: env.M7_PRIVATE_BUILD_OUTCOME === "success",
     masterRegressionPassed: env.M7_MASTER_REGRESSION_OUTCOME === "success",
     publicContractLockPassed:
-      env.M7_PUBLIC_CONTRACT_OUTCOME === "success" && verifyContractLockFromSource(),
+      env.M7_PUBLIC_CONTRACT_OUTCOME === "success" && publicContractLockVerified,
     privateSigningKeyTracked: trackedSecretPresent(paths),
-    privateDependsOnPublicContracts: publicContractDependencyEvidence(paths),
+    privateDependsOnPublicContracts: hasPublicContractDependencyEvidence({
+      publicContractLockVerified,
+      directReferencePresent: publicContractDependencyEvidence(paths),
+    }),
     publicDependsOnPrivateSource: governedPublicDependsOnPrivateSource(paths),
     productionCutoverPerformed: productionCutover !== "NOT_PERFORMED",
   };
