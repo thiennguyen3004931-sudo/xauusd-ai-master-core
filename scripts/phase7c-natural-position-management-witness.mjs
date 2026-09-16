@@ -15,6 +15,9 @@ function ticketOf(value) {
 }
 
 function finiteNumberOrNull(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && value.trim().length === 0) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
