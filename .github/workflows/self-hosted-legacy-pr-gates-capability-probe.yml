@@ -1,0 +1,50 @@
+name: Legacy PR Gate Self-Hosted Capability Probe
+
+on:
+  push:
+    branches:
+      - fix/self-hosted-legacy-pr-gates
+    paths:
+      - ".github/workflows/self-hosted-legacy-pr-gates-capability-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  capability-probe:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Verify exact head
+        shell: powershell
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          Write-Host "EXPECTED_HEAD=${{ github.sha }}"
+          Write-Host "ACTUAL_HEAD=$actual"
+          if ($actual -ne "${{ github.sha }}") { exit 1 }
+      - name: PowerShell 7 capability
+        shell: pwsh
+        run: |
+          $PSVersionTable.PSVersion
+      - name: Windows PowerShell 5.1 capability
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion
+      - name: Git capability
+        shell: powershell
+        run: git --version
+      - name: Python capability
+        shell: powershell
+        run: python --version
+      - name: Node capability
+        shell: powershell
+        run: node --version
+      - name: Docker capability required by repository-boundary gate
+        shell: powershell
+        run: |
+          docker version
