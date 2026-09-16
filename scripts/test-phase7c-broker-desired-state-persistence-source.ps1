@@ -33,13 +33,25 @@ $writeDesiredStateAst = $runnerAst.Find({
   $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
     $node.Name -eq "Write-DurableDesiredExecutorState"
 }, $true)
+$existingSupervisorAst = $runnerAst.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq "Get-Phase7CExistingSupervisorPid"
+}, $true)
 Assert-True ($null -ne $readDesiredStateAst) "Broker must define Read-DurableDesiredExecutorState"
 Assert-True ($null -ne $writeDesiredStateAst) "Broker must define Write-DurableDesiredExecutorState"
+Assert-True ($null -ne $existingSupervisorAst) "Broker must define Get-Phase7CExistingSupervisorPid for cold-start adoption"
 
 # Cold-start must force PAUSE before durable intent is restored. Existing
 # Recover-SupervisorIfNeeded remains the only restoration launcher.
 Assert-True ($runner -match '(?s)Ensure-Phase7CBotPause\s+"system-lifecycle-broker-boot".*?Read-DurableDesiredExecutorState') "Broker cold-start must force PAUSE before restoring durable desired state"
 Assert-True ($runner -match '(?s)while\s*\(\$true\).*?Recover-SupervisorIfNeeded') "Broker must retain the canonical recovery loop"
+
+# A broker cold-start loses the in-memory supervisor PID while the canonical
+# supervisor/process tree can still be alive. Durable RUNNING must first adopt a
+# proven canonical survivor instead of launching a duplicate supervisor.
+Assert-True ($runner -match '(?s)function\s+Get-Phase7CExistingSupervisorPid.*?supervisor\.pid.*?Get-Process.*?Get-CimInstance\s+Win32_Process.*?run-phase7c-executors-local\.ps1') "Existing-supervisor adoption must verify live PID evidence and canonical PowerShell command line"
+Assert-True ($runner -match '(?s)function\s+Recover-SupervisorIfNeeded.*?Get-Phase7CExistingSupervisorPid.*?\$script:supervisorPid\s*=.*?Set-BrokerState\s+"RUNNING".*?return.*?Start-Phase7CExecutorRuntime') "Recovery must adopt a proven surviving supervisor before any new supervisor launch"
 
 # Persist successful operator intent before publishing successful/idempotent request completion.
 Assert-True ($runner -match '(?s)if\s*\(\$action\s*-eq\s*"STOP"\).*?Write-DurableDesiredExecutorState\s+"STOPPED".*?\$script:desiredExecutorState\s*=\s*"STOPPED".*?Complete-Request') "Successful STOP must persist STOPPED before request completion"
