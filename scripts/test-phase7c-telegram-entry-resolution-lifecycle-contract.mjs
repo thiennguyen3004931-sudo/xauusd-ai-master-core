@@ -153,3 +153,13 @@ test("Trend runtime adapter converts transient unresolved state into recoverable
   );
   assert.match(recoveryWindow, /recoveredFromPending: true/);
 });
+
+test("Trend runtime adapter accepts CRLF source from Windows checkout", () => {
+  const canonicalSource = fs.readFileSync(controllerPath, "utf8");
+  const windowsSource = canonicalSource.replace(/\r?\n/g, "\r\n");
+  const source = transformPhase7CSemiTrendRuntimeSource(windowsSource);
+
+  assert.match(source, /SEMI_MANUAL_POSITION_ADOPTED/);
+  assert.match(source, /journal\("ENTRY_ACCEPTED_POSITION_PENDING_RESOLUTION"/);
+  assert.match(source, /recoveredFromPending: true/);
+});
