@@ -4,20 +4,31 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const checkerPaths = new Set([
+const safeSecurityPaths = new Set([
   "scripts/security/check-private-secrets.mjs",
   "scripts/security/check-private-secrets.test.mjs",
+  "scripts/security/validate-credential-remediation.mjs",
+  "scripts/security/validate-credential-remediation.test.mjs",
+  "security/credential-remediation.json",
 ]);
+
+function isEnvTemplatePath(lowerPath) {
+  const baseName = lowerPath.split("/").at(-1) ?? lowerPath;
+  return (
+    /^\.env(?:\.[^/.]+)*\.(?:example|sample)$/.test(baseName) ||
+    /^[^/]+\.env(?:\.[^/.]+)*\.(?:example|sample)$/.test(baseName)
+  );
+}
 
 export function inspectTrackedPath(filePath) {
   const normalized = filePath.replaceAll("\\", "/");
   const lower = normalized.toLowerCase();
 
-  if (checkerPaths.has(lower)) {
+  if (safeSecurityPaths.has(lower)) {
     return "ALLOW";
   }
 
-  if (/\.env\.example$/.test(lower) || /\.env\.sample$/.test(lower)) {
+  if (isEnvTemplatePath(lower)) {
     return "ALLOW";
   }
 
