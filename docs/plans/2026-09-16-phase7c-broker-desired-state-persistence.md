@@ -11,35 +11,41 @@ Persist the lifecycle broker's operator-desired executor state across broker/Sch
 - Production remains unchanged.
 - Bot mode remains PAUSE during this source-only work.
 - LIVE execution remains unarmed.
-- Broker cold-start must enforce PAUSE before reading/restoring durable executor intent.
+- Broker cold-start invokes PAUSE before loading durable executor intent, and recovery must positively confirm PAUSE before adopting or launching any supervisor.
 - Only durable `RUNNING` may restore executor supervision.
 - Missing, corrupt, unsupported-version, or unknown desired-state data fails closed to `STOPPED`.
 - Failed/rejected lifecycle requests must not persist a false successful intent.
+- If a broker cold-start loses its in-memory supervisor PID while the previous canonical supervisor still lives, recovery may adopt it only after proving the PID is live and its Windows process command line points to the canonical `run-phase7c-executors-local.ps1` path.
+- A proven surviving canonical supervisor is adopted rather than launching a duplicate supervisor.
 - No production deploy, task repair, Scheduled Task hash update, ARM, AUTO, or live test order in this change.
 
 ## Files
 
-- Modify: `scripts/test-phase7c-system-lifecycle-broker-source.ps1`
+- Add: `scripts/test-phase7c-broker-desired-state-persistence-source.ps1`
+- Add: `.github/workflows/phase7c-broker-desired-state-persistence-tdd.yml`
 - Modify: `scripts/run-phase7c-executor-task-runner-local.ps1`
+- Add/update: this implementation plan.
 
 No trading-strategy files are in scope.
 
 ## Task 1 — TDD RED: durable-state source contract
 
-Extend `scripts/test-phase7c-system-lifecycle-broker-source.ps1` so the current source fails for the missing behavior. Assertions must require:
+Create `scripts/test-phase7c-broker-desired-state-persistence-source.ps1` so the pre-fix source fails for the missing behavior. Assertions require:
 
 1. A dedicated durable desired-state path under the lifecycle broker state directory.
 2. Atomic durable persistence using the existing JSON atomic writer.
 3. Closed state values: only `RUNNING` and `STOPPED` are accepted.
 4. Missing/corrupt/unknown/unsupported durable state resolves to `STOPPED`.
-5. Cold-start ordering is `Ensure-Phase7CBotPause` first, then durable intent restore.
+5. Cold-start ordering invokes `Ensure-Phase7CBotPause` before durable intent is loaded.
 6. Successful/NOOP START persists `RUNNING` before reporting the request successful/NOOP.
 7. Successful/NOOP STOP persists `STOPPED` before reporting the request successful/NOOP.
 8. Successful RESTART persists `RUNNING` before reporting success.
 9. Rejected/failed START/RESTART paths do not persist `RUNNING`.
 10. The existing recovery loop remains the executor restoration mechanism; no new launch subsystem is introduced.
+11. Cold-start recovery can adopt a surviving supervisor only from live `supervisor.pid` evidence whose Windows process command line proves the canonical supervisor script path.
+12. Recovery must positively confirm PAUSE before survivor adoption or any new supervisor launch.
 
-Run the targeted source contract and capture an expected failure proving the test is exercising the missing durable-state behavior.
+Capture expected RED failures before each production-source behavior is introduced.
 
 ## Task 2 — Minimal implementation
 
@@ -52,29 +58,33 @@ In `scripts/run-phase7c-executor-task-runner-local.ps1`:
 5. On successful/idempotent START, atomically persist `RUNNING`, then update in-memory state and complete the request.
 6. On successful RESTART, atomically persist `RUNNING`, then update in-memory state and complete the request.
 7. Do not persist success intent from rejected/failed actions.
-8. Cold-start sequence: enforce PAUSE first; then read durable desired state; assign the validated result to in-memory `desiredExecutorState`; publish broker status/heartbeat. Existing `Recover-SupervisorIfNeeded` performs restoration when the value is `RUNNING`.
+8. Cold-start sequence invokes PAUSE first, then reads durable desired state and assigns the validated result to in-memory `desiredExecutorState`.
+9. In `Recover-SupervisorIfNeeded`, positively confirm PAUSE before restoration.
+10. If a surviving canonical supervisor is proven by PID plus command-line path, adopt that PID and return `NOOP_ALREADY_RUNNING` without launching a second supervisor.
+11. If no canonical survivor is proven, retain the existing delayed recovery and START safety gate before a new supervisor launch.
 
 ## Task 3 — Targeted GREEN and regressions
 
-Run:
+The dedicated TDD workflow runs the desired-state source contract on the repository self-hosted Windows runner at the exact commit SHA. It must prove:
 
-- `scripts/test-phase7c-system-lifecycle-broker-source.ps1` under PowerShell 7.
-- The same contract under Windows PowerShell 5.1.
-- `scripts/test-phase7c-system-lifecycle-broker-contract.ps1` under both shells.
-- PowerShell parse check for `scripts/run-phase7c-executor-task-runner-local.ps1`.
+- exact-head checkout identity;
+- PowerShell parse validity of the broker runner;
+- durable desired-state reader/writer behavior;
+- fail-closed behavior;
+- successful-request persistence ordering;
+- survivor adoption evidence boundary;
+- PAUSE-before-adoption/relaunch ordering.
 
-All must pass.
+Broader canonical lifecycle, build, security/provenance, and regression coverage remains the responsibility of `Private Master Core Self-Hosted CI` and the existing PR checks.
 
 ## Task 4 — Private/self-hosted CI and review
 
-Run the existing private `Private Master Core Self-Hosted CI` at the exact branch head. This workflow is test/build-only and must retain `M7_PRODUCTION_CUTOVER=NOT_PERFORMED`.
+Run the existing private `Private Master Core Self-Hosted CI` at the exact final branch head. This workflow is test/build-only and must retain `M7_PRODUCTION_CUTOVER=NOT_PERFORMED`.
 
-Review `main...fix/phase7c-broker-desired-state-persistence` and confirm only the plan, lifecycle source contract, and lifecycle broker runner changed. Confirm no trading/risk/order/ARM/AUTO source is modified.
+Review `main...fix/phase7c-broker-desired-state-persistence` and confirm only the plan, dedicated TDD workflow/test, and lifecycle broker runner changed. Confirm no trading/risk/order/ARM/AUTO source is modified.
 
 ## Task 5 — PR and merge gate
 
-Open PR to private `main` only after targeted GREEN and diff review.
-
-Require relevant PR checks, including canonical lifecycle contracts and private self-hosted CI, to pass. Merge only when all required acceptance evidence is green.
+Use the private PR to `main`. Require the dedicated targeted GREEN, relevant lifecycle acceptance evidence, private self-hosted CI, and final diff review to be green/clean before merge.
 
 After merge, stop. Do not deploy production. The runner file hash changes, so a later production rollout requires a separately authorized canonical task/recovery/hash gate with PAUSE + DISARMED + FLAT.
