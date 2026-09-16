@@ -14,13 +14,24 @@ permissions:
 jobs:
   repository-boundary:
     name: public-private-repository-boundary
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 30
     steps:
-      - name: Checkout full history
+      - name: Checkout exact head with full history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actualHead = (git rev-parse HEAD).Trim()
+          Write-Host "CHECKED_OUT_HEAD=$actualHead"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actualHead -ne $env:EXPECTED_HEAD) { exit 1 }
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -32,25 +43,51 @@ jobs:
       - name: Classify tracked repository
         run: node scripts/security/classify-repository.mjs --tracked
       - name: Enforce public/private change freeze
+        shell: powershell
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: node scripts/security/check-public-change-freeze.mjs "$BASE_SHA" "$HEAD_SHA"
+        run: node scripts/security/check-public-change-freeze.mjs $env:BASE_SHA $env:HEAD_SHA
+      - name: Install pinned Gitleaks 8.24.2
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '8.24.2'
+          $asset = "gitleaks_${version}_windows_x64.zip"
+          $baseUri = "https://github.com/gitleaks/gitleaks/releases/download/v$version"
+          $toolDir = Join-Path $env:RUNNER_TEMP "gitleaks-$version"
+          $zipPath = Join-Path $toolDir $asset
+          New-Item -ItemType Directory -Force -Path $toolDir | Out-Null
+          Invoke-WebRequest -Uri "$baseUri/$asset" -OutFile $zipPath
+          $checksums = (Invoke-WebRequest -Uri "$baseUri/gitleaks_${version}_checksums.txt").Content
+          $checksumLine = ($checksums -split "`n" | Where-Object { $_.Trim() -match "gitleaks_8\.24\.2_windows_x64\.zip$" } | Select-Object -First 1)
+          if (-not $checksumLine) { Write-Error 'GITLEAKS_CHECKSUM_NOT_FOUND'; exit 1 }
+          $expectedSha = (($checksumLine.Trim() -split '\s+')[0]).ToLowerInvariant()
+          $actualSha = (Get-FileHash -Algorithm SHA256 -Path $zipPath).Hash.ToLowerInvariant()
+          Write-Host "GITLEAKS_EXPECTED_SHA256=$expectedSha"
+          Write-Host "GITLEAKS_ACTUAL_SHA256=$actualSha"
+          if ($actualSha -ne $expectedSha) { Write-Error 'GITLEAKS_CHECKSUM_MISMATCH'; exit 1 }
+          Expand-Archive -Path $zipPath -DestinationPath $toolDir -Force
+          $gitleaks = Join-Path $toolDir 'gitleaks.exe'
+          if (-not (Test-Path $gitleaks)) { Write-Error 'GITLEAKS_EXE_MISSING'; exit 1 }
+          "GITLEAKS_EXE=$gitleaks" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Scan full Git history with Gitleaks (redacted)
+        shell: powershell
         run: |
-          mkdir -p artifacts/security
-          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.24.2 detect \
-            --source=/repo \
-            --redact \
-            --log-opts="--all" \
-            --report-format=json \
-            --report-path=/repo/artifacts/security/gitleaks.json \
-            --exit-code=0
+          New-Item -ItemType Directory -Force -Path 'artifacts/security' | Out-Null
+          $arguments = @(
+            'detect',
+            '--source=.',
+            '--redact',
+            '--log-opts=--all',
+            '--report-format=json',
+            '--report-path=artifacts/security/gitleaks.json',
+            '--exit-code=0'
+          )
+          & $env:GITLEAKS_EXE @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Validate credential remediation coverage
-        run: |
-          node scripts/security/validate-credential-remediation.mjs \
-            artifacts/security/gitleaks.json \
-            security/credential-remediation.json
+        run: node scripts/security/validate-credential-remediation.mjs artifacts/security/gitleaks.json security/credential-remediation.json
       - name: Upload redacted secret scan report
         if: always()
         uses: actions/upload-artifact@v4
