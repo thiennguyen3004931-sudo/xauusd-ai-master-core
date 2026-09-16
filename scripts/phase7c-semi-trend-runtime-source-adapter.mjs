@@ -210,7 +210,10 @@ export function transformPhase7CSemiTrendRuntimeSource(source) {
     throw new Error("SEMI Trend runtime source adapter requires non-empty TypeScript source.");
   }
 
-  let output = source;
+  const sourceUsesCrLf = source.includes("\r\n");
+  let output = sourceUsesCrLf
+    ? source.replace(/\r\n/g, "\n")
+    : source;
   const semiManagePositionCall = output.includes(
     "await managePosition(managedPosition, quote, spec, m15, m5);",
   )
@@ -253,5 +256,8 @@ export function transformPhase7CSemiTrendRuntimeSource(source) {
     }
   }
 
-  return transformEntryResolutionLifecycle(output);
+  const transformed = transformEntryResolutionLifecycle(output);
+  return sourceUsesCrLf
+    ? transformed.replace(/\n/g, "\r\n")
+    : transformed;
 }
