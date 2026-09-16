@@ -217,7 +217,7 @@ try {
   Write-Verdict "M8_PRIVATE_CUTOVER_PREFLIGHT" "PASS"
   exit 0
 } catch {
-  Write-Error $_.Exception.Message
+  Write-Host "M8_ERROR=$($_.Exception.Message)"
   Write-Verdict "CUTOVER_READY" "FALSE"
   Write-Verdict "PRODUCTION_CUTOVER" "NOT_PERFORMED"
   Write-Verdict "M8_PRIVATE_CUTOVER_PREFLIGHT" "FAIL"
