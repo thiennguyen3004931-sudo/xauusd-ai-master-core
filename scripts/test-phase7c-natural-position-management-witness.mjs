@@ -96,6 +96,25 @@ test("FastMove peak and partial are read from durable managed state, not recompu
   assert.equal(result.partial.activatedAt, 1788956541830);
 });
 
+test("missing nullable evidence remains null rather than being coerced to zero", () => {
+  const result = witness({
+    positions: [position({ stopLoss: null, takeProfit: null })],
+    trendState: {
+      managed: managed({
+        partialActivatedAt: null,
+        fastMovePeakPrice: null,
+      }),
+    },
+  });
+
+  assert.deepEqual(result.brokerProtection, {
+    stopLoss: null,
+    takeProfit: null,
+  });
+  assert.equal(result.partial.activatedAt, null);
+  assert.equal(result.fastMove.peakPrice, null);
+});
+
 test("NO_FASTMOVE_TRIGGER is explicitly NOT_TRIGGERED and not a regression", () => {
   const result = witness();
   assert.equal(result.fastMove.status, "NOT_TRIGGERED");
