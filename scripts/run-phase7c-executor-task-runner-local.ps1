@@ -167,6 +167,7 @@ foreach ($directory in @($runtimeDir, $attemptsRoot, $brokerRoot, $inboxDir, $st
 $requestPath = Join-Path $inboxDir "request.json"
 $statusPath = Join-Path $stateDir "status.json"
 $heartbeatPath = Join-Path $stateDir "heartbeat.json"
+$desiredExecutorStatePath = Join-Path $stateDir "desired-executor-state.json"
 $brokerLogPath = Join-Path $logsDir "broker.log"
 $runnerLockPath = Join-Path $runtimeDir "startup-runner.lock"
 
@@ -215,6 +216,38 @@ $script:nextRecoveryAt = 0L
 function Append-BrokerLog([string]$Message) {
   $stamp = [DateTimeOffset]::Now.ToString("o")
   Add-Content -LiteralPath $brokerLogPath -Value "[$stamp] $Message" -Encoding utf8
+}
+
+function Read-DurableDesiredExecutorState {
+  if (-not (Test-Path -LiteralPath $desiredExecutorStatePath)) { return "STOPPED" }
+  try {
+    $state = Get-Content -LiteralPath $desiredExecutorStatePath -Raw | ConvertFrom-Json
+    if ([int]$state.version -ne 1) { throw "desired executor state version must be 1." }
+    $desired = ([string]$state.desiredExecutorState).Trim().ToUpperInvariant()
+    if ($desired -notin @("RUNNING", "STOPPED")) { throw "desired executor state must be RUNNING or STOPPED." }
+    return $desired
+  } catch {
+    Append-BrokerLog "Durable desired executor state invalid; fail closed to STOPPED. $($_.Exception.Message)"
+    return "STOPPED"
+  }
+}
+
+function Write-DurableDesiredExecutorState([string]$State) {
+  $normalized = ([string]$State).Trim().ToUpperInvariant()
+  if ($normalized -notin @("RUNNING", "STOPPED")) {
+    throw "Durable desired executor state must be RUNNING or STOPPED."
+  }
+  try {
+    Write-Phase7CJsonAtomic -Path $desiredExecutorStatePath -Value ([pscustomobject]@{
+      version = 1
+      desiredExecutorState = $normalized
+      updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    }) -Depth 4
+  } catch {
+    # Never leave a stale RUNNING intent after a failed persistence attempt.
+    Remove-Item -LiteralPath $desiredExecutorStatePath -Force -ErrorAction SilentlyContinue
+    throw
+  }
 }
 
 function Write-BrokerHeartbeat {
@@ -559,6 +592,7 @@ function Process-BrokerRequest {
         Set-BrokerState "BLOCKED" ([string]$stopResult.reasonCode) ([string]$stopResult.message)
         return
       }
+      Write-DurableDesiredExecutorState "STOPPED"
       $script:desiredExecutorState = "STOPPED"
       $status = if ($stopResult.reasonCode -eq "NOOP_ALREADY_STOPPED") { "NOOP" } else { "SUCCEEDED" }
       Complete-Request $requestId $action $status ([string]$stopResult.reasonCode) ([string]$stopResult.message) $startedAt
@@ -567,6 +601,7 @@ function Process-BrokerRequest {
     }
 
     if ($action -eq "START" -and (Test-SupervisorAlive)) {
+      Write-DurableDesiredExecutorState "RUNNING"
       $script:desiredExecutorState = "RUNNING"
       Complete-Request $requestId $action "NOOP" "NOOP_ALREADY_RUNNING" "Executor supervisor is already running." $startedAt
       Set-BrokerState "RUNNING" "NOOP_ALREADY_RUNNING"
@@ -630,6 +665,7 @@ function Process-BrokerRequest {
       return
     }
 
+    Write-DurableDesiredExecutorState "RUNNING"
     $script:desiredExecutorState = "RUNNING"
     $reasonCode = if ($action -eq "RESTART") { "OK_RESTARTED" } else { "OK_STARTED" }
     Complete-Request $requestId $action "SUCCEEDED" $reasonCode ([string]$startResult.message) $startedAt
@@ -685,9 +721,10 @@ function Recover-SupervisorIfNeeded {
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER=LIFECYCLE_BROKER"
 Write-Host "PHASE7C_LIFECYCLE_BROKER_ROOT=$brokerRoot"
 Write-Host "PHASE7C_LIFECYCLE_BROKER_PID=$PID"
-Write-Host "PHASE7C_LIFECYCLE_BROKER_BOOT=IDLE|DESIRED=STOPPED|MODE=PAUSE"
-Append-BrokerLog "Lifecycle broker starting. PID=$PID desiredExecutorState=STOPPED"
 [void](Ensure-Phase7CBotPause "system-lifecycle-broker-boot")
+$script:desiredExecutorState = Read-DurableDesiredExecutorState
+Write-Host "PHASE7C_LIFECYCLE_BROKER_BOOT=IDLE|DESIRED=$($script:desiredExecutorState)|MODE=PAUSE"
+Append-BrokerLog "Lifecycle broker starting. PID=$PID desiredExecutorState=$($script:desiredExecutorState)"
 $script:brokerState = "IDLE"
 Write-BrokerStatus
 Write-BrokerHeartbeat
