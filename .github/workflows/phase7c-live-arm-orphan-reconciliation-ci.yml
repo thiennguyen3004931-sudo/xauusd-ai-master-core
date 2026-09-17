@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   source-contract-windows:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
         run: .\scripts\test-phase7c-live-arm-orphan-reconciliation-source.ps1
 
   api-build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +44,7 @@ jobs:
         run: node scripts/test-phase7b-api-node-production-runtime.mjs
 
   existing-live-arm-regression:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
