@@ -75,8 +75,14 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $repoLinux = (wsl.exe -d Ubuntu -- wslpath -a $PWD.Path).Trim()
-          if (-not $repoLinux) { throw 'Unable to resolve repository path in WSL' }
+          function Convert-ToWslPath([string]$WindowsPath) {
+            $full = [System.IO.Path]::GetFullPath($WindowsPath)
+            if ($full -notmatch '^([A-Za-z]):\\(.*)$') { throw "Unsupported Windows path for WSL conversion: $full" }
+            $drive = $Matches[1].ToLowerInvariant()
+            $rest = $Matches[2] -replace '\\', '/'
+            return "/mnt/$drive/$rest"
+          }
+          $repoLinux = Convert-ToWslPath $PWD.Path
           Write-Host "WSL_REPO=$repoLinux"
           $script = @'
           set -euo pipefail
@@ -102,7 +108,7 @@ jobs:
           $script = $script.Replace('__REPO_LINUX__', $repoLinux.Replace("'", "'\''"))
           $tempScript = Join-Path $env:RUNNER_TEMP 'wsl-node-pnpm-probe.sh'
           [System.IO.File]::WriteAllText($tempScript, $script, [System.Text.UTF8Encoding]::new($false))
-          $tempLinux = (wsl.exe -d Ubuntu -- wslpath -a $tempScript).Trim()
+          $tempLinux = Convert-ToWslPath $tempScript
           wsl.exe -d Ubuntu -- bash $tempLinux
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Existing native capabilities
