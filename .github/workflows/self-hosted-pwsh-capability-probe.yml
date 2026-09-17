@@ -1,0 +1,49 @@
+name: Self-Hosted PowerShell 7 Capability Probe
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  pwsh-capability:
+    name: self-hosted-pwsh-capability
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Runner identity
+        shell: powershell
+        run: |
+          Write-Host "RUNNER_OS=$env:RUNNER_OS"
+          Write-Host "RUNNER_ARCH=$env:RUNNER_ARCH"
+          Write-Host "RUNNER_NAME=$env:RUNNER_NAME"
+          Write-Host "POWERSHELL_51_VERSION=$($PSVersionTable.PSVersion.ToString())"
+
+      - name: PowerShell 7 capability
+        shell: powershell
+        run: |
+          $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+          if (-not $pwsh) {
+            Write-Host "PWSH_FOUND=FALSE"
+            Write-Host "PATH=$env:PATH"
+            $common = 'C:\Program Files\PowerShell\7\pwsh.exe'
+            Write-Host "PWSH_COMMON_PATH_EXISTS=$([bool](Test-Path $common))"
+            $winget = Get-Command winget -ErrorAction SilentlyContinue
+            $choco = Get-Command choco -ErrorAction SilentlyContinue
+            Write-Host "WINGET_FOUND=$([bool]$winget)"
+            Write-Host "CHOCO_FOUND=$([bool]$choco)"
+            Write-Error "PWSH_CAPABILITY_MISSING"
+            exit 1
+          }
+
+          Write-Host "PWSH_FOUND=TRUE"
+          Write-Host "PWSH_PATH=$($pwsh.Source)"
+          $version = & $pwsh.Source -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "PWSH_EXECUTION_FAILED"
+            exit $LASTEXITCODE
+          }
+          Write-Host "PWSH_VERSION=$version"
