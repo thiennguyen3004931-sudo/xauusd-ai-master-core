@@ -1,0 +1,125 @@
+name: PR9 Broader Regression Diagnostic
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/pr9-broader-regression-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  broader-regression-diagnostic:
+    name: pr9-broader-regression-diagnostic
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Capture diagnostic pre-state
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/diagnostics | Out-Null
+          $meta = "artifacts/diagnostics/pre-state.txt"
+          "HEAD=$(git rev-parse HEAD)" | Out-File -FilePath $meta -Encoding utf8
+          "RUNNER_NAME=$env:RUNNER_NAME" | Out-File -FilePath $meta -Encoding utf8 -Append
+          "RUNNER_OS=$env:RUNNER_OS" | Out-File -FilePath $meta -Encoding utf8 -Append
+          "RUNNER_ARCH=$env:RUNNER_ARCH" | Out-File -FilePath $meta -Encoding utf8 -Append
+          "NODE=$(node --version)" | Out-File -FilePath $meta -Encoding utf8 -Append
+          "PNPM=$(pnpm --version)" | Out-File -FilePath $meta -Encoding utf8 -Append
+          "TURBO=$(pnpm exec turbo --version)" | Out-File -FilePath $meta -Encoding utf8 -Append
+          "GIT_STATUS_BEGIN" | Out-File -FilePath $meta -Encoding utf8 -Append
+          git status --porcelain --untracked-files=all | Out-File -FilePath $meta -Encoding utf8 -Append
+          "GIT_STATUS_END" | Out-File -FilePath $meta -Encoding utf8 -Append
+          "TURBO_DIR_EXISTS=$(Test-Path '.turbo')" | Out-File -FilePath $meta -Encoding utf8 -Append
+          if (Test-Path '.turbo') {
+            $files = @(Get-ChildItem '.turbo' -Recurse -File -ErrorAction SilentlyContinue)
+            "TURBO_FILE_COUNT=$($files.Count)" | Out-File -FilePath $meta -Encoding utf8 -Append
+            $files |
+              Sort-Object LastWriteTimeUtc -Descending |
+              Select-Object -First 100 FullName,Length,LastWriteTimeUtc |
+              Format-Table -AutoSize |
+              Out-String |
+              Out-File -FilePath $meta -Encoding utf8 -Append
+          }
+
+      - name: Broader private regression diagnostic
+        id: broader_diagnostic
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $log = "artifacts/diagnostics/pnpm-test.log"
+          & pnpm test *>&1 | Tee-Object -FilePath $log
+          $exitCode = $LASTEXITCODE
+          "exit_code=$exitCode" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "BROAD_PRIVATE_REGRESSION_EXIT_CODE=$exitCode"
+          exit $exitCode
+
+      - name: Capture diagnostic post-state
+        if: always()
+        shell: powershell
+        run: |
+          $meta = "artifacts/diagnostics/post-state.txt"
+          "BROAD_PRIVATE_REGRESSION_OUTCOME=${{ steps.broader_diagnostic.outcome }}" | Out-File -FilePath $meta -Encoding utf8
+          "BROAD_PRIVATE_REGRESSION_CONCLUSION=${{ steps.broader_diagnostic.conclusion }}" | Out-File -FilePath $meta -Encoding utf8 -Append
+          "BROAD_PRIVATE_REGRESSION_EXIT_CODE=${{ steps.broader_diagnostic.outputs.exit_code }}" | Out-File -FilePath $meta -Encoding utf8 -Append
+          "GIT_STATUS_BEGIN" | Out-File -FilePath $meta -Encoding utf8 -Append
+          git status --porcelain --untracked-files=all | Out-File -FilePath $meta -Encoding utf8 -Append
+          "GIT_STATUS_END" | Out-File -FilePath $meta -Encoding utf8 -Append
+          "TURBO_DIR_EXISTS=$(Test-Path '.turbo')" | Out-File -FilePath $meta -Encoding utf8 -Append
+          if (Test-Path '.turbo') {
+            $files = @(Get-ChildItem '.turbo' -Recurse -File -ErrorAction SilentlyContinue)
+            "TURBO_FILE_COUNT=$($files.Count)" | Out-File -FilePath $meta -Encoding utf8 -Append
+            $files |
+              Sort-Object LastWriteTimeUtc -Descending |
+              Select-Object -First 100 FullName,Length,LastWriteTimeUtc |
+              Format-Table -AutoSize |
+              Out-String |
+              Out-File -FilePath $meta -Encoding utf8 -Append
+          }
+
+      - name: Upload broader regression diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr9-broader-regression-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Diagnostic verdict
+        if: always()
+        shell: powershell
+        run: |
+          $outcome = "${{ steps.broader_diagnostic.outcome }}"
+          $exitCode = "${{ steps.broader_diagnostic.outputs.exit_code }}"
+          Write-Host "BROAD_PRIVATE_REGRESSION_OUTCOME=$outcome"
+          Write-Host "BROAD_PRIVATE_REGRESSION_EXIT_CODE=$exitCode"
+          if ($outcome -ne "success") {
+            Write-Error "PR9_DIAGNOSTIC_BROADER_REGRESSION_FAILED"
+            exit 1
+          }
+          Write-Host "PR9_DIAGNOSTIC_BROADER_REGRESSION=PASS"
