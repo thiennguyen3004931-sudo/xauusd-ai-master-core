@@ -4,7 +4,7 @@
 
 **Goal:** Bootstrap and prove PowerShell 7 on the canonical Windows self-hosted runner before migrating any legacy hosted Phase7C workflow.
 
-**Architecture:** Use the existing Draft PR #10 diagnostic workflow on `[self-hosted, Windows, X64, xauusd-core-ci]`. The workflow starts under built-in Windows PowerShell 5.1, installs the official `Microsoft.PowerShell` package with the already-proven `winget` capability only when `pwsh` is absent, adds the installed directory to `GITHUB_PATH`, then proves both direct `pwsh.exe` execution and a real GitHub Actions `shell: pwsh` step. No repository checkout, trading/runtime source execution, or production mutation is allowed.
+**Architecture:** Use the existing Draft PR #10 diagnostic workflow on `[self-hosted, Windows, X64, xauusd-core-ci]`. The workflow starts under built-in Windows PowerShell 5.1, installs the official `Microsoft.PowerShell` package with the already-proven `winget` capability only when `pwsh` is absent, rediscovers the actual installed executable, adds its directory to `GITHUB_PATH`, then proves both direct `pwsh` execution and a real GitHub Actions `shell: pwsh` step. No repository checkout, trading/runtime source execution, or production mutation is allowed.
 
 **Tech Stack:** GitHub Actions, Windows self-hosted runner, Windows PowerShell 5.1, winget, PowerShell 7.
 
@@ -72,7 +72,7 @@ The runner executed real steps and failed exactly at `PowerShell 7 capability`. 
 
 **Interfaces:**
 - Consumes: built-in Windows PowerShell 5.1 plus `winget`.
-- Produces: installed PowerShell 7 executable at `C:\Program Files\PowerShell\7\pwsh.exe`, later-step PATH exposure through `GITHUB_PATH`, and fail-closed bootstrap verdicts.
+- Produces: a discovered PowerShell 7 executable, later-step PATH exposure through `GITHUB_PATH`, and fail-closed bootstrap verdicts.
 
 - [ ] **Step 1: Guard the job to the diagnostic PR branch**
 
@@ -92,7 +92,7 @@ Under `shell: powershell`, implement:
 $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 $common = 'C:\Program Files\PowerShell\7\pwsh.exe'
 
-if (-not $pwsh -and -not (Test-Path -LiteralPath $common -PathType Leaf)) {
+if (-not $pwsh) {
   $winget = Get-Command winget -ErrorAction SilentlyContinue
   if (-not $winget) {
     Write-Error 'PWSH_BOOTSTRAP_BLOCKED_WINGET_MISSING'
@@ -104,15 +104,32 @@ if (-not $pwsh -and -not (Test-Path -LiteralPath $common -PathType Leaf)) {
     Write-Error "PWSH_BOOTSTRAP_INSTALL_FAILED exit=$LASTEXITCODE"
     exit $LASTEXITCODE
   }
+
+  Start-Sleep -Seconds 2
+  $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 }
 
-if (-not (Test-Path -LiteralPath $common -PathType Leaf)) {
+if (-not $pwsh -and (Test-Path -LiteralPath $common -PathType Leaf)) {
+  $pwsh = Get-Item -LiteralPath $common
+}
+
+if (-not $pwsh) {
   Write-Error 'PWSH_BOOTSTRAP_EXECUTABLE_MISSING'
   exit 1
 }
 
-'C:\Program Files\PowerShell\7' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-$version = & $common -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+$pwshPath = [string]$pwsh.Source
+if ([string]::IsNullOrWhiteSpace($pwshPath)) {
+  $pwshPath = [string]$pwsh.FullName
+}
+if ([string]::IsNullOrWhiteSpace($pwshPath) -or -not (Test-Path -LiteralPath $pwshPath -PathType Leaf)) {
+  Write-Error 'PWSH_BOOTSTRAP_EXECUTABLE_INVALID'
+  exit 1
+}
+
+$pwshDir = Split-Path -Parent $pwshPath
+$pwshDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+$version = & $pwshPath -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
 if ($LASTEXITCODE -ne 0) {
   Write-Error 'PWSH_DIRECT_EXECUTION_FAILED'
   exit $LASTEXITCODE
@@ -122,8 +139,8 @@ if ($major -lt 7) {
   Write-Error "PWSH_VERSION_UNSUPPORTED version=$version"
   exit 1
 }
-Write-Host "PWSH_FOUND=TRUE"
-Write-Host "PWSH_PATH=$common"
+Write-Host 'PWSH_FOUND=TRUE'
+Write-Host "PWSH_PATH=$pwshPath"
 Write-Host "PWSH_VERSION=$version"
 Write-Host 'PWSH_DIRECT_EXECUTION=PASS'
 ```
@@ -179,7 +196,7 @@ RUNNER_ARCH=X64
 RUNNER_NAME=XAUUSD-CORE-CI-WIN
 POWERSHELL_51_VERSION=5.1.x
 PWSH_FOUND=TRUE
-PWSH_PATH=C:\Program Files\PowerShell\7\pwsh.exe
+PWSH_PATH=<actual executable path>
 PWSH_VERSION=7.x-or-newer
 PWSH_DIRECT_EXECUTION=PASS
 PWSH_ACTIONS_SHELL=PASS
