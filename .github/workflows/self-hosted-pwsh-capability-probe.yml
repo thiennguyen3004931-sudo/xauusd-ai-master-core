@@ -5,14 +5,19 @@ on:
     branches:
       - main
 
+concurrency:
+  group: self-hosted-pwsh-capability-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   pwsh-capability:
     name: self-hosted-pwsh-capability
+    if: github.event.pull_request.head.ref == 'diag/self-hosted-pwsh-capability'
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Runner identity
         shell: powershell
@@ -22,28 +27,74 @@ jobs:
           Write-Host "RUNNER_NAME=$env:RUNNER_NAME"
           Write-Host "POWERSHELL_51_VERSION=$($PSVersionTable.PSVersion.ToString())"
 
-      - name: PowerShell 7 capability
+      - name: Bootstrap and verify PowerShell 7
         shell: powershell
         run: |
           $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+          $common = 'C:\Program Files\PowerShell\7\pwsh.exe'
+
           if (-not $pwsh) {
-            Write-Host "PWSH_FOUND=FALSE"
-            Write-Host "PATH=$env:PATH"
-            $common = 'C:\Program Files\PowerShell\7\pwsh.exe'
-            Write-Host "PWSH_COMMON_PATH_EXISTS=$([bool](Test-Path $common))"
+            Write-Host "PWSH_FOUND_BEFORE=FALSE"
             $winget = Get-Command winget -ErrorAction SilentlyContinue
-            $choco = Get-Command choco -ErrorAction SilentlyContinue
-            Write-Host "WINGET_FOUND=$([bool]$winget)"
-            Write-Host "CHOCO_FOUND=$([bool]$choco)"
-            Write-Error "PWSH_CAPABILITY_MISSING"
+            if (-not $winget) {
+              Write-Error 'PWSH_BOOTSTRAP_BLOCKED_WINGET_MISSING'
+              exit 1
+            }
+
+            Write-Host "WINGET_FOUND=TRUE"
+            & $winget.Source install --id Microsoft.PowerShell --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "PWSH_BOOTSTRAP_INSTALL_FAILED exit=$LASTEXITCODE"
+              exit $LASTEXITCODE
+            }
+
+            Start-Sleep -Seconds 2
+            $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+          } else {
+            Write-Host "PWSH_FOUND_BEFORE=TRUE"
+          }
+
+          if (-not $pwsh -and (Test-Path -LiteralPath $common -PathType Leaf)) {
+            $pwsh = Get-Item -LiteralPath $common
+          }
+
+          if (-not $pwsh) {
+            Write-Error 'PWSH_BOOTSTRAP_EXECUTABLE_MISSING'
             exit 1
           }
 
-          Write-Host "PWSH_FOUND=TRUE"
-          Write-Host "PWSH_PATH=$($pwsh.Source)"
-          $version = & $pwsh.Source -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          $pwshPath = [string]$pwsh.Source
+          if ([string]::IsNullOrWhiteSpace($pwshPath)) {
+            $pwshPath = [string]$pwsh.FullName
+          }
+          if ([string]::IsNullOrWhiteSpace($pwshPath) -or -not (Test-Path -LiteralPath $pwshPath -PathType Leaf)) {
+            Write-Error 'PWSH_BOOTSTRAP_EXECUTABLE_INVALID'
+            exit 1
+          }
+
+          $pwshDir = Split-Path -Parent $pwshPath
+          $pwshDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          $version = & $pwshPath -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "PWSH_EXECUTION_FAILED"
+            Write-Error 'PWSH_DIRECT_EXECUTION_FAILED'
             exit $LASTEXITCODE
           }
+
+          $major = [int]($version -split '\.')[0]
+          if ($major -lt 7) {
+            Write-Error "PWSH_VERSION_UNSUPPORTED version=$version"
+            exit 1
+          }
+
+          Write-Host 'PWSH_FOUND=TRUE'
+          Write-Host "PWSH_PATH=$pwshPath"
           Write-Host "PWSH_VERSION=$version"
+          Write-Host 'PWSH_DIRECT_EXECUTION=PASS'
+
+      - name: PowerShell 7 Actions shell acceptance
+        shell: pwsh
+        run: |
+          Write-Host "PWSH_ACTIONS_SHELL_VERSION=$($PSVersionTable.PSVersion.ToString())"
+          if ($PSVersionTable.PSVersion.Major -lt 7) { exit 1 }
+          Write-Host 'PWSH_ACTIONS_SHELL=PASS'
