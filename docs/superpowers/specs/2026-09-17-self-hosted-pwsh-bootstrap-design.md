@@ -26,7 +26,8 @@ In scope:
 
 - the existing diagnostic branch `diag/self-hosted-pwsh-capability` and Draft PR #10;
 - installation of the official `Microsoft.PowerShell` package through the already-proven `winget` capability;
-- adding the installed PowerShell 7 directory to later GitHub Actions steps through `GITHUB_PATH`;
+- discovering the actual installed `pwsh` executable instead of assuming one package layout;
+- adding the installed PowerShell 7 executable directory to later GitHub Actions steps through `GITHUB_PATH`;
 - direct executable verification of PowerShell 7;
 - a real GitHub Actions `shell: pwsh` step proving runner shell resolution;
 - exact run/job evidence capture;
@@ -54,13 +55,16 @@ self-hosted Windows runner
   -> identify runner + Windows PowerShell 5.1
   -> locate existing pwsh
   -> if absent: require winget
-  -> winget install --id Microsoft.PowerShell --exact
-  -> require C:\Program Files\PowerShell\7\pwsh.exe
-  -> append C:\Program Files\PowerShell\7 to GITHUB_PATH
-  -> invoke pwsh.exe directly and require major version >= 7
+  -> winget install --id Microsoft.PowerShell --exact --source winget
+  -> rediscover pwsh with Get-Command
+  -> if command discovery still fails, probe the classic MSI path as a compatibility fallback
+  -> append the discovered executable directory to GITHUB_PATH
+  -> invoke the discovered executable directly and require major version >= 7
   -> next workflow step uses shell: pwsh
   -> require PWSH_ACTIONS_SHELL=PASS
 ```
+
+The bootstrap intentionally does not require one fixed installation path. Microsoft currently documents WinGet as the recommended Windows client installation method and notes that recent packages may use MSIX by default; therefore acceptance is based on the actual executable discovered after installation plus successful GitHub Actions shell resolution.
 
 The workflow is guarded to the diagnostic PR branch so future unrelated pull requests do not mutate the runner by attempting package installation.
 
@@ -70,12 +74,12 @@ The bootstrap fails immediately if any of these conditions occurs:
 
 - `winget` is absent when `pwsh` is absent;
 - the package install command returns a non-zero exit code;
-- the canonical PowerShell 7 executable path does not exist after installation;
-- direct execution of the installed executable fails;
+- no executable `pwsh` can be discovered after installation;
+- direct execution of the discovered executable fails;
 - the installed major version is below 7;
 - a subsequent GitHub Actions `shell: pwsh` step cannot start or reports a version below 7.
 
-No fallback to Windows PowerShell 5.1 is permitted for PowerShell 7 acceptance.
+No fallback to Windows PowerShell 5.1 is permitted for PowerShell 7 acceptance. Probing the classic MSI path is only an alternate way to locate the same PowerShell 7 executable after installation.
 
 ## Workflow safety boundary
 
@@ -118,6 +122,7 @@ POWERSHELL_51_VERSION=5.1.x
 PWSH_FOUND=TRUE
 PWSH_PATH=<actual executable path>
 PWSH_VERSION=7.x-or-newer
+PWSH_DIRECT_EXECUTION=PASS
 PWSH_ACTIONS_SHELL=PASS
 JOB_CONCLUSION=SUCCESS
 ```
