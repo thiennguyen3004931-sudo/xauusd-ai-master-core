@@ -73,6 +73,9 @@ jobs:
       - name: Static private CI contract
         run: node --test scripts/security/private-master-core-ci-contract.test.mjs
 
+      - name: Legacy workflow self-hosted migration contract
+        run: node --test scripts/security/private-legacy-workflow-self-hosted-migration.test.mjs
+
       - name: Tracked-secret boundary tests
         run: node --test scripts/security/check-private-secrets.test.mjs
 
