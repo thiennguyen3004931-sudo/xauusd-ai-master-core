@@ -14,7 +14,7 @@ permissions:
 jobs:
   repository-boundary:
     name: public-private-repository-boundary
-    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout full history
@@ -35,22 +35,22 @@ jobs:
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: node scripts/security/check-public-change-freeze.mjs "$env:BASE_SHA" "$env:HEAD_SHA"
+        run: node scripts/security/check-public-change-freeze.mjs "$BASE_SHA" "$HEAD_SHA"
       - name: Scan full Git history with Gitleaks (redacted)
-        shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path artifacts/security | Out-Null
-          $repoPath = (Resolve-Path '.').Path
-          docker run --rm -v "${repoPath}:/repo" zricethezav/gitleaks:v8.24.2 detect `
-            --source=/repo `
-            --redact `
-            --log-opts="--all" `
-            --report-format=json `
-            --report-path=/repo/artifacts/security/gitleaks.json `
+          mkdir -p artifacts/security
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.24.2 detect \
+            --source=/repo \
+            --redact \
+            --log-opts="--all" \
+            --report-format=json \
+            --report-path=/repo/artifacts/security/gitleaks.json \
             --exit-code=0
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Validate credential remediation coverage
-        run: node scripts/security/validate-credential-remediation.mjs artifacts/security/gitleaks.json security/credential-remediation.json
+        run: |
+          node scripts/security/validate-credential-remediation.mjs \
+            artifacts/security/gitleaks.json \
+            security/credential-remediation.json
       - name: Upload redacted secret scan report
         if: always()
         uses: actions/upload-artifact@v4
