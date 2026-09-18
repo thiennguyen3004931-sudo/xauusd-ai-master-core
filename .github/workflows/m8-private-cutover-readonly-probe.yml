@@ -1,4 +1,4 @@
-name: M8 Private Cutover Read-Only Probe
+name: M8 Bridge Read-Only Evidence
 
 on:
   push:
@@ -11,272 +11,21 @@ permissions:
   contents: read
 
 jobs:
-  m8-readonly-preflight:
-    name: m8-readonly-preflight
+  bridge-readonly-evidence:
+    name: bridge-readonly-evidence
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Prepare separate candidate checkout
+      - name: Read bridge task and runner state
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $candidate = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master-core-m8-candidate"
           $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
-          $expectedCommit = "b399d2f3ccd0bfbeb35699a890f681ae28afbbac"
-          $expectedTree = "2ca865b168a6056e408b44d327ae300c4dc71239"
-
-          Write-Host "M8_PROBE_MODE=READ_ONLY_PRODUCTION"
-          Write-Host "CANDIDATE_SOURCE_ROOT=$candidate"
-          Write-Host "RUNTIME_PROJECT_ROOT=$production"
-          Write-Host "EXPECTED_COMMIT=$expectedCommit"
-          Write-Host "EXPECTED_TREE=$expectedTree"
-          Write-Host "PRODUCTION_GIT_MUTATION=NONE"
-          Write-Host "PROCESS_MUTATION=NONE"
-          Write-Host "MODE_MUTATION=NONE"
-          Write-Host "ARM_MUTATION=NONE"
-          Write-Host "ORDER_MUTATION=NONE"
-          Write-Host "POSITION_MUTATION=NONE"
-          Write-Host "LIVE_TEST_ORDER=NONE"
-
-          if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
-            throw "M8 candidate checkout missing: $candidate"
-          }
-          if (-not (Test-Path -LiteralPath $production -PathType Container)) {
-            throw "Production RuntimeProjectRoot missing: $production"
-          }
-
-          $origin = (git -C $candidate remote get-url origin).Trim()
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Write-Host "CANDIDATE_ORIGIN=$origin"
-          if ($origin -notmatch "thiennguyen3004931-sudo/xauusd-ai-master-core") {
-            throw "Candidate origin is not canonical private repo."
-          }
-
-          # Candidate checkout only. Never mutate the production worktree here.
-          git -C $candidate fetch --no-tags origin main
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C $candidate checkout main
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C $candidate reset --hard $expectedCommit
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          $head = (git -C $candidate rev-parse HEAD).Trim()
-          $tree = (git -C $candidate rev-parse "HEAD^{tree}").Trim()
-          $branch = (git -C $candidate branch --show-current).Trim()
-          $status = git -C $candidate status --porcelain
-
-          $candidateClean = -not [bool]$status
-          Write-Host "CANDIDATE_HEAD=$head"
-          Write-Host "CANDIDATE_TREE=$tree"
-          Write-Host "CANDIDATE_BRANCH=$branch"
-          Write-Host "CANDIDATE_WORKTREE_CLEAN=$candidateClean"
-
-          if ($head -ne $expectedCommit) { throw "Candidate HEAD mismatch." }
-          if ($tree -ne $expectedTree) { throw "Candidate tree mismatch." }
-          if ($branch -ne "main") { throw "Candidate must be on main." }
-          if (-not $candidateClean) {
-            throw "Candidate worktree is not clean."
-          }
-
-      - name: Run canonical M8 read-only preflight
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          $candidate = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master-core-m8-candidate"
-          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
-          $expectedCommit = "b399d2f3ccd0bfbeb35699a890f681ae28afbbac"
-          $expectedTree = "2ca865b168a6056e408b44d327ae300c4dc71239"
-          $preflight = Join-Path $candidate "scripts\security\preflight-private-cutover.ps1"
-
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $preflight `
-            -ExpectedCommit $expectedCommit `
-            -ExpectedTree $expectedTree `
-            -RuntimeProjectRoot $production
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Production read-only state diagnostics
-        if: always()
-        shell: powershell
-        continue-on-error: true
-        run: |
-          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
-          $currentRuntimeCommit = "62e93ce5545195dd6bf78570c9b5fc0f4b253399"
-          $probe = Join-Path $production "scripts\preflight-phase7c-production-readonly-local.ps1"
-
-          Write-Host "M8_DIAGNOSTIC=PRODUCTION_READ_ONLY_STATE"
-          if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) {
-            throw "Canonical production read-only diagnostic is missing: $probe"
-          }
-
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $probe `
-            -ProjectRoot $production `
-            -ExpectedMainCommit $currentRuntimeCommit `
-            -TimeoutSeconds 12
-
-      - name: Resilient runtime safety snapshot
-        if: always()
-        shell: powershell
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Stop"
-          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
-          $configPath = Join-Path $production ".runtime\phase7c-executor-task-config.json"
-          $accountLib = Join-Path $production "scripts\lib\phase7c-account-mode.ps1"
-
-          Write-Host "M8_DIAGNOSTIC=RESILIENT_RUNTIME_SAFETY_SNAPSHOT"
-          Write-Host "READ_ONLY=TRUE"
-          Write-Host "HTTP_METHODS=GET_ONLY"
-          Write-Host "PROCESS_MUTATION=NONE"
-          Write-Host "MODE_MUTATION=NONE"
-          Write-Host "ARM_MUTATION=NONE"
-          Write-Host "ORDER_MUTATION=NONE"
-          Write-Host "POSITION_MUTATION=NONE"
-
-          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-          $control = ([string]$config.controlApiUrl).TrimEnd("/")
-
-          $mode = Invoke-RestMethod -Uri "$control/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
-          $arm = Invoke-RestMethod -Uri "$control/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
-          $lifecycle = Invoke-RestMethod -Uri "$control/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 8
-          $source = Invoke-RestMethod -Uri "$control/api/v1/phase7c/runtime-source-attestation" -Method Get -TimeoutSec 8
-
-          Write-Host "BOT_MODE=$($mode.state.mode)"
-          Write-Host "ARM=$($arm.liveArmStatus)"
-          Write-Host "LIVE_EXECUTION_ARMED=$($arm.liveExecutionArmed)"
-          Write-Host "LIFECYCLE_RUNNING=$($lifecycle.running)"
-          Write-Host "LIFECYCLE_READY=$($lifecycle.ready)"
-          Write-Host "ACCOUNT_MODE=$($lifecycle.accountMode.accountMode)"
-          Write-Host "CONTROL_API_MT5_REACHABLE=$($lifecycle.bridge.reachable)"
-          Write-Host "RUNTIME_SOURCE_OVERALL=$($source.overall)"
-          Write-Host "RUNTIME_SOURCE_COMMIT=$($source.deployment.sourceCommit)"
-          Write-Host "RUNTIME_SOURCE_TREE=$($source.deployment.sourceTree)"
-
-          . $accountLib
-          function Resolve-ProdPath([string]$p) {
-            if ([System.IO.Path]::IsPathRooted($p)) { return [System.IO.Path]::GetFullPath($p) }
-            return [System.IO.Path]::GetFullPath((Join-Path $production $p))
-          }
-
-          $envFile = Resolve-ProdPath ([string]$config.envFile)
-          $accountMode = ConvertTo-Phase7CAccountMode ([string]$config.accountMode)
-          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode $accountMode
-          $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
-          $headers = @{ "x-mt5-api-key" = $envInfo.apiKey }
-
-          try {
-            $health = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers $headers -Method Get -TimeoutSec 8
-            $healthy = [bool]$health.connected -and [string]$health.status -eq "ok"
-            Write-Host "MT5_BRIDGE_HEALTH=$(if ($healthy) { 'PASS' } else { 'FAIL' })"
-            Write-Host "MT5_BRIDGE_CONNECTED=$($health.connected)"
-            Write-Host "MT5_BRIDGE_STATUS=$($health.status)"
-
-            $positionsResponse = Invoke-WebRequest -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 8
-            $ordersResponse = Invoke-WebRequest -Uri "$bridgeBase/v1/orders?symbol=XAUUSD" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 8
-            $positionsRaw = ([string]$positionsResponse.Content).Trim()
-            $ordersRaw = ([string]$ordersResponse.Content).Trim()
-            $positions = if ([string]::IsNullOrWhiteSpace($positionsRaw) -or $positionsRaw -eq "[]") { @() } else { @($positionsRaw | ConvertFrom-Json) }
-            $orders = if ([string]::IsNullOrWhiteSpace($ordersRaw) -or $ordersRaw -eq "[]") { @() } else { @($ordersRaw | ConvertFrom-Json) }
-            Write-Host "XAUUSD_POSITIONS=$($positions.Count)"
-            Write-Host "XAUUSD_PENDING_ORDERS=$($orders.Count)"
-          } catch {
-            Write-Host "MT5_BRIDGE_HEALTH=FAIL"
-            Write-Host "MT5_BRIDGE_ERROR_TYPE=$($_.Exception.GetType().Name)"
-            Write-Host "XAUUSD_POSITIONS=UNAVAILABLE"
-            Write-Host "XAUUSD_PENDING_ORDERS=UNAVAILABLE"
-          }
-
-      - name: MT5 bridge OS-level read-only diagnostics
-        if: always()
-        shell: powershell
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Stop"
-          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
-          $config = Get-Content -LiteralPath (Join-Path $production ".runtime\phase7c-executor-task-config.json") -Raw | ConvertFrom-Json
-          $accountLib = Join-Path $production "scripts\lib\phase7c-account-mode.ps1"
-          . $accountLib
-
-          function Resolve-ProdPath([string]$p) {
-            if ([System.IO.Path]::IsPathRooted($p)) { return [System.IO.Path]::GetFullPath($p) }
-            return [System.IO.Path]::GetFullPath((Join-Path $production $p))
-          }
-
-          $envFile = Resolve-ProdPath ([string]$config.envFile)
-          $accountMode = ConvertTo-Phase7CAccountMode ([string]$config.accountMode)
-          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode $accountMode
-
-          $hostName = [string]$envInfo.bridgeHost
-          $port = [int]$envInfo.bridgePort
-          Write-Host "M8_DIAGNOSTIC=MT5_BRIDGE_OS_READ_ONLY"
-          Write-Host "BRIDGE_HOST=$hostName"
-          Write-Host "BRIDGE_PORT=$port"
-          Write-Host "PROCESS_MUTATION=NONE"
-          Write-Host "TASK_MUTATION=NONE"
-          Write-Host "BRIDGE_RESTART=NONE"
-
-          try {
-            $tnc = Test-NetConnection -ComputerName $hostName -Port $port -WarningAction SilentlyContinue
-            Write-Host "BRIDGE_TCP_TEST=$($tnc.TcpTestSucceeded)"
-          } catch {
-            Write-Host "BRIDGE_TCP_TEST=ERROR"
-            Write-Host "BRIDGE_TCP_ERROR_TYPE=$($_.Exception.GetType().Name)"
-          }
-
-          try {
-            $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop)
-            Write-Host "BRIDGE_LISTENER_COUNT=$($listeners.Count)"
-            foreach ($listener in $listeners) {
-              Write-Host "BRIDGE_LISTENER_PID=$($listener.OwningProcess)"
-              try {
-                $p = Get-Process -Id $listener.OwningProcess -ErrorAction Stop
-                Write-Host "BRIDGE_LISTENER_PROCESS_NAME=$($p.ProcessName)"
-                Write-Host "BRIDGE_LISTENER_PROCESS_START_TIME=$($p.StartTime.ToString('o'))"
-              } catch {
-                Write-Host "BRIDGE_LISTENER_PROCESS_LOOKUP=FAIL"
-              }
-            }
-          } catch {
-            Write-Host "BRIDGE_LISTENER_COUNT=0"
-            Write-Host "BRIDGE_LISTENER_ERROR_TYPE=$($_.Exception.GetType().Name)"
-          }
-
-          try {
-            $services = @(Get-Service | Where-Object { $_.Name -match "MT5|Bridge|XAUUSD" -or $_.DisplayName -match "MT5|Bridge|XAUUSD" })
-            Write-Host "BRIDGE_RELATED_SERVICE_COUNT=$($services.Count)"
-            foreach ($svc in $services) {
-              Write-Host "BRIDGE_RELATED_SERVICE=$($svc.Name)|STATUS=$($svc.Status)"
-            }
-          } catch {
-            Write-Host "BRIDGE_RELATED_SERVICE_QUERY=FAIL"
-          }
-
-          try {
-            Import-Module ScheduledTasks -ErrorAction Stop
-            $tasks = @(Get-ScheduledTask | Where-Object { $_.TaskName -match "MT5|Bridge|XAUUSD" })
-            Write-Host "BRIDGE_RELATED_TASK_COUNT=$($tasks.Count)"
-            foreach ($task in $tasks) {
-              Write-Host "BRIDGE_RELATED_TASK=$($task.TaskName)|STATE=$($task.State)"
-            }
-          } catch {
-            Write-Host "BRIDGE_RELATED_TASK_QUERY=FAIL"
-          }
-
-      - name: Bridge task and runner evidence read only
-        if: always()
-        shell: powershell
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Stop"
-          $production = "F:\\Project\\XAUUSD_AI_MASTER\\xauusd-ai-master"
-          $runtimeDir = Join-Path $production ".runtime\\phase7c-account-bridge"
+          $runtimeDir = Join-Path $production ".runtime\phase7c-account-bridge"
           $statusPath = Join-Path $runtimeDir "startup-runner-status.json"
           $lockPath = Join-Path $runtimeDir "startup-runner.lock"
-          $stdoutPath = Join-Path $runtimeDir "bridge.out.log"
-          $stderrPath = Join-Path $runtimeDir "bridge.err.log"
-          $runnerErrPath = Join-Path $runtimeDir "startup-runner.err.log"
           $taskName = "XAUUSD-Phase7C-Bridge"
 
-          Write-Host "M8_DIAGNOSTIC=BRIDGE_TASK_RUNNER_EVIDENCE"
           Write-Host "READ_ONLY=TRUE"
           Write-Host "TASK_MUTATION=NONE"
           Write-Host "PROCESS_MUTATION=NONE"
@@ -289,10 +38,6 @@ jobs:
           Write-Host "BRIDGE_TASK_LAST_RUN_TIME=$($info.LastRunTime.ToString('o'))"
           Write-Host "BRIDGE_TASK_LAST_RESULT=$($info.LastTaskResult)"
           Write-Host "BRIDGE_TASK_MISSED_RUNS=$($info.NumberOfMissedRuns)"
-          if ($null -ne $info.NextRunTime -and $info.NextRunTime -ne [datetime]::MinValue) {
-            Write-Host "BRIDGE_TASK_NEXT_RUN_TIME=$($info.NextRunTime.ToString('o'))"
-          } else { Write-Host "BRIDGE_TASK_NEXT_RUN_TIME=NONE" }
-
           $actions = @($task.Actions)
           Write-Host "BRIDGE_TASK_ACTION_COUNT=$($actions.Count)"
           foreach ($action in $actions) {
@@ -300,92 +45,62 @@ jobs:
             Write-Host "BRIDGE_TASK_ACTION_WORKDIR=$($action.WorkingDirectory)"
           }
 
-          $status = $null
           if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
-            try {
-              $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
-              Write-Host "BRIDGE_RUNNER_STATUS=$($status.status)"
-              Write-Host "BRIDGE_RUNNER_PID=$($status.runnerPid)"
-              Write-Host "BRIDGE_CHILD_PID=$($status.bridgeProcessPid)"
-              Write-Host "BRIDGE_RUNNER_ACCOUNT_MODE=$($status.accountMode)"
-              Write-Host "BRIDGE_RUNNER_ATTEMPT=$($status.attempt)"
-              if ($null -ne $status.PSObject.Properties['exitCode']) { Write-Host "BRIDGE_CHILD_EXIT_CODE=$($status.exitCode)" } else { Write-Host "BRIDGE_CHILD_EXIT_CODE=UNAVAILABLE" }
-              Write-Host "BRIDGE_RUNNER_UPDATED_AT=$($status.updatedAt)"
-              if ($null -ne $status.PSObject.Properties['message']) {
-                $msg = [string]$status.message
-                $msg = $msg -replace '(?i)(api[_-]?key|token|password|secret)\s*[=:]\s*\S+', '$1=<redacted>'
-                Write-Host "BRIDGE_RUNNER_MESSAGE=$msg"
-              }
-            } catch { Write-Host "BRIDGE_RUNNER_STATUS=INVALID_JSON" }
-          } else { Write-Host "BRIDGE_RUNNER_STATUS=MISSING" }
-
-          if ($null -ne $status) {
-            foreach ($pair in @(@{Label='RUNNER'; Id=$status.runnerPid}, @{Label='CHILD'; Id=$status.bridgeProcessPid})) {
-              $pidText = [string]$pair.Id
-              if (-not [string]::IsNullOrWhiteSpace($pidText) -and $pidText -match '^\d+
-          Write-Host "PRODUCTION_CUTOVER=NOT_PERFORMED"
-          Write-Host "PRODUCTION_GIT_MUTATION=NONE"
-          Write-Host "PROCESS_MUTATION=NONE"
-          Write-Host "MODE_MUTATION=NONE"
-          Write-Host "ARM_MUTATION=NONE"
-          Write-Host "ORDER_MUTATION=NONE"
-          Write-Host "POSITION_MUTATION=NONE"
-          Write-Host "LIVE_TEST_ORDER=NONE"
-) {
+            $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+            Write-Host "BRIDGE_RUNNER_STATUS=$($status.status)"
+            Write-Host "BRIDGE_RUNNER_PID=$($status.runnerPid)"
+            Write-Host "BRIDGE_CHILD_PID=$($status.bridgeProcessPid)"
+            Write-Host "BRIDGE_RUNNER_ACCOUNT_MODE=$($status.accountMode)"
+            Write-Host "BRIDGE_RUNNER_ATTEMPT=$($status.attempt)"
+            Write-Host "BRIDGE_RUNNER_UPDATED_AT=$($status.updatedAt)"
+            if ($null -ne $status.PSObject.Properties['exitCode']) { Write-Host "BRIDGE_CHILD_EXIT_CODE=$($status.exitCode)" }
+            if ($null -ne $status.PSObject.Properties['message']) { Write-Host "BRIDGE_RUNNER_MESSAGE=$($status.message)" }
+            foreach ($pidValue in @($status.runnerPid, $status.bridgeProcessPid)) {
+              if ($null -ne $pidValue -and [string]$pidValue -match '^\d+$') {
                 try {
-                  $proc = Get-Process -Id ([int]$pidText) -ErrorAction Stop
-                  Write-Host "BRIDGE_$($pair.Label)_PROCESS_EXISTS=True"
-                  Write-Host "BRIDGE_$($pair.Label)_PROCESS_NAME=$($proc.ProcessName)"
-                  Write-Host "BRIDGE_$($pair.Label)_PROCESS_START_TIME=$($proc.StartTime.ToString('o'))"
-                } catch { Write-Host "BRIDGE_$($pair.Label)_PROCESS_EXISTS=False" }
-              } else { Write-Host "BRIDGE_$($pair.Label)_PROCESS_EXISTS=False" }
+                  $p = Get-Process -Id ([int]$pidValue) -ErrorAction Stop
+                  Write-Host "BRIDGE_PROCESS_PID=$pidValue|EXISTS=True|NAME=$($p.ProcessName)|START=$($p.StartTime.ToString('o'))"
+                } catch {
+                  Write-Host "BRIDGE_PROCESS_PID=$pidValue|EXISTS=False"
+                }
+              }
             }
+          } else {
+            Write-Host "BRIDGE_RUNNER_STATUS=MISSING"
           }
 
           if (Test-Path -LiteralPath $lockPath -PathType Leaf) {
+            Write-Host "BRIDGE_LOCK_PRESENT=True"
             try {
-              $lockMeta = (Get-Content -LiteralPath $lockPath -Raw) | ConvertFrom-Json
-              Write-Host "BRIDGE_LOCK_PRESENT=True"
-              Write-Host "BRIDGE_LOCK_RUNNER_PID=$($lockMeta.runnerPid)"
-              Write-Host "BRIDGE_LOCK_ACQUIRED_AT=$($lockMeta.acquiredAt)"
-            } catch {
-              Write-Host "BRIDGE_LOCK_PRESENT=True"
-              Write-Host "BRIDGE_LOCK_METADATA=UNREADABLE"
-            }
+              $lock = Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json
+              Write-Host "BRIDGE_LOCK_RUNNER_PID=$($lock.runnerPid)"
+              Write-Host "BRIDGE_LOCK_ACQUIRED_AT=$($lock.acquiredAt)"
+            } catch { Write-Host "BRIDGE_LOCK_METADATA=UNREADABLE" }
           } else { Write-Host "BRIDGE_LOCK_PRESENT=False" }
 
-          function Write-LogEvidence([string]$label, [string]$filePath) {
-            if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
-              Write-Host ($label + '_EXISTS=False')
-              return
+      - name: Read bridge log metadata
+        shell: powershell
+        run: |
+          $runtimeDir = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master\.runtime\phase7c-account-bridge"
+          foreach ($name in @('startup-runner.err.log','bridge.err.log','bridge.out.log')) {
+            $p = Join-Path $runtimeDir $name
+            if (Test-Path -LiteralPath $p -PathType Leaf) {
+              $item = Get-Item -LiteralPath $p
+              Write-Host "BRIDGE_LOG=$name|EXISTS=True|SIZE=$($item.Length)|LAST_WRITE=$($item.LastWriteTime.ToString('o'))"
+            } else {
+              Write-Host "BRIDGE_LOG=$name|EXISTS=False"
             }
-            $item = Get-Item -LiteralPath $filePath
-            Write-Host ($label + '_EXISTS=True')
-            Write-Host ($label + '_SIZE=' + $item.Length)
-            Write-Host ($label + '_LAST_WRITE=' + $item.LastWriteTime.ToString('o'))
-            $safe = @(Get-Content -LiteralPath $filePath -Tail 40 -ErrorAction SilentlyContinue | Where-Object { $_ -match '(?i)error|exception|traceback|failed|failure|exit|retry|refused|connect|mt5|uvicorn|python|permission|address|port|bind' } | ForEach-Object {
-              $line = [string]$_
-              $line = $line -replace '(?i)(api[_-]?key|token|password|secret)\s*[=:]\s*\S+', '$1=<redacted>'
-              $line = $line -replace '(?i)(MT5_LOGIN\s*[=:]\s*)\d+', '$1<redacted>'
-              $line
-            } | Select-Object -Last 12)
-            Write-Host ($label + '_MATCHED_LINES=' + $safe.Count)
-            foreach ($line in $safe) { Write-Host ($label + '_LINE=' + $line) }
           }
 
-          Write-LogEvidence "BRIDGE_RUNNER_ERR_LOG" $runnerErrPath
-          Write-LogEvidence "BRIDGE_STDERR_LOG" $stderrPath
-          Write-LogEvidence "BRIDGE_STDOUT_LOG" $stdoutPath
-
-      - name: Probe completion boundary
+      - name: Safety boundary
         if: always()
         shell: powershell
         run: |
           Write-Host "PRODUCTION_CUTOVER=NOT_PERFORMED"
-          Write-Host "PRODUCTION_GIT_MUTATION=NONE"
-          Write-Host "PROCESS_MUTATION=NONE"
           Write-Host "MODE_MUTATION=NONE"
           Write-Host "ARM_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "TASK_MUTATION=NONE"
           Write-Host "ORDER_MUTATION=NONE"
           Write-Host "POSITION_MUTATION=NONE"
           Write-Host "LIVE_TEST_ORDER=NONE"
