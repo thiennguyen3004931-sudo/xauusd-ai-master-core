@@ -65,15 +65,16 @@ jobs:
           $branch = (git -C $candidate branch --show-current).Trim()
           $status = git -C $candidate status --porcelain
 
+          $candidateClean = -not [bool]$status
           Write-Host "CANDIDATE_HEAD=$head"
           Write-Host "CANDIDATE_TREE=$tree"
           Write-Host "CANDIDATE_BRANCH=$branch"
-          Write-Host "CANDIDATE_WORKTREE_CLEAN=$([string]::IsNullOrWhiteSpace(($status -join "")))"
+          Write-Host "CANDIDATE_WORKTREE_CLEAN=$candidateClean"
 
           if ($head -ne $expectedCommit) { throw "Candidate HEAD mismatch." }
           if ($tree -ne $expectedTree) { throw "Candidate tree mismatch." }
           if ($branch -ne "main") { throw "Candidate must be on main." }
-          if (-not [string]::IsNullOrWhiteSpace(($status -join ""))) {
+          if (-not $candidateClean) {
             throw "Candidate worktree is not clean."
           }
 
