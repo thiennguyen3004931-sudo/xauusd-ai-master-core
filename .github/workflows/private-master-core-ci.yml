@@ -73,6 +73,9 @@ jobs:
       - name: Static private CI contract
         run: node --test scripts/security/private-master-core-ci-contract.test.mjs
 
+      - name: Private repository topology contract
+        run: node --test scripts/security/private-repository-topology.test.mjs
+
       - name: Tracked-secret boundary tests
         run: node --test scripts/security/check-private-secrets.test.mjs
 
