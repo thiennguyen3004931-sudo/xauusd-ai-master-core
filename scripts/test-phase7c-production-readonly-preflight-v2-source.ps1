@@ -149,5 +149,24 @@ $quotedHeadTreePattern = '(?m)&\s+\$gitExe\s+rev-parse\s+[''"]HEAD\^\{tree\}[''"
 if ($source -notmatch $quotedHeadTreePattern) { throw 'Local tree read must pass HEAD^{tree} as one explicitly quoted git rev-parse argument.' }
 if ($source -notmatch '(?m)&\s+\$gitExe\s+status\s+--porcelain') { throw 'Missing worktree dirty-state read.' }
 if ($source -notmatch '(?m)&\s+\$gitExe\s+ls-remote\s+--heads\s+origin\s+refs/heads/main') { throw 'Remote main must be read with git ls-remote only.' }
+if (-not $source.Contains("'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core'")) {
+    throw 'Post-M8 production preflight must trust the canonical private HTTPS origin.'
+}
+if (-not $source.Contains("'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core.git'")) {
+    throw 'Post-M8 production preflight must trust the canonical private HTTPS .git origin.'
+}
+if (-not $source.Contains("'git@github.com:thiennguyen3004931-sudo/xauusd-ai-master-core.git'")) {
+    throw 'Post-M8 production preflight must trust the canonical private SSH origin.'
+}
+foreach ($legacyOrigin in @(
+    "'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master'",
+    "'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master.git'",
+    "'git@github.com:thiennguyen3004931-sudo/xauusd-ai-master.git'"
+)) {
+    if ($source.Contains($legacyOrigin)) {
+        throw "Post-M8 production preflight must not trust legacy production origin: $legacyOrigin"
+    }
+}
+
 
 Write-Output 'PHASE7C_PRODUCTION_READONLY_PREFLIGHT_V2_SOURCE_CONTRACT=PASS'
