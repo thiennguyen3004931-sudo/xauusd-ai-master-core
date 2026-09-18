@@ -24,9 +24,9 @@ $RunnerRepoPath = 'scripts/run-phase7c-executor-task-runner-local.ps1'
 $StoppedLifecycleMismatchComponents = @('api','web','supervisor','trend','sideway','telegram','regime-notifier')
 $ExpectedGenerationMismatchReasons = @('SOURCE_COMMIT_MISMATCH','SOURCE_TREE_MISMATCH','DEPLOYMENT_ID_MISMATCH')
 $ExpectedOriginUrls = @(
-    'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master',
-    'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master.git',
-    'git@github.com:thiennguyen3004931-sudo/xauusd-ai-master.git'
+    'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core',
+    'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core.git',
+    'git@github.com:thiennguyen3004931-sudo/xauusd-ai-master-core.git'
 )
 
 if (-not (Test-Path -LiteralPath $ProjectRoot -PathType Container)) { throw "ProjectRoot does not exist: $ProjectRoot" }
