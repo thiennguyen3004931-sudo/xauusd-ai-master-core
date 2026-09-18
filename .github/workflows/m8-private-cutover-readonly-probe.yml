@@ -261,6 +261,122 @@ jobs:
             Write-Host "BRIDGE_RELATED_TASK_QUERY=FAIL"
           }
 
+      - name: Bridge task and runner evidence read only
+        if: always()
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Stop"
+          $production = "F:\\Project\\XAUUSD_AI_MASTER\\xauusd-ai-master"
+          $runtimeDir = Join-Path $production ".runtime\\phase7c-account-bridge"
+          $statusPath = Join-Path $runtimeDir "startup-runner-status.json"
+          $lockPath = Join-Path $runtimeDir "startup-runner.lock"
+          $stdoutPath = Join-Path $runtimeDir "bridge.out.log"
+          $stderrPath = Join-Path $runtimeDir "bridge.err.log"
+          $runnerErrPath = Join-Path $runtimeDir "startup-runner.err.log"
+          $taskName = "XAUUSD-Phase7C-Bridge"
+
+          Write-Host "M8_DIAGNOSTIC=BRIDGE_TASK_RUNNER_EVIDENCE"
+          Write-Host "READ_ONLY=TRUE"
+          Write-Host "TASK_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "BRIDGE_RESTART=NONE"
+
+          Import-Module ScheduledTasks -ErrorAction Stop
+          $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+          $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
+          Write-Host "BRIDGE_TASK_STATE=$($task.State)"
+          Write-Host "BRIDGE_TASK_LAST_RUN_TIME=$($info.LastRunTime.ToString('o'))"
+          Write-Host "BRIDGE_TASK_LAST_RESULT=$($info.LastTaskResult)"
+          Write-Host "BRIDGE_TASK_MISSED_RUNS=$($info.NumberOfMissedRuns)"
+          if ($null -ne $info.NextRunTime -and $info.NextRunTime -ne [datetime]::MinValue) {
+            Write-Host "BRIDGE_TASK_NEXT_RUN_TIME=$($info.NextRunTime.ToString('o'))"
+          } else { Write-Host "BRIDGE_TASK_NEXT_RUN_TIME=NONE" }
+
+          $actions = @($task.Actions)
+          Write-Host "BRIDGE_TASK_ACTION_COUNT=$($actions.Count)"
+          foreach ($action in $actions) {
+            Write-Host "BRIDGE_TASK_ACTION_EXECUTE=$($action.Execute)"
+            Write-Host "BRIDGE_TASK_ACTION_WORKDIR=$($action.WorkingDirectory)"
+          }
+
+          $status = $null
+          if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
+            try {
+              $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+              Write-Host "BRIDGE_RUNNER_STATUS=$($status.status)"
+              Write-Host "BRIDGE_RUNNER_PID=$($status.runnerPid)"
+              Write-Host "BRIDGE_CHILD_PID=$($status.bridgeProcessPid)"
+              Write-Host "BRIDGE_RUNNER_ACCOUNT_MODE=$($status.accountMode)"
+              Write-Host "BRIDGE_RUNNER_ATTEMPT=$($status.attempt)"
+              if ($null -ne $status.PSObject.Properties['exitCode']) { Write-Host "BRIDGE_CHILD_EXIT_CODE=$($status.exitCode)" } else { Write-Host "BRIDGE_CHILD_EXIT_CODE=UNAVAILABLE" }
+              Write-Host "BRIDGE_RUNNER_UPDATED_AT=$($status.updatedAt)"
+              if ($null -ne $status.PSObject.Properties['message']) {
+                $msg = [string]$status.message
+                $msg = $msg -replace '(?i)(api[_-]?key|token|password|secret)\s*[=:]\s*\S+', '$1=<redacted>'
+                Write-Host "BRIDGE_RUNNER_MESSAGE=$msg"
+              }
+            } catch { Write-Host "BRIDGE_RUNNER_STATUS=INVALID_JSON" }
+          } else { Write-Host "BRIDGE_RUNNER_STATUS=MISSING" }
+
+          if ($null -ne $status) {
+            foreach ($pair in @(@{Label='RUNNER'; Id=$status.runnerPid}, @{Label='CHILD'; Id=$status.bridgeProcessPid})) {
+              $pidText = [string]$pair.Id
+              if (-not [string]::IsNullOrWhiteSpace($pidText) -and $pidText -match '^\d+
+          Write-Host "PRODUCTION_CUTOVER=NOT_PERFORMED"
+          Write-Host "PRODUCTION_GIT_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
+) {
+                try {
+                  $proc = Get-Process -Id ([int]$pidText) -ErrorAction Stop
+                  Write-Host "BRIDGE_$($pair.Label)_PROCESS_EXISTS=True"
+                  Write-Host "BRIDGE_$($pair.Label)_PROCESS_NAME=$($proc.ProcessName)"
+                  Write-Host "BRIDGE_$($pair.Label)_PROCESS_START_TIME=$($proc.StartTime.ToString('o'))"
+                } catch { Write-Host "BRIDGE_$($pair.Label)_PROCESS_EXISTS=False" }
+              } else { Write-Host "BRIDGE_$($pair.Label)_PROCESS_EXISTS=False" }
+            }
+          }
+
+          if (Test-Path -LiteralPath $lockPath -PathType Leaf) {
+            try {
+              $lockMeta = (Get-Content -LiteralPath $lockPath -Raw) | ConvertFrom-Json
+              Write-Host "BRIDGE_LOCK_PRESENT=True"
+              Write-Host "BRIDGE_LOCK_RUNNER_PID=$($lockMeta.runnerPid)"
+              Write-Host "BRIDGE_LOCK_ACQUIRED_AT=$($lockMeta.acquiredAt)"
+            } catch {
+              Write-Host "BRIDGE_LOCK_PRESENT=True"
+              Write-Host "BRIDGE_LOCK_METADATA=UNREADABLE"
+            }
+          } else { Write-Host "BRIDGE_LOCK_PRESENT=False" }
+
+          function Write-LogEvidence([string]$label, [string]$filePath) {
+            if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
+              Write-Host ($label + '_EXISTS=False')
+              return
+            }
+            $item = Get-Item -LiteralPath $filePath
+            Write-Host ($label + '_EXISTS=True')
+            Write-Host ($label + '_SIZE=' + $item.Length)
+            Write-Host ($label + '_LAST_WRITE=' + $item.LastWriteTime.ToString('o'))
+            $safe = @(Get-Content -LiteralPath $filePath -Tail 40 -ErrorAction SilentlyContinue | Where-Object { $_ -match '(?i)error|exception|traceback|failed|failure|exit|retry|refused|connect|mt5|uvicorn|python|permission|address|port|bind' } | ForEach-Object {
+              $line = [string]$_
+              $line = $line -replace '(?i)(api[_-]?key|token|password|secret)\s*[=:]\s*\S+', '$1=<redacted>'
+              $line = $line -replace '(?i)(MT5_LOGIN\s*[=:]\s*)\d+', '$1<redacted>'
+              $line
+            } | Select-Object -Last 12)
+            Write-Host ($label + '_MATCHED_LINES=' + $safe.Count)
+            foreach ($line in $safe) { Write-Host ($label + '_LINE=' + $line) }
+          }
+
+          Write-LogEvidence "BRIDGE_RUNNER_ERR_LOG" $runnerErrPath
+          Write-LogEvidence "BRIDGE_STDERR_LOG" $stderrPath
+          Write-LogEvidence "BRIDGE_STDOUT_LOG" $stdoutPath
+
       - name: Probe completion boundary
         if: always()
         shell: powershell
