@@ -1,4 +1,4 @@
-name: M8 Bridge Fail-Closed Recovery
+name: M8 Private Cutover Read-Only Acceptance
 
 on:
   push:
@@ -11,139 +11,50 @@ permissions:
   contents: read
 
 jobs:
-  bridge-fail-closed-recovery:
-    name: bridge-fail-closed-recovery
+  m8-readonly-acceptance:
+    name: m8-readonly-acceptance
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Preflight and force PAUSE
+      - name: Prepare exact private-main candidate
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
-          $config = Get-Content -LiteralPath (Join-Path $production ".runtime\phase7c-executor-task-config.json") -Raw | ConvertFrom-Json
-          $control = ([string]$config.controlApiUrl).TrimEnd('/')
+          $candidate = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master-core-m8-candidate"
+          $expectedCommit = "b399d2f3ccd0bfbeb35699a890f681ae28afbbac"
+          $expectedTree = "2ca865b168a6056e408b44d327ae300c4dc71239"
+          git -C $candidate fetch --no-tags origin main
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $candidate checkout main
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $candidate reset --hard $expectedCommit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $head = (git -C $candidate rev-parse HEAD).Trim()
+          $tree = (git -C $candidate rev-parse "HEAD^{tree}").Trim()
+          $dirty = @(git -C $candidate status --porcelain)
+          if ($head -ne $expectedCommit -or $tree -ne $expectedTree -or $dirty.Count -ne 0) { throw "Candidate exact-source verification failed." }
+          Write-Host "CANDIDATE_HEAD=$head"
+          Write-Host "CANDIDATE_TREE=$tree"
+          Write-Host "CANDIDATE_WORKTREE=CLEAN"
 
-          $arm = Invoke-RestMethod -Uri "$control/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
-          if ([string]$arm.accountMode -ne 'LIVE' -or [string]$arm.liveArmStatus -ne 'DISARMED' -or [bool]$arm.liveExecutionArmed) {
-            throw "Bridge recovery requires LIVE ARM DISARMED before mutation."
-          }
-          Write-Host "PRE_RECOVERY_ARM=DISARMED"
-          Write-Host "PRE_RECOVERY_LIVE_EXECUTION_ARMED=False"
-
-          $before = Invoke-RestMethod -Uri "$control/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
-          Write-Host "PRE_RECOVERY_BOT_MODE=$($before.state.mode)"
-          $payload = @{ mode = 'PAUSE'; source = 'm8-bridge-fail-closed-recovery' } | ConvertTo-Json -Compress
-          $paused = Invoke-RestMethod -Uri "$control/api/v1/phase7c/bot-mode" -Method Post -ContentType 'application/json' -Body $payload -TimeoutSec 8
-          if ([string]$paused.state.mode -ne 'PAUSE') { throw "Control API did not confirm PAUSE." }
-          Write-Host "BOT_MODE_MUTATION=AUTO_TO_PAUSE_OR_IDEMPOTENT_PAUSE"
-          Write-Host "BOT_MODE=PAUSE"
-
-          $armAfterPause = Invoke-RestMethod -Uri "$control/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
-          if ([string]$armAfterPause.liveArmStatus -ne 'DISARMED' -or [bool]$armAfterPause.liveExecutionArmed) {
-            throw "ARM changed unexpectedly after PAUSE."
-          }
-          Write-Host "POST_PAUSE_ARM=DISARMED"
-
-      - name: Restart only canonical Phase7C bridge task
+      - name: Run canonical M8 read-only preflight
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
+          $candidate = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master-core-m8-candidate"
           $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
-          $taskName = "XAUUSD-Phase7C-Bridge"
-          $expectedRunner = Join-Path $production "scripts\run-phase7c-account-bridge-task-runner-local.ps1"
-          Import-Module ScheduledTasks -ErrorAction Stop
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate "scripts\security\preflight-private-cutover.ps1") `
+            -ExpectedCommit "b399d2f3ccd0bfbeb35699a890f681ae28afbbac" `
+            -ExpectedTree "2ca865b168a6056e408b44d327ae300c4dc71239" `
+            -RuntimeProjectRoot $production
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-          $actions = @($task.Actions)
-          if ($actions.Count -ne 1) { throw "Bridge task must have exactly one action." }
-          $action = $actions[0]
-          if ([string]$action.WorkingDirectory -ne $production) { throw "Bridge task working directory mismatch." }
-          if (-not ([string]$action.Arguments).Contains($expectedRunner)) { throw "Bridge task runner path mismatch." }
-          Write-Host "BRIDGE_TASK_DEFINITION_PREFLIGHT=PASS"
-          Write-Host "BRIDGE_TASK_PRE_STATE=$($task.State)"
-
-          $statusPath = Join-Path $production ".runtime\phase7c-account-bridge\startup-runner-status.json"
-          $oldStatus = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
-          $oldRunnerPid = [int]$oldStatus.runnerPid
-          $oldChildPid = [int]$oldStatus.bridgeProcessPid
-          Write-Host "BRIDGE_OLD_RUNNER_PID=$oldRunnerPid"
-          Write-Host "BRIDGE_OLD_CHILD_PID=$oldChildPid"
-
-          Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
-          $stopDeadline = [DateTime]::UtcNow.AddSeconds(25)
-          do {
-            Start-Sleep -Milliseconds 500
-            $runnerAlive = $null -ne (Get-Process -Id $oldRunnerPid -ErrorAction SilentlyContinue)
-            $childAlive = $null -ne (Get-Process -Id $oldChildPid -ErrorAction SilentlyContinue)
-            $state = [string](Get-ScheduledTask -TaskName $taskName -ErrorAction Stop).State
-            if (-not $runnerAlive -and -not $childAlive -and $state -ne 'Running') { break }
-          } while ([DateTime]::UtcNow -lt $stopDeadline)
-          if ($runnerAlive -or $childAlive) { throw "Bridge task stop did not terminate owned runner/child process tree." }
-          Write-Host "BRIDGE_TASK_STOP=PASS"
-          Write-Host "BRIDGE_OLD_PROCESS_TREE_EXITED=PASS"
-
-          Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
-          Write-Host "BRIDGE_TASK_START=ISSUED"
-
-      - name: Verify fresh bridge session and flatness
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
-          $config = Get-Content -LiteralPath (Join-Path $production ".runtime\phase7c-executor-task-config.json") -Raw | ConvertFrom-Json
-          $accountLib = Join-Path $production "scripts\lib\phase7c-account-mode.ps1"
-          . $accountLib
-          function Resolve-ProdPath([string]$p) {
-            if ([System.IO.Path]::IsPathRooted($p)) { return [System.IO.Path]::GetFullPath($p) }
-            return [System.IO.Path]::GetFullPath((Join-Path $production $p))
-          }
-          $envFile = Resolve-ProdPath ([string]$config.envFile)
-          $accountMode = ConvertTo-Phase7CAccountMode ([string]$config.accountMode)
-          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode $accountMode -RequireTrading
-          $base = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
-          $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
-
-          $health = $null
-          $deadline = [DateTime]::UtcNow.AddSeconds(75)
-          do {
-            Start-Sleep -Seconds 2
-            try {
-              $candidate = Invoke-RestMethod -Uri "$base/health" -Headers $headers -Method Get -TimeoutSec 5
-              if ([bool]$candidate.connected -and [string]$candidate.status -eq 'ok') { $health = $candidate; break }
-            } catch {}
-          } while ([DateTime]::UtcNow -lt $deadline)
-          if ($null -eq $health) { throw "Fresh bridge did not become healthy within recovery window." }
-          if ([string]$health.configuredAccountMode -ne 'LIVE' -or [string]$health.accountMode -ne 'real') { throw "Fresh bridge is not LIVE/real." }
-          Write-Host "MT5_BRIDGE_HEALTH=PASS"
-          Write-Host "MT5_BRIDGE_ACCOUNT_MODE=LIVE_REAL"
-          Write-Host "MT5_BRIDGE_SESSION_FRESH=PASS"
-
-          $positionsResponse = Invoke-WebRequest -Uri "$base/v1/positions?symbol=XAUUSD" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 8
-          $ordersResponse = Invoke-WebRequest -Uri "$base/v1/orders?symbol=XAUUSD" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 8
-          $positionsRaw = ([string]$positionsResponse.Content).Trim()
-          $ordersRaw = ([string]$ordersResponse.Content).Trim()
-          $positions = if ([string]::IsNullOrWhiteSpace($positionsRaw) -or $positionsRaw -eq '[]') { @() } else { @($positionsRaw | ConvertFrom-Json) }
-          $orders = if ([string]::IsNullOrWhiteSpace($ordersRaw) -or $ordersRaw -eq '[]') { @() } else { @($ordersRaw | ConvertFrom-Json) }
-          Write-Host "XAUUSD_POSITIONS=$($positions.Count)"
-          Write-Host "XAUUSD_PENDING_ORDERS=$($orders.Count)"
-
-          $control = ([string]$config.controlApiUrl).TrimEnd('/')
-          $mode = Invoke-RestMethod -Uri "$control/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
-          $arm = Invoke-RestMethod -Uri "$control/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
-          if ([string]$mode.state.mode -ne 'PAUSE') { throw "Final mode is not PAUSE." }
-          if ([string]$arm.liveArmStatus -ne 'DISARMED' -or [bool]$arm.liveExecutionArmed) { throw "Final ARM is not DISARMED." }
-          Write-Host "FINAL_BOT_MODE=PAUSE"
-          Write-Host "FINAL_ARM=DISARMED"
-          Write-Host "FINAL_LIVE_EXECUTION_ARMED=False"
-          if ($positions.Count -ne 0 -or $orders.Count -ne 0) { throw "Bridge recovered but XAUUSD is not flat; cutover remains blocked." }
-          Write-Host "FLATNESS=PASS"
-
-      - name: Fail-closed safety boundary
+      - name: Safety boundary
         if: always()
         shell: powershell
         run: |
           Write-Host "PRODUCTION_CUTOVER=NOT_PERFORMED"
+          Write-Host "PRODUCTION_GIT_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
           Write-Host "ARM_MUTATION=NONE"
           Write-Host "ORDER_MUTATION=NONE"
           Write-Host "POSITION_MUTATION=NONE"
