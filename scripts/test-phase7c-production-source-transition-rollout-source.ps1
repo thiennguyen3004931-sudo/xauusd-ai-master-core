@@ -120,7 +120,12 @@ Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_ORDER_MUTATION=NONE' 'no or
 Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_POSITION_MUTATION=NONE' 'no position mutation attestation'
 Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_LIVE_TEST_ORDER=NONE' 'no LIVE test order attestation'
 Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_FINAL_MODE=PAUSE' 'final PAUSE contract'
-Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_FINAL_ARM=ARMED' 'final ARMED contract'
+Require-Source 'if\s*\(\$ExpectedInitialArm\s+-eq\s+''ARMED''\)\s*\{' 'ARM restore must be conditional on initial ARMED state'
+Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_ARM_RESTORE=PERFORMED' 'armed path must report ARM restore'
+Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_ARM_RESTORE=SKIPPED_INITIAL_DISARMED' 'initial DISARMED path must skip ARM restore'
+Require-Source 'Assert-Arm\s+-Expected\s+\$ExpectedInitialArm\s+-Stage\s+[''\"]FINAL[''\"]' 'final ARM state must equal initial ARM state'
+Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_FINAL_ARM=\$ExpectedInitialArm' 'final ARM audit marker must preserve initial ARM state'
+Forbid-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_FINAL_ARM=ARMED' 'hard-coded final ARMED state'
 Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_STATUS=PASS' 'terminal PASS marker'
 
 Forbid-Source '\$component\.sourceTree' 'component result sourceTree property absent from runtime-source API contract'
