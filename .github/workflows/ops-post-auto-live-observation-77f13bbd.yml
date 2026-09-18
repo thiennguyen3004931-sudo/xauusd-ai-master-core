@@ -1,0 +1,178 @@
+name: Ops Post-AUTO LIVE Observation 77f13bbd
+
+on:
+  push:
+    branches:
+      - ops/post-auto-live-observation-77f13bbd
+    paths:
+      - '.github/workflows/ops-post-auto-live-observation-77f13bbd.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    name: post-auto-live-observation
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify source exact
+        shell: powershell
+        env:
+          TARGET: 77f13bbd8e20875ed924a22a865c306551dad582
+          TARGET_TREE: a117da071c1db489c6027e7a10a83ceb3427b269
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $repoHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodHead = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodTree = (git -C $env:PRODUCTION_ROOT rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $prodDirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+          Write-Host "OBS_PRIVATE_MAIN_HEAD=$repoHead"
+          Write-Host "OBS_PRODUCTION_HEAD=$prodHead"
+          Write-Host "OBS_PRODUCTION_TREE=$prodTree"
+          Write-Host "OBS_PRODUCTION_DIRTY_COUNT=$($prodDirty.Count)"
+          if ($repoHead -ne $env:TARGET) { throw "PRIVATE_MAIN_HEAD_MISMATCH" }
+          if ($prodHead -ne $env:TARGET) { throw "PRODUCTION_HEAD_MISMATCH" }
+          if ($prodTree -ne $env:TARGET_TREE) { throw "PRODUCTION_TREE_MISMATCH" }
+          if ($prodDirty.Count -ne 0) { throw "PRODUCTION_WORKTREE_DIRTY" }
+
+      - name: Read lifecycle ARM MT5 and source attestation
+        shell: powershell
+        run: |
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $mt5 = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/mt5/status?symbol=XAUUSD' -Method Get -TimeoutSec 10
+          $att = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation/' -Method Get -TimeoutSec 10
+
+          Write-Host "OBS_ACCOUNT_MODE=$($life.accountMode.accountMode)"
+          Write-Host "OBS_BOT_MODE=$($life.mode.mode)"
+          Write-Host "OBS_LIFECYCLE_RUNNING=$($life.running)"
+          Write-Host "OBS_LIFECYCLE_READY=$($life.ready)"
+          Write-Host "OBS_TELEGRAM_READY=$($life.telegramReady)"
+          Write-Host "OBS_TELEGRAM_STATUS=$($life.telegramStatus)"
+          Write-Host "OBS_TELEGRAM_HEARTBEAT_AGE_MS=$($life.telegramHeartbeatAgeMs)"
+          Write-Host "OBS_ARM_STATUS=$($cap.liveArmStatus)"
+          Write-Host "OBS_ARMED=$($cap.liveExecutionArmed)"
+          Write-Host "OBS_CAN_DISARM=$($cap.canDisarm)"
+          Write-Host "OBS_MT5_REACHABLE=$($mt5.reachable)"
+          Write-Host "OBS_MT5_STATUS=$($mt5.status)"
+          Write-Host "OBS_MT5_ACCOUNT_MODE=$($mt5.health.accountMode)"
+          Write-Host "OBS_MT5_TRADING_ENABLED=$($mt5.health.tradingEnabled)"
+          Write-Host "OBS_MT5_TERMINAL_TRADE_ALLOWED=$($mt5.health.terminalTradeAllowed)"
+          Write-Host "OBS_MT5_EXPERT_TRADE_ALLOWED=$($mt5.health.expertTradeAllowed)"
+          Write-Host "OBS_OPEN_POSITION_COUNT=$(@($mt5.positions).Count)"
+          Write-Host "OBS_PENDING_ORDER_COUNT=$(@($mt5.pendingOrders).Count)"
+          Write-Host "OBS_RUNTIME_SOURCE_OVERALL=$($att.overall)"
+          Write-Host "OBS_DEPLOYMENT_ID=$($att.deployment.deploymentId)"
+          Write-Host "OBS_DEPLOYMENT_SOURCE_COMMIT=$($att.deployment.sourceCommit)"
+          foreach ($c in @($att.components)) {
+            Write-Host "OBS_SOURCE_$([string]$c.component.ToUpperInvariant())=$($c.verdict)|ALIVE=$($c.alive)"
+          }
+
+          if ([string]$life.accountMode.accountMode -ne 'LIVE') { throw "OBS_ACCOUNT_NOT_LIVE" }
+          if ([string]$life.mode.mode -ne 'AUTO') { throw "OBS_MODE_NOT_AUTO" }
+          if ($life.running -ne $true -or $life.ready -ne $true) { throw "OBS_RUNTIME_NOT_READY" }
+          if ($life.telegramReady -ne $true) { throw "OBS_TELEGRAM_NOT_READY" }
+          if ([string]$cap.liveArmStatus -ne 'ARMED' -or $cap.liveExecutionArmed -ne $true) { throw "OBS_ARM_NOT_ARMED" }
+          if ($mt5.reachable -ne $true) { throw "OBS_MT5_NOT_REACHABLE" }
+          if ([string]$att.overall -ne 'EXACT_MATCH') { throw "OBS_RUNTIME_SOURCE_NOT_EXACT" }
+          if (@($att.components | Where-Object { $_.verdict -ne 'EXACT_MATCH' }).Count -ne 0) { throw "OBS_COMPONENT_SOURCE_NOT_EXACT" }
+
+      - name: Read current market regime and AUTO decision
+        shell: powershell
+        run: |
+          $regime = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/live-regime?symbol=XAUUSD&count=320' -Method Get -TimeoutSec 12
+          $decision = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/decision-monitor?symbol=XAUUSD' -Method Get -TimeoutSec 12
+
+          Write-Host "OBS_REGIME=$($regime.regime)"
+          Write-Host "OBS_REGIME_CONFIDENCE=$($regime.confidence)"
+          Write-Host "OBS_RECOMMENDED_MODE=$($regime.recommendedMode)"
+          Write-Host "OBS_ACTIVE_MODE=$($regime.activeMode)"
+          Write-Host "OBS_MODE_MATCHES_RECOMMENDATION=$($regime.modeMatchesRecommendation)"
+          Write-Host "OBS_LAST_CANDLE_CLOSE_TIME=$($regime.lastCandleCloseTime)"
+          Write-Host "OBS_REGIME_REASONS=$([string]::Join(' | ', @($regime.reasons)))"
+
+          Write-Host "OBS_DECISION_SOURCE=$($decision.source)"
+          Write-Host "OBS_DECISION_MODE_ACTIVE=$($decision.mode.active)"
+          Write-Host "OBS_DECISION_RECOMMENDED=$($decision.market.recommendedMode)"
+          Write-Host "OBS_POSITION_STATE=$($decision.position.state)"
+          Write-Host "OBS_POSITION_STRATEGY=$($decision.position.strategy)"
+          Write-Host "OBS_POSITION_COUNT=$($decision.position.count)"
+          Write-Host "OBS_POSITION_HOLD_REASON_CODE=$($decision.position.holdReasonCode)"
+          Write-Host "OBS_POSITION_HOLD_REASON=$($decision.position.holdReason)"
+          Write-Host "OBS_PRETRADE_STRATEGY=$($decision.preTrade.strategy)"
+          Write-Host "OBS_PRETRADE_APPROVED=$($decision.preTrade.approved)"
+          Write-Host "OBS_PRETRADE_STAGE=$($decision.preTrade.stage)"
+          Write-Host "OBS_PRETRADE_ACTION=$($decision.preTrade.action)"
+          Write-Host "OBS_PRETRADE_LIMIT_REASON=$($decision.preTrade.limitReason)"
+          Write-Host "OBS_PRETRADE_DECISION_REASON=$($decision.preTrade.decisionReason)"
+
+      - name: Read AUTO journal and regime notifier state
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $runtime = Join-Path $env:PRODUCTION_ROOT '.runtime'
+          $statePath = Join-Path $runtime 'phase7c-regime-notifier-state.json'
+          $journalStatePath = Join-Path $runtime 'auto-journal-state.json'
+          $journalPath = Join-Path $runtime 'auto-decisions.jsonl'
+
+          if (Test-Path -LiteralPath $statePath) {
+            $s = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+            Write-Host "OBS_NOTIFIER_STATE_REGIME=$($s.regime)"
+            Write-Host "OBS_NOTIFIER_STATE_RECOMMENDED=$($s.recommendedMode)"
+            Write-Host "OBS_NOTIFIER_STATE_ACTIVE=$($s.activeMode)"
+            Write-Host "OBS_NOTIFIER_LAST_NOTIFIED_AT=$($s.lastNotifiedAt)"
+          } else {
+            Write-Host "OBS_NOTIFIER_STATE=MISSING"
+          }
+
+          if (Test-Path -LiteralPath $journalStatePath) {
+            $j = Get-Content -LiteralPath $journalStatePath -Raw | ConvertFrom-Json
+            Write-Host "OBS_JOURNAL_STATE_REGIME=$($j.regime)"
+            Write-Host "OBS_JOURNAL_STATE_RECOMMENDED=$($j.recommendedMode)"
+            Write-Host "OBS_JOURNAL_STATE_ACTIVE=$($j.activeMode)"
+            Write-Host "OBS_JOURNAL_STATE_CONFIDENCE=$($j.confidence)"
+            Write-Host "OBS_JOURNAL_STATE_UPDATED_AT=$($j.updatedAt)"
+          } else {
+            Write-Host "OBS_JOURNAL_STATE=MISSING"
+          }
+
+          if (Test-Path -LiteralPath $journalPath) {
+            $last = Get-Content -LiteralPath $journalPath -Tail 1
+            if (-not [string]::IsNullOrWhiteSpace($last)) {
+              $row = $last | ConvertFrom-Json
+              Write-Host "OBS_JOURNAL_LAST_TYPE=$($row.type)"
+              Write-Host "OBS_JOURNAL_LAST_REGIME=$($row.regime)"
+              Write-Host "OBS_JOURNAL_LAST_RECOMMENDED=$($row.recommendedMode)"
+              Write-Host "OBS_JOURNAL_LAST_ACTIVE=$($row.activeMode)"
+              Write-Host "OBS_JOURNAL_LAST_CONFIDENCE=$($row.confidence)"
+              Write-Host "OBS_JOURNAL_LAST_REASONS=$([string]::Join(',', @($row.reasons)))"
+              Write-Host "OBS_JOURNAL_LAST_TIMESTAMP=$($row.timestamp)"
+            }
+          } else {
+            Write-Host "OBS_JOURNAL_FILE=MISSING"
+          }
+
+      - name: Read-only boundary
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "OBS_READ_ONLY=TRUE"
+          Write-Host "OBS_HTTP_METHODS=GET_ONLY"
+          Write-Host "OBS_MODE_MUTATION=NONE"
+          Write-Host "OBS_ARM_MUTATION=NONE"
+          Write-Host "OBS_ACCOUNT_SWITCH=NONE"
+          Write-Host "OBS_TASK_MUTATION=NONE"
+          Write-Host "OBS_PROCESS_MUTATION=NONE"
+          Write-Host "OBS_MANUAL_ORDER_MUTATION=NONE"
+          Write-Host "OBS_MANUAL_POSITION_MUTATION=NONE"
+          Write-Host "OBS_LIVE_TEST_ORDER=NONE"
