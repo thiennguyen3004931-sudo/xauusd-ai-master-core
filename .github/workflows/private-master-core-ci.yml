@@ -93,7 +93,11 @@ jobs:
 
       - name: M8 private cutover preflight contract
         shell: powershell
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/security/preflight-private-cutover.contract.test.ps1
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/security/preflight-private-cutover.contract.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test scripts/security/private-m8-readonly-preflight-workflow.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: M6 public contract lock
         id: m6_public_contract
