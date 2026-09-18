@@ -1,4 +1,4 @@
-name: M8 Bridge Read-Only Evidence
+name: M8 Bridge Process Read-Only Evidence
 
 on:
   push:
@@ -11,85 +11,61 @@ permissions:
   contents: read
 
 jobs:
-  bridge-readonly-evidence:
-    name: bridge-readonly-evidence
+  bridge-process-evidence:
+    name: bridge-process-evidence
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 10
     steps:
-      - name: Read bridge task and runner state
+      - name: Inspect bridge process tree and safe error tail
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
-          $runtimeDir = Join-Path $production ".runtime\phase7c-account-bridge"
+          $runtimeDir = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master\.runtime\phase7c-account-bridge"
           $statusPath = Join-Path $runtimeDir "startup-runner-status.json"
-          $lockPath = Join-Path $runtimeDir "startup-runner.lock"
-          $taskName = "XAUUSD-Phase7C-Bridge"
-
           Write-Host "READ_ONLY=TRUE"
-          Write-Host "TASK_MUTATION=NONE"
           Write-Host "PROCESS_MUTATION=NONE"
           Write-Host "BRIDGE_RESTART=NONE"
 
-          Import-Module ScheduledTasks -ErrorAction Stop
-          $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-          $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
-          Write-Host "BRIDGE_TASK_STATE=$($task.State)"
-          Write-Host "BRIDGE_TASK_LAST_RUN_TIME=$($info.LastRunTime.ToString('o'))"
-          Write-Host "BRIDGE_TASK_LAST_RESULT=$($info.LastTaskResult)"
-          Write-Host "BRIDGE_TASK_MISSED_RUNS=$($info.NumberOfMissedRuns)"
-          $actions = @($task.Actions)
-          Write-Host "BRIDGE_TASK_ACTION_COUNT=$($actions.Count)"
-          foreach ($action in $actions) {
-            Write-Host "BRIDGE_TASK_ACTION_EXECUTE=$($action.Execute)"
-            Write-Host "BRIDGE_TASK_ACTION_WORKDIR=$($action.WorkingDirectory)"
+          $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+          $runnerPid = [int]$status.runnerPid
+          $childPid = [int]$status.bridgeProcessPid
+          Write-Host "BRIDGE_RUNNER_PID=$runnerPid"
+          Write-Host "BRIDGE_CHILD_PID=$childPid"
+
+          $all = @(Get-CimInstance Win32_Process)
+          $direct = @($all | Where-Object { [int]$_.ParentProcessId -eq $childPid })
+          Write-Host "BRIDGE_CHILD_DIRECT_DESCENDANTS=$($direct.Count)"
+          foreach ($p in $direct) {
+            Write-Host "BRIDGE_DESCENDANT_PID=$($p.ProcessId)|PARENT=$($p.ParentProcessId)|NAME=$($p.Name)"
           }
 
-          if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
-            $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
-            Write-Host "BRIDGE_RUNNER_STATUS=$($status.status)"
-            Write-Host "BRIDGE_RUNNER_PID=$($status.runnerPid)"
-            Write-Host "BRIDGE_CHILD_PID=$($status.bridgeProcessPid)"
-            Write-Host "BRIDGE_RUNNER_ACCOUNT_MODE=$($status.accountMode)"
-            Write-Host "BRIDGE_RUNNER_ATTEMPT=$($status.attempt)"
-            Write-Host "BRIDGE_RUNNER_UPDATED_AT=$($status.updatedAt)"
-            if ($null -ne $status.PSObject.Properties['exitCode']) { Write-Host "BRIDGE_CHILD_EXIT_CODE=$($status.exitCode)" }
-            if ($null -ne $status.PSObject.Properties['message']) { Write-Host "BRIDGE_RUNNER_MESSAGE=$($status.message)" }
-            foreach ($pidValue in @($status.runnerPid, $status.bridgeProcessPid)) {
-              if ($null -ne $pidValue -and [string]$pidValue -match '^\d+$') {
-                try {
-                  $p = Get-Process -Id ([int]$pidValue) -ErrorAction Stop
-                  Write-Host "BRIDGE_PROCESS_PID=$pidValue|EXISTS=True|NAME=$($p.ProcessName)|START=$($p.StartTime.ToString('o'))"
-                } catch {
-                  Write-Host "BRIDGE_PROCESS_PID=$pidValue|EXISTS=False"
-                }
+          $level2 = New-Object System.Collections.Generic.List[object]
+          foreach ($parent in $direct) {
+            foreach ($p in @($all | Where-Object { [int]$_.ParentProcessId -eq [int]$parent.ProcessId })) { [void]$level2.Add($p) }
+          }
+          Write-Host "BRIDGE_DESCENDANT_LEVEL2_COUNT=$($level2.Count)"
+          foreach ($p in $level2) {
+            Write-Host "BRIDGE_DESCENDANT_L2_PID=$($p.ProcessId)|PARENT=$($p.ParentProcessId)|NAME=$($p.Name)"
+          }
+
+          foreach ($logName in @('bridge.err.log','startup-runner.err.log')) {
+            $logPath = Join-Path $runtimeDir $logName
+            Write-Host "BRIDGE_SAFE_LOG_BEGIN=$logName"
+            if (Test-Path -LiteralPath $logPath -PathType Leaf) {
+              $raw = @(Get-Content -LiteralPath $logPath -Tail 120 -ErrorAction SilentlyContinue)
+              $matches = @($raw | Where-Object {
+                $_ -match '(?i)traceback|error|exception|failed|failure|exited|retry|refused|uvicorn|python|initialize|connection|timeout|winerror|address|bind|port'
+              } | Where-Object { $_ -notmatch '(?i)api[_-]?key|token|password|secret' } | Select-Object -Last 25)
+              Write-Host "BRIDGE_SAFE_LOG_MATCH_COUNT=$($matches.Count)"
+              foreach ($line in $matches) {
+                $safe = [string]$line
+                $safe = $safe -replace '\b\d{7,}\b','<number-redacted>'
+                Write-Host "BRIDGE_SAFE_LOG_LINE=$safe"
               }
-            }
-          } else {
-            Write-Host "BRIDGE_RUNNER_STATUS=MISSING"
-          }
-
-          if (Test-Path -LiteralPath $lockPath -PathType Leaf) {
-            Write-Host "BRIDGE_LOCK_PRESENT=True"
-            try {
-              $lock = Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json
-              Write-Host "BRIDGE_LOCK_RUNNER_PID=$($lock.runnerPid)"
-              Write-Host "BRIDGE_LOCK_ACQUIRED_AT=$($lock.acquiredAt)"
-            } catch { Write-Host "BRIDGE_LOCK_METADATA=UNREADABLE" }
-          } else { Write-Host "BRIDGE_LOCK_PRESENT=False" }
-
-      - name: Read bridge log metadata
-        shell: powershell
-        run: |
-          $runtimeDir = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master\.runtime\phase7c-account-bridge"
-          foreach ($name in @('startup-runner.err.log','bridge.err.log','bridge.out.log')) {
-            $p = Join-Path $runtimeDir $name
-            if (Test-Path -LiteralPath $p -PathType Leaf) {
-              $item = Get-Item -LiteralPath $p
-              Write-Host "BRIDGE_LOG=$name|EXISTS=True|SIZE=$($item.Length)|LAST_WRITE=$($item.LastWriteTime.ToString('o'))"
             } else {
-              Write-Host "BRIDGE_LOG=$name|EXISTS=False"
+              Write-Host "BRIDGE_SAFE_LOG_MISSING=True"
             }
+            Write-Host "BRIDGE_SAFE_LOG_END=$logName"
           }
 
       - name: Safety boundary
@@ -103,4 +79,3 @@ jobs:
           Write-Host "TASK_MUTATION=NONE"
           Write-Host "ORDER_MUTATION=NONE"
           Write-Host "POSITION_MUTATION=NONE"
-          Write-Host "LIVE_TEST_ORDER=NONE"
