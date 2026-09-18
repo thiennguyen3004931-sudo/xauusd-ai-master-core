@@ -1,0 +1,123 @@
+name: Ops Post-Cutover AUTO LIVE Readiness 77f13bbd
+
+on:
+  push:
+    branches:
+      - ops/post-cutover-auto-live-readiness-77f13bbd
+    paths:
+      - '.github/workflows/ops-post-cutover-auto-live-readiness-77f13bbd.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  auto-live-readiness:
+    name: post-cutover-auto-live-readiness
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify exact private main and production source
+        shell: powershell
+        env:
+          TARGET: 77f13bbd8e20875ed924a22a865c306551dad582
+          TARGET_TREE: a117da071c1db489c6027e7a10a83ceb3427b269
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $repoHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $repoTree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $prodHead = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodTree = (git -C $env:PRODUCTION_ROOT rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $prodBranch = (git -C $env:PRODUCTION_ROOT branch --show-current).Trim()
+          $prodDirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+          Write-Host "PRIVATE_MAIN_HEAD=$repoHead"
+          Write-Host "PRIVATE_MAIN_TREE=$repoTree"
+          Write-Host "PRODUCTION_HEAD=$prodHead"
+          Write-Host "PRODUCTION_TREE=$prodTree"
+          Write-Host "PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "PRODUCTION_DIRTY_COUNT=$($prodDirty.Count)"
+          if ($repoHead -ne $env:TARGET) { throw "PRIVATE_MAIN_HEAD_MISMATCH" }
+          if ($repoTree -ne $env:TARGET_TREE) { throw "PRIVATE_MAIN_TREE_MISMATCH" }
+          if ($prodHead -ne $env:TARGET) { throw "PRODUCTION_HEAD_MISMATCH" }
+          if ($prodTree -ne $env:TARGET_TREE) { throw "PRODUCTION_TREE_MISMATCH" }
+          if ($prodBranch -ne 'main') { throw "PRODUCTION_BRANCH_MISMATCH" }
+          if ($prodDirty.Count -ne 0) { throw "PRODUCTION_WORKTREE_DIRTY" }
+
+      - name: Canonical production read-only source and runtime proof
+        shell: powershell
+        env:
+          TARGET: 77f13bbd8e20875ed924a22a865c306551dad582
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\preflight-phase7c-production-readonly-local.ps1 `
+            -ProjectRoot $env:PRODUCTION_ROOT `
+            -ExpectedMainCommit $env:TARGET
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Read AUTO activation readiness status
+        shell: powershell
+        run: |
+          $status = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-auto-activation/status' -Method Get -TimeoutSec 10
+          Write-Host "AUTO_ACTIVATION_APPROVED=$($status.approved)"
+          Write-Host "AUTO_ACTIVATION_ACCOUNT_MODE=$($status.accountMode)"
+          Write-Host "AUTO_ACTIVATION_BROKER_ACCOUNT_MODE=$($status.brokerAccountMode)"
+          Write-Host "AUTO_ACTIVATION_BOT_MODE=$($status.botMode)"
+          Write-Host "AUTO_ACTIVATION_LIVE_ARM_REQUIRED=$($status.liveArmRequired)"
+          Write-Host "AUTO_ACTIVATION_LIVE_ARM_STATUS=$($status.liveArmStatus)"
+          Write-Host "AUTO_ACTIVATION_BLOCKED_BY=$([string]::Join(',', @($status.blockedBy)))"
+          foreach ($p in $status.checks.PSObject.Properties) {
+            Write-Host "AUTO_CHECK_$($p.Name.ToUpperInvariant())=$($p.Value)"
+          }
+
+      - name: Read LIVE ARM capability status
+        shell: powershell
+        run: |
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          Write-Host "LIVE_ARM_CAPABILITY_ACCOUNT_MODE=$($cap.accountMode)"
+          Write-Host "LIVE_ARM_CAPABILITY_BOT_MODE=$($cap.botMode)"
+          Write-Host "LIVE_ARM_CAPABILITY_STATUS=$($cap.liveArmStatus)"
+          Write-Host "LIVE_ARM_CAPABILITY_ARMED=$($cap.liveExecutionArmed)"
+          Write-Host "LIVE_ARM_CAPABILITY_POSITIONS=$($cap.openXauusdPositions)"
+          Write-Host "LIVE_ARM_CAPABILITY_TASK_INSTALLED=$($cap.taskInstalled)"
+          Write-Host "LIVE_ARM_CAPABILITY_ORPHANED_REQUEST=$($cap.orphanedControlRequest)"
+          Write-Host "LIVE_ARM_CAPABILITY_CAN_ARM=$($cap.canArm)"
+          Write-Host "LIVE_ARM_CAPABILITY_CAN_DISARM=$($cap.canDisarm)"
+          Write-Host "LIVE_ARM_CAPABILITY_ARM_BLOCKED_BY=$([string]::Join(',', @($cap.armBlockedBy)))"
+          foreach ($p in $cap.armChecks.PSObject.Properties) {
+            Write-Host "LIVE_ARM_CHECK_$($p.Name.ToUpperInvariant())=$($p.Value)"
+          }
+          Write-Host "LIVE_ARM_CAPABILITY_ORDER_SEND=$($cap.safety.orderSend)"
+          Write-Host "LIVE_ARM_CAPABILITY_AUTO_AFTER_ARM=$($cap.safety.autoAfterArm)"
+
+      - name: Run canonical LIVE ARM verifier read-only
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $env:PRODUCTION_ROOT 'scripts\verify-phase7c-live-arm-local.ps1') `
+            -WorkDir (Join-Path $env:PRODUCTION_ROOT '.runtime') `
+            -ControlApiUrl 'http://127.0.0.1:3711'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Final read-only boundary
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "READ_ONLY=TRUE"
+          Write-Host "HTTP_METHODS=GET_ONLY"
+          Write-Host "LIVE_ARM_PREFLIGHT_TOKEN_CREATED=FALSE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ACCOUNT_SWITCH=NONE"
+          Write-Host "TASK_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
