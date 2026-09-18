@@ -1,0 +1,40 @@
+name: Ops PR21 Private Origin Contract
+
+on:
+  push:
+    branches:
+      - ops/pr21-private-origin-contract
+    paths:
+      - '.github/workflows/ops-pr21-private-origin-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-contract:
+    name: pr21-private-origin-contract
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR21 head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: fix/post-m8-private-origin-readonly-preflight
+          clean: true
+
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: 87c0876166aa6fd55e1be90f99a1e3d16c901d3a
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$actual"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actual -ne $env:EXPECTED_HEAD) { throw "CHECKED_OUT_HEAD_MISMATCH" }
+
+      - name: Run post-M8 private-origin source contract
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-phase7c-production-readonly-preflight-v2-source.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
