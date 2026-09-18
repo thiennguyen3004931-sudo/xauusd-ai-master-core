@@ -94,6 +94,25 @@ jobs:
             -RuntimeProjectRoot $production
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Production read-only state diagnostics
+        if: always()
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $currentRuntimeCommit = "62e93ce5545195dd6bf78570c9b5fc0f4b253399"
+          $probe = Join-Path $production "scripts\preflight-phase7c-production-readonly-local.ps1"
+
+          Write-Host "M8_DIAGNOSTIC=PRODUCTION_READ_ONLY_STATE"
+          if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) {
+            throw "Canonical production read-only diagnostic is missing: $probe"
+          }
+
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $probe `
+            -ProjectRoot $production `
+            -ExpectedMainCommit $currentRuntimeCommit `
+            -TimeoutSeconds 12
+
       - name: Probe completion boundary
         if: always()
         shell: powershell
