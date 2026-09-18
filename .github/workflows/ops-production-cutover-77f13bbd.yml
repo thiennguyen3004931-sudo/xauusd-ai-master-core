@@ -1,0 +1,131 @@
+name: Ops Production Cutover 77f13bbd
+
+on:
+  push:
+    branches:
+      - ops/production-cutover-77f13bbd
+    paths:
+      - '.github/workflows/ops-production-cutover-77f13bbd.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  production-cutover:
+    name: production-cutover-77f13bbd
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout exact approved private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify exact approved target and helper provenance
+        shell: powershell
+        env:
+          EXPECTED_HEAD: 77f13bbd8e20875ed924a22a865c306551dad582
+          EXPECTED_TREE: a117da071c1db489c6027e7a10a83ceb3427b269
+          EXPECTED_HELPER_BLOB: d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $blob = (git hash-object -- .\scripts\rollout-phase7c-production-source-transition-local.ps1).Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$head"
+          Write-Host "CHECKED_OUT_TREE=$tree"
+          Write-Host "HELPER_BLOB=$blob"
+          if ($head -ne $env:EXPECTED_HEAD) { throw "PRIVATE_TARGET_HEAD_MISMATCH" }
+          if ($tree -ne $env:EXPECTED_TREE) { throw "PRIVATE_TARGET_TREE_MISMATCH" }
+          if ($blob -ne $env:EXPECTED_HELPER_BLOB) { throw "HELPER_BLOB_MISMATCH" }
+
+      - name: Fresh final M8 preflight before mutation
+        shell: powershell
+        env:
+          TARGET: 77f13bbd8e20875ed924a22a865c306551dad582
+          TARGET_TREE: a117da071c1db489c6027e7a10a83ceb3427b269
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+            -ExpectedCommit $env:TARGET `
+            -ExpectedTree $env:TARGET_TREE `
+            -RuntimeProjectRoot $env:PRODUCTION_ROOT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Canonical production source transition
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+          CURRENT_COMMIT: 86b7cd81b34b171c8601fbfbf6c42c10259e7e4c
+          TARGET_COMMIT: 77f13bbd8e20875ed924a22a865c306551dad582
+          REMOTE_MAIN: 77f13bbd8e20875ed924a22a865c306551dad582
+          HELPER_BLOB: d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\rollout-phase7c-production-source-transition-local.ps1 `
+            -ProjectRoot $env:PRODUCTION_ROOT `
+            -ExpectedCurrentCommit $env:CURRENT_COMMIT `
+            -TargetCommit $env:TARGET_COMMIT `
+            -ExpectedRemoteMainCommit $env:REMOTE_MAIN `
+            -ExpectedHelperBlobSha1 $env:HELPER_BLOB `
+            -ExpectedInitialArm DISARMED `
+            -ExpectedInitialRuntimeState HEALTHY `
+            -TimeoutSeconds 300
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify production Git exact target
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+          TARGET: 77f13bbd8e20875ed924a22a865c306551dad582
+          TARGET_TREE: a117da071c1db489c6027e7a10a83ceb3427b269
+        run: |
+          $head = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (git -C $env:PRODUCTION_ROOT rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $branch = (git -C $env:PRODUCTION_ROOT branch --show-current).Trim()
+          $dirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+          Write-Host "PRODUCTION_HEAD=$head"
+          Write-Host "PRODUCTION_TREE=$tree"
+          Write-Host "PRODUCTION_BRANCH=$branch"
+          Write-Host "PRODUCTION_DIRTY_COUNT=$($dirty.Count)"
+          if ($head -ne $env:TARGET) { throw "PRODUCTION_HEAD_MISMATCH" }
+          if ($tree -ne $env:TARGET_TREE) { throw "PRODUCTION_TREE_MISMATCH" }
+          if ($branch -ne 'main') { throw "PRODUCTION_BRANCH_MISMATCH" }
+          if ($dirty.Count -ne 0) { throw "PRODUCTION_WORKTREE_DIRTY" }
+
+      - name: Canonical post-cutover production read-only proof
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+          TARGET: 77f13bbd8e20875ed924a22a865c306551dad582
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\preflight-phase7c-production-readonly-local.ps1 `
+            -ProjectRoot $env:PRODUCTION_ROOT `
+            -ExpectedMainCommit $env:TARGET
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Canonical post-cutover M8 source and safety proof
+        shell: powershell
+        env:
+          TARGET: 77f13bbd8e20875ed924a22a865c306551dad582
+          TARGET_TREE: a117da071c1db489c6027e7a10a83ceb3427b269
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+            -ExpectedCommit $env:TARGET `
+            -ExpectedTree $env:TARGET_TREE `
+            -RuntimeProjectRoot $env:PRODUCTION_ROOT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Final authorized mutation boundary
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "AUTHORIZED_PRODUCTION_SOURCE_CUTOVER=77f13bbd8e20875ed924a22a865c306551dad582"
+          Write-Host "EXPECTED_FINAL_MODE=PAUSE"
+          Write-Host "EXPECTED_FINAL_ARM=DISARMED"
+          Write-Host "ACCOUNT_SWITCH=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
