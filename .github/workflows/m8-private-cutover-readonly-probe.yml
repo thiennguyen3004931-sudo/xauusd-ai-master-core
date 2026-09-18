@@ -1,4 +1,4 @@
-name: M8 Private Cutover Read-Only Acceptance
+name: M8 Production Git Identity Read-Only
 
 on:
   push:
@@ -11,51 +11,47 @@ permissions:
   contents: read
 
 jobs:
-  m8-readonly-acceptance:
-    name: m8-readonly-acceptance
+  production-git-identity:
+    name: production-git-identity
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Prepare exact private-main candidate
+      - name: Read production Git identity and target reachability
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $candidate = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master-core-m8-candidate"
-          $expectedCommit = "b399d2f3ccd0bfbeb35699a890f681ae28afbbac"
-          $expectedTree = "2ca865b168a6056e408b44d327ae300c4dc71239"
-          git -C $candidate fetch --no-tags origin main
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C $candidate checkout main
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C $candidate reset --hard $expectedCommit
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $head = (git -C $candidate rev-parse HEAD).Trim()
-          $tree = (git -C $candidate rev-parse "HEAD^{tree}").Trim()
-          $dirty = @(git -C $candidate status --porcelain)
-          if ($head -ne $expectedCommit -or $tree -ne $expectedTree -or $dirty.Count -ne 0) { throw "Candidate exact-source verification failed." }
-          Write-Host "CANDIDATE_HEAD=$head"
-          Write-Host "CANDIDATE_TREE=$tree"
-          Write-Host "CANDIDATE_WORKTREE=CLEAN"
+          $root = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $target = "b399d2f3ccd0bfbeb35699a890f681ae28afbbac"
+          Write-Host "READ_ONLY=TRUE"
+          Write-Host "GIT_MUTATION=NONE"
+          $head = (git -C $root rev-parse HEAD).Trim()
+          $tree = (git -C $root rev-parse "HEAD^{tree}").Trim()
+          $branchName = (git -C $root branch --show-current).Trim()
+          $origin = (git -C $root remote get-url origin).Trim()
+          $dirty = @(git -C $root status --porcelain --untracked-files=normal)
+          Write-Host "PRODUCTION_GIT_HEAD=$head"
+          Write-Host "PRODUCTION_GIT_TREE=$tree"
+          Write-Host "PRODUCTION_GIT_BRANCH=$branchName"
+          Write-Host "PRODUCTION_GIT_ORIGIN=$origin"
+          Write-Host "PRODUCTION_GIT_DIRTY_COUNT=$($dirty.Count)"
 
-      - name: Run canonical M8 read-only preflight
-        shell: powershell
-        run: |
-          $candidate = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master-core-m8-candidate"
-          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate "scripts\security\preflight-private-cutover.ps1") `
-            -ExpectedCommit "b399d2f3ccd0bfbeb35699a890f681ae28afbbac" `
-            -ExpectedTree "2ca865b168a6056e408b44d327ae300c4dc71239" `
-            -RuntimeProjectRoot $production
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $remoteRaw = @(git -C $root ls-remote --heads origin refs/heads/main)
+          if ($LASTEXITCODE -eq 0 -and $remoteRaw.Count -eq 1) {
+            $remoteMain = ([string]$remoteRaw[0]).Split([char]9)[0].Trim()
+            Write-Host "PRODUCTION_ORIGIN_MAIN=$remoteMain"
+          } else { Write-Host "PRODUCTION_ORIGIN_MAIN=UNAVAILABLE" }
 
-      - name: Safety boundary
-        if: always()
-        shell: powershell
-        run: |
+          git -C $root cat-file -e "$target^{commit}" 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "PRODUCTION_LOCAL_HAS_TARGET_COMMIT=True"
+            git -C $root merge-base --is-ancestor $head $target
+            Write-Host "PRODUCTION_HEAD_IS_ANCESTOR_OF_TARGET=$($LASTEXITCODE -eq 0)"
+          } else {
+            Write-Host "PRODUCTION_LOCAL_HAS_TARGET_COMMIT=False"
+            Write-Host "PRODUCTION_HEAD_IS_ANCESTOR_OF_TARGET=UNKNOWN"
+          }
+
           Write-Host "PRODUCTION_CUTOVER=NOT_PERFORMED"
-          Write-Host "PRODUCTION_GIT_MUTATION=NONE"
-          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "MODE_MUTATION=NONE"
           Write-Host "ARM_MUTATION=NONE"
-          Write-Host "ORDER_MUTATION=NONE"
-          Write-Host "POSITION_MUTATION=NONE"
-          Write-Host "LIVE_TEST_ORDER=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
