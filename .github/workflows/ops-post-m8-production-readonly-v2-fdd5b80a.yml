@@ -1,0 +1,66 @@
+name: Ops Post-M8 Production Read-Only V2 fdd5b80a
+
+on:
+  push:
+    branches:
+      - ops/post-m8-production-readonly-v2-fdd5b80a
+    paths:
+      - '.github/workflows/ops-post-m8-production-readonly-v2-fdd5b80a.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  production-readonly-v2:
+    name: post-m8-production-readonly-v2
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout exact private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify exact private main
+        shell: powershell
+        env:
+          EXPECTED_HEAD: fdd5b80a1ae6f018dbc9b8623d49dabbbdf5b32d
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$actual"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actual -ne $env:EXPECTED_HEAD) { throw "CHECKED_OUT_HEAD_MISMATCH" }
+
+      - name: Run strict production read-only preflight V2
+        id: preflight
+        continue-on-error: true
+        shell: powershell
+        env:
+          EXPECTED_MAIN: fdd5b80a1ae6f018dbc9b8623d49dabbbdf5b32d
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\preflight-phase7c-production-readonly-local.ps1 `
+            -ProjectRoot $env:PRODUCTION_ROOT `
+            -ExpectedMainCommit $env:EXPECTED_MAIN
+          exit $LASTEXITCODE
+
+      - name: Read-only witness verdict
+        if: always()
+        shell: powershell
+        env:
+          PREFLIGHT_OUTCOME: ${{ steps.preflight.outcome }}
+        run: |
+          Write-Host "PRODUCTION_READONLY_PREFLIGHT_STEP_OUTCOME=$env:PREFLIGHT_OUTCOME"
+          Write-Host "READ_ONLY=TRUE"
+          Write-Host "HTTP_METHODS=GET_ONLY"
+          Write-Host "GIT_MUTATION=NONE"
+          Write-Host "TASK_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
