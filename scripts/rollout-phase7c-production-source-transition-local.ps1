@@ -662,24 +662,29 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "P4 production acceptance failed with exit code $LASTEXITCODE." }
     Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_P4_ACCEPTANCE=PASS'
 
-    Assert-Pause -Stage 'PRE_ARM'
-    Assert-Arm -Expected 'DISARMED' -Stage 'PRE_ARM'
-    Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage 'PRE_ARM'
-    Assert-FlatBroker -Stage 'PRE_ARM'
-    Wait-LifecycleReadyStable -Stage 'PRE_ARM'
-    [void](Assert-RuntimeSourceExact -ExpectedCommit $TargetCommit -ExpectedTree $targetTree -Stage 'PRE_ARM')
+    Assert-Pause -Stage 'PRE_ARM_RESTORE'
+    Assert-Arm -Expected 'DISARMED' -Stage 'PRE_ARM_RESTORE'
+    Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage 'PRE_ARM_RESTORE'
+    Assert-FlatBroker -Stage 'PRE_ARM_RESTORE'
+    Wait-LifecycleReadyStable -Stage 'PRE_ARM_RESTORE'
+    [void](Assert-RuntimeSourceExact -ExpectedCommit $TargetCommit -ExpectedTree $targetTree -Stage 'PRE_ARM_RESTORE')
 
-    Invoke-LiveArmAction -Action 'ARM_LIVE'
+    if ($ExpectedInitialArm -eq 'ARMED') {
+        Invoke-LiveArmAction -Action 'ARM_LIVE'
+        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_ARM_RESTORE=PERFORMED'
+    } else {
+        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_ARM_RESTORE=SKIPPED_INITIAL_DISARMED'
+    }
     Assert-Pause -Stage 'FINAL'
-    Assert-Arm -Expected 'ARMED' -Stage 'FINAL'
+    Assert-Arm -Expected $ExpectedInitialArm -Stage 'FINAL'
     Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage 'FINAL'
     Assert-FlatBroker -Stage 'FINAL'
     Wait-LifecycleReadyStable -Stage 'FINAL'
     $finalDeploymentId = Assert-RuntimeSourceExact -ExpectedCommit $TargetCommit -ExpectedTree $targetTree -Stage 'FINAL'
-    if ($finalDeploymentId -ne $newDeploymentId) { throw 'Deployment identity changed after production acceptance/ARM restore.' }
+    if ($finalDeploymentId -ne $newDeploymentId) { throw 'Deployment identity changed after production acceptance/ARM-state preservation.' }
 
     Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_FINAL_MODE=PAUSE'
-    Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_FINAL_ARM=ARMED'
+    Write-Host "PHASE7C_PRODUCTION_SOURCE_TRANSITION_FINAL_ARM=$ExpectedInitialArm"
     Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_BRIDGE_SESSION_UNCHANGED=PASS'
     Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_ORDER_MUTATION=NONE'
     Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_POSITION_MUTATION=NONE'
