@@ -163,3 +163,42 @@ test("Trend runtime adapter accepts CRLF source from Windows checkout", () => {
   assert.match(source, /journal\("ENTRY_ACCEPTED_POSITION_PENDING_RESOLUTION"/);
   assert.match(source, /recoveredFromPending: true/);
 });
+
+
+test("runtime transform attaches pending and unresolved events to the correct lifecycle blocks", () => {
+  const legacySource = fs.readFileSync(controllerPath, "utf8");
+  const source = transformPhase7CSemiTrendRuntimeSource(legacySource);
+
+  assert.match(
+    source,
+    /if \(!opened\) \{[\s\S]*?journal\("ENTRY_ACCEPTED_POSITION_PENDING_RESOLUTION"/,
+    "accepted-but-not-yet-visible position must remain a transient pending event",
+  );
+  assert.match(
+    source,
+    /journal\("PENDING_ENTRY_EXPIRED_NO_POSITION"[\s\S]*?journal\("ENTRY_ACCEPTED_POSITION_NOT_RESOLVED"/,
+    "only the actual pending-entry expiry block may emit the unresolved warning",
+  );
+});
+
+test("pending Trend recovery matches the broker TP actually sent when fixed TP is enabled", () => {
+  const source = fs.readFileSync(controllerPath, "utf8");
+  const matcherStart = source.indexOf("function matchPendingTrendPosition(");
+  const matcherEnd = source.indexOf("function managedFromPending(", matcherStart);
+
+  assert.notEqual(matcherStart, -1, "pending-position matcher must exist");
+  assert.notEqual(matcherEnd, -1, "managed-from-pending boundary must exist");
+
+  const matcher = source.slice(matcherStart, matcherEnd);
+
+  assert.match(
+    matcher,
+    /pending\.fixedTpEnabled[\s\S]*pending\.fixedTpPrice[\s\S]*pending\.takeProfit/,
+    "fixed-TP recovery must derive the broker TP expectation from the same fixed-TP snapshot used for order submission",
+  );
+  assert.match(
+    matcher,
+    /position\.takeProfit\s*-\s*expectedTakeProfit/,
+    "pending-position TP comparison must use the derived broker TP expectation",
+  );
+});

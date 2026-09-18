@@ -2173,8 +2173,15 @@ function matchPendingTrendPosition(
     };
   }
 
+  const expectedTakeProfit =
+    pending.dailyMode !== "RECOVERY_TP" &&
+    pending.fixedTpEnabled &&
+    pending.fixedTpPrice !== null
+      ? pending.fixedTpPrice
+      : pending.takeProfit;
+
   if (
-    Math.abs(position.takeProfit - pending.takeProfit) >
+    Math.abs(position.takeProfit - expectedTakeProfit) >
     priceTolerance
   ) {
     return {
