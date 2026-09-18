@@ -1,0 +1,46 @@
+name: Ops PR22 Final LIVE ARM Contracts
+
+on:
+  push:
+    branches:
+      - ops/pr22-final-live-arm-contracts
+    paths:
+      - '.github/workflows/ops-pr22-final-live-arm-contracts.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-contracts:
+    name: pr22-final-live-arm-contracts
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR22 head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: fix/live-arm-verifier-dynamic-test-count
+          clean: true
+
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: f4fffc2628d6ab39a5c2e74d89d96a780e853da7
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$actual"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actual -ne $env:EXPECTED_HEAD) { throw "CHECKED_OUT_HEAD_MISMATCH" }
+
+      - name: Run LIVE ARM verifier source contract
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-phase7c-live-arm-verifier-source.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run canonical gate contract
+        shell: powershell
+        run: |
+          node --test .\scripts\test-phase7c-canonical-pr-gate-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
