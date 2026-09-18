@@ -213,10 +213,31 @@ test("natural position management read-only witness contract executes from exact
     "scripts",
     "test-phase7c-natural-position-management-witness.mjs",
   );
+  const implementationRelativePath =
+    "scripts/phase7c-natural-position-management-witness.mjs";
+
   assert.equal(
     fs.existsSync(contractPath),
     true,
     "natural position management witness contract must exist",
+  );
+
+  const trackedImplementation = spawnSync(
+    "git",
+    ["ls-files", "--error-unmatch", implementationRelativePath],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+    },
+  );
+  assert.equal(
+    trackedImplementation.status,
+    0,
+    [
+      "natural position management witness implementation must be tracked in exact HEAD",
+      trackedImplementation.stdout ?? "",
+      trackedImplementation.stderr ?? "",
+    ].join("\n"),
   );
 
   const result = spawnSync(
