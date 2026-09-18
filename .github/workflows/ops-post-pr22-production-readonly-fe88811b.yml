@@ -1,0 +1,71 @@
+name: Ops Post-PR22 Production Read-Only fe88811b
+
+on:
+  push:
+    branches:
+      - ops/post-pr22-production-readonly-fe88811b
+    paths:
+      - '.github/workflows/ops-post-pr22-production-readonly-fe88811b.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  production-readonly:
+    name: post-pr22-production-readonly
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify exact private main
+        shell: powershell
+        env:
+          EXPECTED_HEAD: fe88811b1f666eeefa85114a2aaceca4d318bd67
+          EXPECTED_TREE: e8fe2d8ac9858f55925646bf8f52a282149ec011
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$head"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          Write-Host "CHECKED_OUT_TREE=$tree"
+          Write-Host "EXPECTED_TREE=$env:EXPECTED_TREE"
+          if ($head -ne $env:EXPECTED_HEAD) { throw "PRIVATE_MAIN_HEAD_MISMATCH" }
+          if ($tree -ne $env:EXPECTED_TREE) { throw "PRIVATE_MAIN_TREE_MISMATCH" }
+
+      - name: Run strict production read-only preflight
+        id: preflight
+        continue-on-error: true
+        shell: powershell
+        env:
+          EXPECTED_MAIN: fe88811b1f666eeefa85114a2aaceca4d318bd67
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\preflight-phase7c-production-readonly-local.ps1 `
+            -ProjectRoot $env:PRODUCTION_ROOT `
+            -ExpectedMainCommit $env:EXPECTED_MAIN
+          exit $LASTEXITCODE
+
+      - name: Read-only witness boundary
+        if: always()
+        shell: powershell
+        env:
+          PREFLIGHT_OUTCOME: ${{ steps.preflight.outcome }}
+        run: |
+          Write-Host "PRODUCTION_READONLY_PREFLIGHT_STEP_OUTCOME=$env:PREFLIGHT_OUTCOME"
+          Write-Host "READ_ONLY=TRUE"
+          Write-Host "GIT_MUTATION=NONE"
+          Write-Host "TASK_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ACCOUNT_SWITCH=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
