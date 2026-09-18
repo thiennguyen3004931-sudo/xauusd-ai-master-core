@@ -59,6 +59,7 @@ jobs:
       - name: Structural and execution safety regressions
         run: |
           node --test scripts/test-phase7c-structural-sl-monotonicity.mjs
+          node --test scripts/test-phase7c-natural-position-management-witness.mjs
           node --test scripts/phase7c-fast-move-profit-lock.test.mjs
           node --test scripts/phase7c-fast-move-canonical-source-contract.test.mjs
           node --test scripts/phase7c-sideway-logic.test.mjs
