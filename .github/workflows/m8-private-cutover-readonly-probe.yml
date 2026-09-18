@@ -1,0 +1,107 @@
+name: M8 Private Cutover Read-Only Probe
+
+on:
+  push:
+    branches:
+      - diag/m8-readonly-preflight-b399d2f3
+    paths:
+      - ".github/workflows/m8-private-cutover-readonly-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  m8-readonly-preflight:
+    name: m8-readonly-preflight
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+    steps:
+      - name: Prepare separate candidate checkout
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $candidate = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master-core-m8-candidate"
+          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $expectedCommit = "b399d2f3ccd0bfbeb35699a890f681ae28afbbac"
+          $expectedTree = "2ca865b168a6056e408b44d327ae300c4dc71239"
+
+          Write-Host "M8_PROBE_MODE=READ_ONLY_PRODUCTION"
+          Write-Host "CANDIDATE_SOURCE_ROOT=$candidate"
+          Write-Host "RUNTIME_PROJECT_ROOT=$production"
+          Write-Host "EXPECTED_COMMIT=$expectedCommit"
+          Write-Host "EXPECTED_TREE=$expectedTree"
+          Write-Host "PRODUCTION_GIT_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
+
+          if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
+            throw "M8 candidate checkout missing: $candidate"
+          }
+          if (-not (Test-Path -LiteralPath $production -PathType Container)) {
+            throw "Production RuntimeProjectRoot missing: $production"
+          }
+
+          $origin = (git -C $candidate remote get-url origin).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "CANDIDATE_ORIGIN=$origin"
+          if ($origin -notmatch "thiennguyen3004931-sudo/xauusd-ai-master-core") {
+            throw "Candidate origin is not canonical private repo."
+          }
+
+          # Candidate checkout only. Never mutate the production worktree here.
+          git -C $candidate fetch --no-tags origin main
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $candidate checkout main
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $candidate reset --hard $expectedCommit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $head = (git -C $candidate rev-parse HEAD).Trim()
+          $tree = (git -C $candidate rev-parse "HEAD^{tree}").Trim()
+          $branch = (git -C $candidate branch --show-current).Trim()
+          $status = git -C $candidate status --porcelain
+
+          Write-Host "CANDIDATE_HEAD=$head"
+          Write-Host "CANDIDATE_TREE=$tree"
+          Write-Host "CANDIDATE_BRANCH=$branch"
+          Write-Host "CANDIDATE_WORKTREE_CLEAN=$([string]::IsNullOrWhiteSpace(($status -join "")))"
+
+          if ($head -ne $expectedCommit) { throw "Candidate HEAD mismatch." }
+          if ($tree -ne $expectedTree) { throw "Candidate tree mismatch." }
+          if ($branch -ne "main") { throw "Candidate must be on main." }
+          if (-not [string]::IsNullOrWhiteSpace(($status -join ""))) {
+            throw "Candidate worktree is not clean."
+          }
+
+      - name: Run canonical M8 read-only preflight
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $candidate = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master-core-m8-candidate"
+          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $expectedCommit = "b399d2f3ccd0bfbeb35699a890f681ae28afbbac"
+          $expectedTree = "2ca865b168a6056e408b44d327ae300c4dc71239"
+          $preflight = Join-Path $candidate "scripts\security\preflight-private-cutover.ps1"
+
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $preflight `
+            -ExpectedCommit $expectedCommit `
+            -ExpectedTree $expectedTree `
+            -RuntimeProjectRoot $production
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Probe completion boundary
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "PRODUCTION_CUTOVER=NOT_PERFORMED"
+          Write-Host "PRODUCTION_GIT_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
