@@ -1,0 +1,69 @@
+name: Ops M8 Read-Only Preflight fe88811b
+
+on:
+  push:
+    branches:
+      - ops/m8-readonly-preflight-fe88811b
+    paths:
+      - '.github/workflows/ops-m8-readonly-preflight-fe88811b.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  m8-readonly-preflight:
+    name: m8-readonly-preflight-fe88811b
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact approved private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify exact approved private main
+        shell: powershell
+        env:
+          EXPECTED_COMMIT: fe88811b1f666eeefa85114a2aaceca4d318bd67
+          EXPECTED_TREE: e8fe2d8ac9858f55925646bf8f52a282149ec011
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$head"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_COMMIT"
+          Write-Host "CHECKED_OUT_TREE=$tree"
+          Write-Host "EXPECTED_TREE=$env:EXPECTED_TREE"
+          if ($head -ne $env:EXPECTED_COMMIT) { throw "PRIVATE_TARGET_HEAD_MISMATCH" }
+          if ($tree -ne $env:EXPECTED_TREE) { throw "PRIVATE_TARGET_TREE_MISMATCH" }
+
+      - name: Run canonical M8 read-only production preflight
+        shell: powershell
+        env:
+          EXPECTED_COMMIT: fe88811b1f666eeefa85114a2aaceca4d318bd67
+          EXPECTED_TREE: e8fe2d8ac9858f55925646bf8f52a282149ec011
+          RUNTIME_PROJECT_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+            -ExpectedCommit $env:EXPECTED_COMMIT `
+            -ExpectedTree $env:EXPECTED_TREE `
+            -RuntimeProjectRoot $env:RUNTIME_PROJECT_ROOT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Read-only boundary
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "READ_ONLY=TRUE"
+          Write-Host "PRODUCTION_CUTOVER=NOT_PERFORMED"
+          Write-Host "GIT_MUTATION=NONE"
+          Write-Host "TASK_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ACCOUNT_SWITCH=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
