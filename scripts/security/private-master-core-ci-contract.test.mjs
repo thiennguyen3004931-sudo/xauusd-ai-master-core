@@ -3,6 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../..");
@@ -203,4 +204,37 @@ test("private Master/Core CI contains no production mutation or secret wiring", 
   ]) {
     assert.doesNotMatch(source, forbidden);
   }
+});
+
+
+test("natural position management read-only witness contract executes from exact head", () => {
+  const contractPath = path.join(
+    repoRoot,
+    "scripts",
+    "test-phase7c-natural-position-management-witness.mjs",
+  );
+  assert.equal(
+    fs.existsSync(contractPath),
+    true,
+    "natural position management witness contract must exist",
+  );
+
+  const result = spawnSync(
+    process.execPath,
+    ["--test", contractPath],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+    },
+  );
+
+  assert.equal(
+    result.status,
+    0,
+    [
+      "natural position management witness contract failed",
+      result.stdout ?? "",
+      result.stderr ?? "",
+    ].join("\n"),
+  );
 });
