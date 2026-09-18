@@ -1,4 +1,4 @@
-name: M8 Production Git Identity Read-Only
+name: M8 Private Production Cutover
 
 on:
   push:
@@ -11,47 +11,194 @@ permissions:
   contents: read
 
 jobs:
-  production-git-identity:
-    name: production-git-identity
+  m8-private-production-cutover:
+    name: m8-private-production-cutover
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - name: Read production Git identity and target reachability
+      - name: Re-prove M8 cutover readiness
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $root = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $candidate = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master-core-m8-candidate"
+          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
           $target = "b399d2f3ccd0bfbeb35699a890f681ae28afbbac"
-          Write-Host "READ_ONLY=TRUE"
-          Write-Host "GIT_MUTATION=NONE"
-          $head = (git -C $root rev-parse HEAD).Trim()
-          $tree = (git -C $root rev-parse "HEAD^{tree}").Trim()
-          $branchName = (git -C $root branch --show-current).Trim()
-          $origin = (git -C $root remote get-url origin).Trim()
-          $dirty = @(git -C $root status --porcelain --untracked-files=normal)
-          Write-Host "PRODUCTION_GIT_HEAD=$head"
-          Write-Host "PRODUCTION_GIT_TREE=$tree"
-          Write-Host "PRODUCTION_GIT_BRANCH=$branchName"
-          Write-Host "PRODUCTION_GIT_ORIGIN=$origin"
-          Write-Host "PRODUCTION_GIT_DIRTY_COUNT=$($dirty.Count)"
+          $targetTree = "2ca865b168a6056e408b44d327ae300c4dc71239"
 
-          $remoteRaw = @(git -C $root ls-remote --heads origin refs/heads/main)
-          if ($LASTEXITCODE -eq 0 -and $remoteRaw.Count -eq 1) {
-            $remoteMain = ([string]$remoteRaw[0]).Split([char]9)[0].Trim()
-            Write-Host "PRODUCTION_ORIGIN_MAIN=$remoteMain"
-          } else { Write-Host "PRODUCTION_ORIGIN_MAIN=UNAVAILABLE" }
+          git -C $candidate fetch --no-tags origin main
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $candidate checkout main
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $candidate reset --hard $target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          git -C $root cat-file -e "$target^{commit}" 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "PRODUCTION_LOCAL_HAS_TARGET_COMMIT=True"
-            git -C $root merge-base --is-ancestor $head $target
-            Write-Host "PRODUCTION_HEAD_IS_ANCESTOR_OF_TARGET=$($LASTEXITCODE -eq 0)"
-          } else {
-            Write-Host "PRODUCTION_LOCAL_HAS_TARGET_COMMIT=False"
-            Write-Host "PRODUCTION_HEAD_IS_ANCESTOR_OF_TARGET=UNKNOWN"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate "scripts\security\preflight-private-cutover.ps1") `
+            -ExpectedCommit $target `
+            -ExpectedTree $targetTree `
+            -RuntimeProjectRoot $production
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "M8_CUTOVER_READINESS_REPROVED=PASS"
+
+      - name: Quiesce lifecycle and fast-forward production source
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $candidate = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master-core-m8-candidate"
+          $current = "62e93ce5545195dd6bf78570c9b5fc0f4b253399"
+          $target = "b399d2f3ccd0bfbeb35699a890f681ae28afbbac"
+          $targetTree = "2ca865b168a6056e408b44d327ae300c4dc71239"
+          $privateOrigin = (git -C $candidate remote get-url origin).Trim()
+          if ($privateOrigin -notmatch "thiennguyen3004931-sudo/xauusd-ai-master-core") { throw "Candidate private origin mismatch." }
+
+          $head = (git -C $production rev-parse HEAD).Trim()
+          $branchName = (git -C $production branch --show-current).Trim()
+          $dirty = @(git -C $production status --porcelain --untracked-files=normal)
+          if ($head -ne $current -or $branchName -ne 'main' -or $dirty.Count -ne 0) {
+            throw "Production Git precondition changed. head=$head branch=$branchName dirty=$($dirty.Count)"
           }
 
-          Write-Host "PRODUCTION_CUTOVER=NOT_PERFORMED"
-          Write-Host "MODE_MUTATION=NONE"
-          Write-Host "ARM_MUTATION=NONE"
-          Write-Host "PROCESS_MUTATION=NONE"
+          $config = Get-Content -LiteralPath (Join-Path $production ".runtime\phase7c-executor-task-config.json") -Raw | ConvertFrom-Json
+          $control = ([string]$config.controlApiUrl).TrimEnd('/')
+          $mode = Invoke-RestMethod -Uri "$control/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+          $arm = Invoke-RestMethod -Uri "$control/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+          if ([string]$mode.state.mode -ne 'PAUSE') { throw "Cutover requires PAUSE." }
+          if ([string]$arm.liveArmStatus -ne 'DISARMED' -or [bool]$arm.liveExecutionArmed) { throw "Cutover requires DISARMED." }
+          Write-Host "M8_PRE_MUTATION_MODE=PAUSE"
+          Write-Host "M8_PRE_MUTATION_ARM=DISARMED"
+
+          $lifecycle = Invoke-RestMethod -Uri "$control/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 8
+          if (-not [bool]$lifecycle.running -or -not [bool]$lifecycle.ready) { throw "Cutover requires current lifecycle running/ready before controlled stop." }
+
+          $stop = Invoke-RestMethod -Uri "$control/api/v1/phase7c/lifecycle/stop" -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 55
+          $deadline = [DateTime]::UtcNow.AddSeconds(45)
+          $stopped = $false
+          do {
+            Start-Sleep -Milliseconds 500
+            try {
+              $s = Invoke-RestMethod -Uri "$control/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 8
+              $alive = @($s.processes.PSObject.Properties | Where-Object { $null -ne $_.Value -and [bool]$_.Value.alive })
+              if (-not [bool]$s.running -and $alive.Count -eq 0) { $stopped = $true; break }
+            } catch {}
+          } while ([DateTime]::UtcNow -lt $deadline)
+          if (-not $stopped) { throw "Lifecycle did not quiesce before source transition." }
+          Write-Host "M8_LIFECYCLE_STOP=PASS"
+
+          $mode2 = Invoke-RestMethod -Uri "$control/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+          $arm2 = Invoke-RestMethod -Uri "$control/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+          if ([string]$mode2.state.mode -ne 'PAUSE' -or [string]$arm2.liveArmStatus -ne 'DISARMED' -or [bool]$arm2.liveExecutionArmed) {
+            throw "Safety state changed after lifecycle stop."
+          }
+
+          git -C $production fetch --no-tags $candidate "refs/heads/main:refs/remotes/private-cutover/main"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $fetched = (git -C $production rev-parse refs/remotes/private-cutover/main).Trim()
+          if ($fetched -ne $target) { throw "Fetched private candidate mismatch. expected=$target actual=$fetched" }
+          git -C $production merge-base --is-ancestor $current $target
+          if ($LASTEXITCODE -ne 0) { throw "Production current commit is not ancestor of private target." }
+          git -C $production merge --ff-only $target
+          if ($LASTEXITCODE -ne 0) { throw "Production exact fast-forward failed." }
+
+          $postHead = (git -C $production rev-parse HEAD).Trim()
+          $postTree = (git -C $production rev-parse "HEAD^{tree}").Trim()
+          $postDirty = @(git -C $production status --porcelain --untracked-files=normal)
+          if ($postHead -ne $target -or $postTree -ne $targetTree -or $postDirty.Count -ne 0) {
+            throw "Production source fast-forward postcondition failed. head=$postHead tree=$postTree dirty=$($postDirty.Count)"
+          }
+          Write-Host "M8_PRODUCTION_GIT_FAST_FORWARD=PASS"
+          Write-Host "M8_PRODUCTION_SOURCE_HEAD=$postHead"
+          Write-Host "M8_PRODUCTION_SOURCE_TREE=$postTree"
+
+      - name: Canonical runtime recovery deploy
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $target = "b399d2f3ccd0bfbeb35699a890f681ae28afbbac"
+          $recovery = Join-Path $production "scripts\recover-phase7c-runtime-ready-stable-deploy-local.ps1"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $recovery -ExpectedCommit $target -TimeoutSeconds 180
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "M8_CANONICAL_RECOVERY_DEPLOY=PASS"
+
+      - name: Post-cutover exact-source proof and private origin switch
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $candidate = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master-core-m8-candidate"
+          $target = "b399d2f3ccd0bfbeb35699a890f681ae28afbbac"
+          $targetTree = "2ca865b168a6056e408b44d327ae300c4dc71239"
+          $config = Get-Content -LiteralPath (Join-Path $production ".runtime\phase7c-executor-task-config.json") -Raw | ConvertFrom-Json
+          $control = ([string]$config.controlApiUrl).TrimEnd('/')
+
+          $source = Invoke-RestMethod -Uri "$control/api/v1/phase7c/runtime-source-attestation" -Method Get -TimeoutSec 8
+          if ([string]$source.overall -ne 'EXACT_MATCH') { throw "Post-cutover runtime source is not EXACT_MATCH." }
+          if ([string]$source.deployment.sourceCommit -ne $target -or [string]$source.deployment.sourceTree -ne $targetTree) { throw "Post-cutover deployment identity mismatch." }
+          $components = @($source.components)
+          if ($components.Count -ne 8) { throw "Post-cutover requires exactly 8 runtime components." }
+          foreach ($c in $components) { if ([string]$c.verdict -ne 'EXACT_MATCH' -or [string]$c.sourceCommit -ne $target) { throw "Component source mismatch: $($c.component)" } }
+
+          $mode = Invoke-RestMethod -Uri "$control/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+          $arm = Invoke-RestMethod -Uri "$control/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+          $life = Invoke-RestMethod -Uri "$control/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 8
+          if ([string]$mode.state.mode -ne 'PAUSE') { throw "Post-cutover mode must remain PAUSE." }
+          if ([string]$arm.liveArmStatus -ne 'DISARMED' -or [bool]$arm.liveExecutionArmed) { throw "Post-cutover ARM must remain DISARMED." }
+          if (-not [bool]$life.running -or -not [bool]$life.ready) { throw "Post-cutover lifecycle must be running/ready." }
+
+          $accountLib = Join-Path $production "scripts\lib\phase7c-account-mode.ps1"
+          . $accountLib
+          function Resolve-ProdPath([string]$p) { if ([System.IO.Path]::IsPathRooted($p)) { return [System.IO.Path]::GetFullPath($p) }; return [System.IO.Path]::GetFullPath((Join-Path $production $p)) }
+          $envFile = Resolve-ProdPath ([string]$config.envFile)
+          $accountMode = ConvertTo-Phase7CAccountMode ([string]$config.accountMode)
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode $accountMode -RequireTrading
+          $base = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+          $health = Invoke-RestMethod -Uri "$base/health" -Headers $headers -Method Get -TimeoutSec 8
+          if (-not [bool]$health.connected -or [string]$health.status -ne 'ok') { throw "Post-cutover bridge is unhealthy." }
+          $pr = Invoke-WebRequest -Uri "$base/v1/positions?symbol=XAUUSD" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 8
+          $or = Invoke-WebRequest -Uri "$base/v1/orders?symbol=XAUUSD" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 8
+          $praw = ([string]$pr.Content).Trim(); $oraw = ([string]$or.Content).Trim()
+          $positions = if ([string]::IsNullOrWhiteSpace($praw) -or $praw -eq '[]') { @() } else { @($praw | ConvertFrom-Json) }
+          $orders = if ([string]::IsNullOrWhiteSpace($oraw) -or $oraw -eq '[]') { @() } else { @($oraw | ConvertFrom-Json) }
+          if ($positions.Count -ne 0 -or $orders.Count -ne 0) { throw "Post-cutover XAUUSD must remain flat." }
+
+          $privateOrigin = (git -C $candidate remote get-url origin).Trim()
+          if ($privateOrigin -notmatch "thiennguyen3004931-sudo/xauusd-ai-master-core") { throw "Private candidate origin mismatch." }
+          git -C $production remote set-url origin $privateOrigin
+          if ($LASTEXITCODE -ne 0) { throw "Failed to switch production origin to canonical private repo." }
+          git -C $production fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to refresh private origin/main." }
+          $originMain = (git -C $production rev-parse refs/remotes/origin/main).Trim()
+          if ($originMain -ne $target) { throw "Canonical private origin/main mismatch. expected=$target actual=$originMain" }
+
+          Write-Host "PRIVATE_SOURCE=MERGED_APPROVED"
+          Write-Host "RUNNING_SOURCE=EXACT_PRIVATE_SOURCE"
+          Write-Host "SOURCE_EQUIVALENCE=PASS"
+          Write-Host "POST_CUTOVER_SAFETY=PASS"
+          Write-Host "M8_PRODUCTION_CUTOVER=PASS"
+          Write-Host "RUNTIME_SOURCE_COMMIT=$target"
+          Write-Host "RUNTIME_SOURCE_TREE=$targetTree"
+          Write-Host "ALL_8_COMPONENT_ATTESTATIONS=EXACT"
+          Write-Host "BOT_MODE=PAUSE"
+          Write-Host "LIVE_EXECUTION_ARMED=FALSE"
+          Write-Host "XAUUSD_POSITIONS=0"
+          Write-Host "XAUUSD_PENDING_ORDERS=0"
+          Write-Host "PRODUCTION_ORIGIN=$privateOrigin"
+
+      - name: Fail-closed boundary
+        if: failure()
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          try {
+            $config = Get-Content -LiteralPath (Join-Path $production ".runtime\phase7c-executor-task-config.json") -Raw | ConvertFrom-Json
+            $control = ([string]$config.controlApiUrl).TrimEnd('/')
+            $payload = @{ mode = 'PAUSE'; source = 'm8-cutover-failclosed' } | ConvertTo-Json -Compress
+            Invoke-RestMethod -Uri "$control/api/v1/phase7c/bot-mode" -Method Post -ContentType 'application/json' -Body $payload -TimeoutSec 8 | Out-Null
+          } catch {}
+          Write-Host "M8_CUTOVER_FAIL_CLOSED=PAUSE_DISARMED_EXPECTED"
+          Write-Host "ARM_ACTION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
