@@ -11,9 +11,9 @@ $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 $ExpectedMainCommit = $ExpectedMainCommit.Trim().ToLowerInvariant()
 $TaskName = 'XAUUSD-Phase7C-Executors'
 $ExpectedOriginUrls = @(
-    'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master',
-    'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master.git',
-    'git@github.com:thiennguyen3004931-sudo/xauusd-ai-master.git'
+    'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core',
+    'https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core.git',
+    'git@github.com:thiennguyen3004931-sudo/xauusd-ai-master-core.git'
 )
 $RequiredComponents = @('api','web','supervisor','trend','sideway','telegram','regime-notifier','lifecycle-broker')
 
