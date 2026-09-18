@@ -1,0 +1,186 @@
+name: Ops ARM-Only LIVE 77f13bbd
+
+on:
+  push:
+    branches:
+      - ops/arm-only-live-77f13bbd
+    paths:
+      - '.github/workflows/ops-arm-only-live-77f13bbd.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  arm-only-live:
+    name: arm-only-live
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify exact private main and production source
+        shell: powershell
+        env:
+          TARGET: 77f13bbd8e20875ed924a22a865c306551dad582
+          TARGET_TREE: a117da071c1db489c6027e7a10a83ceb3427b269
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $repoHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $repoTree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $prodHead = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodTree = (git -C $env:PRODUCTION_ROOT rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $prodBranch = (git -C $env:PRODUCTION_ROOT branch --show-current).Trim()
+          $prodDirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+          Write-Host "PRIVATE_MAIN_HEAD=$repoHead"
+          Write-Host "PRIVATE_MAIN_TREE=$repoTree"
+          Write-Host "PRODUCTION_HEAD=$prodHead"
+          Write-Host "PRODUCTION_TREE=$prodTree"
+          Write-Host "PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "PRODUCTION_DIRTY_COUNT=$($prodDirty.Count)"
+          if ($repoHead -ne $env:TARGET) { throw "PRIVATE_MAIN_HEAD_MISMATCH" }
+          if ($repoTree -ne $env:TARGET_TREE) { throw "PRIVATE_MAIN_TREE_MISMATCH" }
+          if ($prodHead -ne $env:TARGET) { throw "PRODUCTION_HEAD_MISMATCH" }
+          if ($prodTree -ne $env:TARGET_TREE) { throw "PRODUCTION_TREE_MISMATCH" }
+          if ($prodBranch -ne 'main') { throw "PRODUCTION_BRANCH_MISMATCH" }
+          if ($prodDirty.Count -ne 0) { throw "PRODUCTION_WORKTREE_DIRTY" }
+
+      - name: Fresh ARM-only readiness gate
+        shell: powershell
+        run: |
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $auto = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-auto-activation/status' -Method Get -TimeoutSec 10
+
+          Write-Host "PRE_ARM_CAN_ARM=$($cap.canArm)"
+          Write-Host "PRE_ARM_ACCOUNT_MODE=$($cap.accountMode)"
+          Write-Host "PRE_ARM_BOT_MODE=$($cap.botMode)"
+          Write-Host "PRE_ARM_STATUS=$($cap.liveArmStatus)"
+          Write-Host "PRE_ARM_ARMED=$($cap.liveExecutionArmed)"
+          Write-Host "PRE_ARM_POSITIONS=$($cap.openXauusdPositions)"
+          Write-Host "PRE_ARM_ORPHANED_REQUEST=$($cap.orphanedControlRequest)"
+          Write-Host "PRE_ARM_BLOCKED_BY=$([string]::Join(',', @($cap.armBlockedBy)))"
+          Write-Host "PRE_ARM_ORDER_SEND=$($cap.safety.orderSend)"
+          Write-Host "PRE_ARM_AUTO_AFTER_ARM=$($cap.safety.autoAfterArm)"
+
+          Write-Host "PRE_ARM_AUTO_APPROVED=$($auto.approved)"
+          Write-Host "PRE_ARM_AUTO_BLOCKED_BY=$([string]::Join(',', @($auto.blockedBy)))"
+
+          if ($cap.canArm -ne $true) { throw "LIVE_ARM_CAPABILITY_NOT_APPROVED" }
+          if ([string]$cap.accountMode -ne 'LIVE') { throw "ACCOUNT_MODE_NOT_LIVE" }
+          if ([string]$cap.botMode -ne 'PAUSE') { throw "BOT_MODE_NOT_PAUSE" }
+          if ([string]$cap.liveArmStatus -ne 'DISARMED') { throw "LIVE_ARM_NOT_DISARMED" }
+          if ($cap.liveExecutionArmed -eq $true) { throw "LIVE_ALREADY_ARMED" }
+          if ([int]$cap.openXauusdPositions -ne 0) { throw "XAUUSD_NOT_FLAT" }
+          if ($cap.orphanedControlRequest -eq $true) { throw "ORPHANED_ARM_REQUEST" }
+          if ($cap.safety.orderSend -ne $false) { throw "ARM_CONTROL_ORDER_SEND_NOT_FALSE" }
+          if ($cap.safety.autoAfterArm -ne $false) { throw "AUTO_AFTER_ARM_NOT_FALSE" }
+          if ($auto.approved -eq $true) { throw "AUTO_UNEXPECTEDLY_APPROVED_BEFORE_ARM" }
+          $blocked = @($auto.blockedBy)
+          if ($blocked.Count -ne 1 -or [string]$blocked[0] -ne 'liveArmSatisfied') {
+            throw "AUTO_PRE_ARM_BLOCKERS_NOT_EXACT"
+          }
+
+      - name: Execute canonical ARM_LIVE only
+        id: arm
+        shell: powershell
+        run: |
+          $pre = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/preflight' `
+            -Method Post `
+            -ContentType 'application/json' `
+            -Body '{"action":"ARM_LIVE"}' `
+            -TimeoutSec 10
+
+          Write-Host "ARM_PREFLIGHT_APPROVED=$($pre.approved)"
+          Write-Host "ARM_PREFLIGHT_BLOCKED_BY=$([string]::Join(',', @($pre.blockedBy)))"
+          if ($pre.approved -ne $true) { throw "ARM_PREFLIGHT_NOT_APPROVED" }
+          if ([string]::IsNullOrWhiteSpace([string]$pre.preflightToken)) { throw "ARM_PREFLIGHT_TOKEN_MISSING" }
+
+          $body = @{
+            action = 'ARM_LIVE'
+            preflightToken = [string]$pre.preflightToken
+            confirmation = 'ARM_LIVE'
+          } | ConvertTo-Json -Compress
+
+          $exec = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/execute' `
+            -Method Post `
+            -ContentType 'application/json' `
+            -Body $body `
+            -TimeoutSec 10
+
+          Write-Host "ARM_EXECUTE_ACCEPTED=$($exec.accepted)"
+          Write-Host "ARM_EXECUTE_REQUEST_ID=$($exec.requestId)"
+          if ($exec.accepted -ne $true) { throw "ARM_EXECUTE_NOT_ACCEPTED" }
+          if ([string]::IsNullOrWhiteSpace([string]$exec.requestId)) { throw "ARM_REQUEST_ID_MISSING" }
+
+          $deadline = [DateTime]::UtcNow.AddSeconds(75)
+          $final = $null
+          do {
+            Start-Sleep -Seconds 2
+            $rid = [uri]::EscapeDataString([string]$exec.requestId)
+            $final = Invoke-RestMethod -Uri "http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/status?requestId=$rid" -Method Get -TimeoutSec 10
+            Write-Host "ARM_STATUS=$($final.status)|PHASE=$($final.phase)|FINAL_ARM=$($final.finalArmStatus)"
+            if ([string]$final.status -in @('PASS','FAIL')) { break }
+          } while ([DateTime]::UtcNow -lt $deadline)
+
+          if ($null -eq $final) { throw "ARM_STATUS_MISSING" }
+          if ([string]$final.status -ne 'PASS') { throw "ARM_CONTROL_FAILED status=$($final.status) phase=$($final.phase) message=$($final.message)" }
+          if ([string]$final.finalArmStatus -ne 'ARMED') { throw "ARM_FINAL_STATUS_NOT_ARMED" }
+
+      - name: Verify ARMED PAUSE FLAT and no AUTO mutation
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $arm = powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $env:PRODUCTION_ROOT 'scripts\get-phase7c-live-arm-local.ps1') -WorkDir (Join-Path $env:PRODUCTION_ROOT '.runtime') 2>&1
+          $arm | ForEach-Object { Write-Host $_ }
+          if (($arm -join "`n") -notmatch 'PHASE7C_LIVE_ARM_STATUS=ARMED') { throw "CANONICAL_ARM_STATUS_NOT_ARMED" }
+
+          $account = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/account-mode' -Method Get -TimeoutSec 10
+          $bot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $auto = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-auto-activation/status' -Method Get -TimeoutSec 10
+
+          Write-Host "POST_ARM_ACCOUNT_MODE=$($account.state.accountMode)"
+          Write-Host "POST_ARM_BOT_MODE=$($bot.state.mode)"
+          Write-Host "POST_ARM_RUNNING=$($life.running)"
+          Write-Host "POST_ARM_READY=$($life.ready)"
+          Write-Host "POST_ARM_TELEGRAM_READY=$($life.telegramReady)"
+          Write-Host "POST_ARM_POSITIONS=$($life.bridge.openXauusdPositions)"
+          Write-Host "POST_ARM_CAPABILITY_STATUS=$($cap.liveArmStatus)"
+          Write-Host "POST_ARM_CAPABILITY_ARMED=$($cap.liveExecutionArmed)"
+          Write-Host "POST_ARM_CAN_DISARM=$($cap.canDisarm)"
+          Write-Host "POST_ARM_AUTO_AFTER_ARM=$($cap.safety.autoAfterArm)"
+          Write-Host "POST_ARM_AUTO_APPROVED=$($auto.approved)"
+          Write-Host "POST_ARM_AUTO_BLOCKED_BY=$([string]::Join(',', @($auto.blockedBy)))"
+          foreach ($p in $auto.checks.PSObject.Properties) {
+            Write-Host "POST_ARM_AUTO_CHECK_$($p.Name.ToUpperInvariant())=$($p.Value)"
+          }
+
+          if ([string]$account.state.accountMode -ne 'LIVE') { throw "POST_ARM_ACCOUNT_NOT_LIVE" }
+          if ([string]$bot.state.mode -ne 'PAUSE') { throw "POST_ARM_MODE_NOT_PAUSE" }
+          if ($life.running -ne $true -or $life.ready -ne $true) { throw "POST_ARM_RUNTIME_NOT_READY" }
+          if ([int]$life.bridge.openXauusdPositions -ne 0) { throw "POST_ARM_XAUUSD_NOT_FLAT" }
+          if ([string]$cap.liveArmStatus -ne 'ARMED' -or $cap.liveExecutionArmed -ne $true) { throw "POST_ARM_NOT_ARMED" }
+          if ($cap.safety.autoAfterArm -ne $false) { throw "POST_ARM_AUTO_AFTER_ARM_NOT_FALSE" }
+
+          $prodDirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+          Write-Host "POST_ARM_PRODUCTION_DIRTY_COUNT=$($prodDirty.Count)"
+          if ($prodDirty.Count -ne 0) { throw "POST_ARM_PRODUCTION_WORKTREE_DIRTY" }
+
+      - name: Authorized mutation boundary
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "AUTHORIZED_MUTATION=ARM_LIVE_ONLY"
+          Write-Host "AUTO_ENABLE_CALL=NONE"
+          Write-Host "BOT_MODE_MUTATION=NONE"
+          Write-Host "ACCOUNT_SWITCH=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
