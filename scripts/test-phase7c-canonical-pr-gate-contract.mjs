@@ -55,6 +55,7 @@ test("canonical Windows gate covers cross-shell lifecycle and LIVE source safety
     "test-phase7c-system-lifecycle-broker-contract.ps1",
     "test-phase7c-lifecycle-broker-acl-source.ps1",
     "test-phase7c-web-live-arm-demo-auto-source.ps1",
+    "test-phase7c-live-arm-verifier-source.ps1",
     "test-phase7c-activation-safety-source.ps1",
     "test-phase7c-live-risk-profile-source.ps1",
   ]) {
