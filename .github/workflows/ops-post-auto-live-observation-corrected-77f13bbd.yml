@@ -1,0 +1,141 @@
+name: Ops Post-AUTO LIVE Observation Corrected 77f13bbd
+
+on:
+  push:
+    branches:
+      - ops/post-auto-live-observation-corrected-77f13bbd
+    paths:
+      - '.github/workflows/ops-post-auto-live-observation-corrected-77f13bbd.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  observe-corrected:
+    name: post-auto-live-observation-corrected
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout exact private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Read canonical runtime and direct bridge pending orders
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $root = $env:PRODUCTION_ROOT
+          $accountPath = Join-Path $root '.runtime\phase7c-account-mode.json'
+          $lib = Join-Path $root 'scripts\lib\phase7c-account-mode.ps1'
+          . $lib
+
+          $state = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+          $envFile = [string]$state.envFile
+          if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $root $envFile }
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+          $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+
+          $orders = @(Invoke-RestMethod -Uri "$bridgeBase/v1/orders?symbol=XAUUSD" -Headers @{ "x-mt5-api-key" = $envInfo.apiKey } -Method Get -TimeoutSec 10)
+          $positions = @(Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers @{ "x-mt5-api-key" = $envInfo.apiKey } -Method Get -TimeoutSec 10)
+          $health = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers @{ "x-mt5-api-key" = $envInfo.apiKey } -Method Get -TimeoutSec 10
+          $bot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+
+          Write-Host "CORR_BOT_MODE=$($bot.state.mode)"
+          Write-Host "CORR_ARM_STATUS=$($health.liveArmStatus)"
+          Write-Host "CORR_ARMED=$($health.liveExecutionArmed)"
+          Write-Host "CORR_RUNTIME_READY=$($life.ready)"
+          Write-Host "CORR_OPEN_POSITION_COUNT=$($positions.Count)"
+          Write-Host "CORR_PENDING_ORDER_COUNT=$($orders.Count)"
+          foreach ($o in $orders) {
+            Write-Host "CORR_PENDING_ORDER=TICKET=$($o.ticket)|TYPE=$($o.type)|VOLUME=$($o.volume)|PRICE=$($o.price)|MAGIC=$($o.magic)|COMMENT=$($o.comment)"
+          }
+
+      - name: Read canonical notifier and AUTO journal paths
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $base = Join-Path $env:PRODUCTION_ROOT '.runtime\phase7c-executors'
+          $statePath = Join-Path $base 'regime-notifier-state.json'
+          $journalStatePath = Join-Path $base 'auto-journal-state.json'
+          $journalPath = Join-Path $base 'auto-decisions.jsonl'
+
+          Write-Host "CORR_NOTIFIER_STATE_PATH=$statePath"
+          Write-Host "CORR_AUTO_JOURNAL_PATH=$journalPath"
+
+          if (Test-Path -LiteralPath $statePath) {
+            $s = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+            Write-Host "CORR_NOTIFIER_REGIME=$($s.regime)"
+            Write-Host "CORR_NOTIFIER_RECOMMENDED=$($s.recommendedMode)"
+            Write-Host "CORR_NOTIFIER_ACTIVE=$($s.activeMode)"
+            Write-Host "CORR_NOTIFIER_LAST_CANDLE=$($s.lastCandleCloseTime)"
+            Write-Host "CORR_NOTIFIER_LAST_NOTIFIED_AT=$($s.lastNotifiedAt)"
+          } else { Write-Host "CORR_NOTIFIER_STATE=MISSING" }
+
+          if (Test-Path -LiteralPath $journalStatePath) {
+            $j = Get-Content -LiteralPath $journalStatePath -Raw | ConvertFrom-Json
+            Write-Host "CORR_JOURNAL_REGIME=$($j.regime)"
+            Write-Host "CORR_JOURNAL_RECOMMENDED=$($j.recommendedMode)"
+            Write-Host "CORR_JOURNAL_ACTIVE=$($j.activeMode)"
+            Write-Host "CORR_JOURNAL_CONFIDENCE=$($j.confidence)"
+            Write-Host "CORR_JOURNAL_LAST_CANDLE=$($j.lastCandleCloseTime)"
+            Write-Host "CORR_JOURNAL_UPDATED_AT=$($j.updatedAt)"
+          } else { Write-Host "CORR_JOURNAL_STATE=MISSING" }
+
+          if (Test-Path -LiteralPath $journalPath) {
+            $rows = @(Get-Content -LiteralPath $journalPath -Tail 3)
+            foreach ($line in $rows) {
+              if ([string]::IsNullOrWhiteSpace($line)) { continue }
+              $r = $line | ConvertFrom-Json
+              Write-Host "CORR_JOURNAL_ROW=TS=$($r.timestamp)|REGIME=$($r.regime)|RECOMMENDED=$($r.recommendedMode)|ACTIVE=$($r.activeMode)|CONF=$($r.confidence)|REASONS=$([string]::Join(',', @($r.reasons)))"
+            }
+          } else { Write-Host "CORR_JOURNAL_FILE=MISSING" }
+
+      - name: Read fresh classifier and decision monitor
+        shell: powershell
+        run: |
+          $regime = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/live-regime?symbol=XAUUSD&count=320' -Method Get -TimeoutSec 12
+          $d = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/decision-monitor?symbol=XAUUSD' -Method Get -TimeoutSec 12
+
+          Write-Host "CORR_LIVE_REGIME=$($regime.regime)"
+          Write-Host "CORR_LIVE_CONFIDENCE=$($regime.confidence)"
+          Write-Host "CORR_LIVE_RECOMMENDED=$($regime.recommendedMode)"
+          Write-Host "CORR_LIVE_ACTIVE=$($regime.activeMode)"
+          Write-Host "CORR_LIVE_LAST_CANDLE=$($regime.lastCandleCloseTime)"
+          Write-Host "CORR_LIVE_REASONS=$([string]::Join(' | ', @($regime.reasons)))"
+
+          Write-Host "CORR_DECISION_ENGINE_REGIME=$($d.engine.regime)"
+          Write-Host "CORR_DECISION_ENGINE_RECOMMENDED=$($d.engine.recommendedMode)"
+          Write-Host "CORR_DECISION_MODE_ACTIVE=$($d.mode.active)"
+          Write-Host "CORR_DECISION_EFFECTIVE_STRATEGY=$($d.mode.effectiveStrategy)"
+          Write-Host "CORR_DECISION_POSITION_STATE=$($d.position.state)"
+          Write-Host "CORR_DECISION_POSITION_COUNT=$($d.position.count)"
+          Write-Host "CORR_DECISION_PRETRADE_STRATEGY=$($d.preTrade.strategy)"
+          Write-Host "CORR_DECISION_PRETRADE_APPROVED=$($d.preTrade.approved)"
+          Write-Host "CORR_DECISION_PRETRADE_STAGE=$($d.preTrade.stage)"
+          Write-Host "CORR_DECISION_PRETRADE_ACTION=$($d.preTrade.action)"
+          Write-Host "CORR_DECISION_PRETRADE_REASON=$($d.preTrade.decisionReason)"
+
+          $recent = @($d.recentDecisions) | Select-Object -First 8
+          foreach ($r in $recent) {
+            Write-Host "CORR_RECENT_DECISION=TS=$($r.timestamp)|STRATEGY=$($r.strategy)|EVENT=$($r.event)|STAGE=$($r.stage)|REASON_CODE=$($r.reasonCode)|REASON=$($r.reason)"
+          }
+
+      - name: Corrected read-only boundary
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "CORR_READ_ONLY=TRUE"
+          Write-Host "CORR_HTTP_METHODS=GET_ONLY"
+          Write-Host "CORR_MODE_MUTATION=NONE"
+          Write-Host "CORR_ARM_MUTATION=NONE"
+          Write-Host "CORR_ACCOUNT_SWITCH=NONE"
+          Write-Host "CORR_ORDER_MUTATION=NONE"
+          Write-Host "CORR_POSITION_MUTATION=NONE"
+          Write-Host "CORR_LIVE_TEST_ORDER=NONE"
