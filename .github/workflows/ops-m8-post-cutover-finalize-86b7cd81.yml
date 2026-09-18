@@ -1,0 +1,167 @@
+name: Ops M8 Post-Cutover Finalize 86b7cd81
+
+on:
+  push:
+    branches:
+      - ops/m8-post-cutover-finalize-86b7cd81
+    paths:
+      - '.github/workflows/ops-m8-post-cutover-finalize-86b7cd81.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  m8-post-cutover-finalize:
+    name: m8-post-cutover-finalize-86b7cd81
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact approved private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify approved private target
+        shell: powershell
+        env:
+          TARGET_COMMIT: 86b7cd81b34b171c8601fbfbf6c42c10259e7e4c
+          TARGET_TREE: 8fda93937a8c18f2b4c434c02bbad2a4fc835df6
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $origin = (git remote get-url origin).Trim()
+          if ($head -ne $env:TARGET_COMMIT) { throw "PRIVATE_TARGET_HEAD_MISMATCH" }
+          if ($tree -ne $env:TARGET_TREE) { throw "PRIVATE_TARGET_TREE_MISMATCH" }
+          if ($origin -notmatch 'thiennguyen3004931-sudo/xauusd-ai-master-core(?:\.git)?$') { throw "PRIVATE_TARGET_ORIGIN_MISMATCH" }
+          Write-Host "PRIVATE_TARGET=PASS"
+
+      - name: Re-prove post-cutover runtime and safety
+        shell: powershell
+        env:
+          TARGET_COMMIT: 86b7cd81b34b171c8601fbfbf6c42c10259e7e4c
+          TARGET_TREE: 8fda93937a8c18f2b4c434c02bbad2a4fc835df6
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+            -ExpectedCommit $env:TARGET_COMMIT `
+            -ExpectedTree $env:TARGET_TREE `
+            -RuntimeProjectRoot $env:PRODUCTION_ROOT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $head = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (git -C $env:PRODUCTION_ROOT rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $branch = (git -C $env:PRODUCTION_ROOT branch --show-current).Trim()
+          $dirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+          if ($head -ne $env:TARGET_COMMIT) { throw "PRODUCTION_TARGET_HEAD_MISMATCH" }
+          if ($tree -ne $env:TARGET_TREE) { throw "PRODUCTION_TARGET_TREE_MISMATCH" }
+          if ($branch -ne 'main') { throw "PRODUCTION_BRANCH_NOT_MAIN" }
+          if ($dirty.Count -ne 0) { throw "PRODUCTION_WORKTREE_DIRTY" }
+
+          $config = Get-Content -LiteralPath (Join-Path $env:PRODUCTION_ROOT '.runtime\phase7c-executor-task-config.json') -Raw | ConvertFrom-Json
+          $control = ([string]$config.controlApiUrl).TrimEnd('/')
+          $source = Invoke-RestMethod -Uri "$control/api/v1/phase7c/runtime-source-attestation" -Method Get -TimeoutSec 8
+          if ([string]$source.overall -ne 'EXACT_MATCH') { throw "RUNTIME_NOT_EXACT" }
+          if ([string]$source.deployment.sourceCommit -ne $env:TARGET_COMMIT) { throw "RUNTIME_COMMIT_MISMATCH" }
+          if ([string]$source.deployment.sourceTree -ne $env:TARGET_TREE) { throw "RUNTIME_TREE_MISMATCH" }
+          $deploymentId = [string]$source.deployment.deploymentId
+          $required = @('api','web','lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')
+          foreach ($name in $required) {
+            $matches = @($source.components | Where-Object { [string]$_.component -eq $name })
+            if ($matches.Count -ne 1) { throw "RUNTIME_COMPONENT_COUNT_MISMATCH:$name" }
+            $c = $matches[0]
+            if ([string]$c.verdict -ne 'EXACT_MATCH') { throw "RUNTIME_COMPONENT_NOT_EXACT:$name" }
+            if ([string]$c.sourceCommit -ne $env:TARGET_COMMIT) { throw "RUNTIME_COMPONENT_COMMIT_MISMATCH:$name" }
+            if ([string]$c.deploymentId -ne $deploymentId) { throw "RUNTIME_COMPONENT_DEPLOYMENT_MISMATCH:$name" }
+          }
+
+          $mode = Invoke-RestMethod -Uri "$control/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+          $arm = Invoke-RestMethod -Uri "$control/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+          $life = Invoke-RestMethod -Uri "$control/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 8
+          if ([string]$mode.state.mode -ne 'PAUSE') { throw "MODE_NOT_PAUSE" }
+          if ([string]$arm.liveArmStatus -ne 'DISARMED' -or [bool]$arm.liveExecutionArmed) { throw "ARM_NOT_DISARMED" }
+          if (-not [bool]$life.running -or -not [bool]$life.ready) { throw "LIFECYCLE_NOT_RUNNING_READY" }
+
+          Write-Host "RUNNING_SOURCE=EXACT_PRIVATE_SOURCE"
+          Write-Host "SOURCE_EQUIVALENCE=PASS"
+          Write-Host "POST_CUTOVER_SAFETY=PASS"
+          Write-Host "ALL_8_COMPONENT_ATTESTATIONS=EXACT"
+          Write-Host "BOT_MODE=PAUSE"
+          Write-Host "LIVE_EXECUTION_ARMED=FALSE"
+
+      - name: Switch production origin to canonical private repository
+        shell: powershell
+        env:
+          TARGET_COMMIT: 86b7cd81b34b171c8601fbfbf6c42c10259e7e4c
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $privateOrigin = (git remote get-url origin).Trim()
+          if ($privateOrigin -notmatch 'thiennguyen3004931-sudo/xauusd-ai-master-core(?:\.git)?$') { throw "PRIVATE_ORIGIN_MISMATCH" }
+          $currentOrigin = (git -C $env:PRODUCTION_ROOT remote get-url origin).Trim()
+          Write-Host "PRODUCTION_ORIGIN_BEFORE=$currentOrigin"
+          if ($currentOrigin -notmatch 'thiennguyen3004931-sudo/xauusd-ai-master(?:-core)?(?:\.git)?$') { throw "PRODUCTION_ORIGIN_UNEXPECTED" }
+          git -C $env:PRODUCTION_ROOT remote set-url origin $privateOrigin
+          if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_ORIGIN_SWITCH_FAILED" }
+          git -C $env:PRODUCTION_ROOT fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main"
+          if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_PRIVATE_ORIGIN_FETCH_FAILED" }
+          $originMain = (git -C $env:PRODUCTION_ROOT rev-parse refs/remotes/origin/main).Trim().ToLowerInvariant()
+          $originUrl = (git -C $env:PRODUCTION_ROOT remote get-url origin).Trim()
+          if ($originMain -ne $env:TARGET_COMMIT) { throw "PRODUCTION_PRIVATE_ORIGIN_MAIN_MISMATCH" }
+          if ($originUrl -notmatch 'thiennguyen3004931-sudo/xauusd-ai-master-core(?:\.git)?$') { throw "PRODUCTION_PRIVATE_ORIGIN_URL_MISMATCH" }
+          Write-Host "PRODUCTION_PRIVATE_ORIGIN=PASS"
+          Write-Host "PRODUCTION_ORIGIN=$originUrl"
+
+      - name: Final M8 post-cutover acceptance
+        shell: powershell
+        env:
+          TARGET_COMMIT: 86b7cd81b34b171c8601fbfbf6c42c10259e7e4c
+          TARGET_TREE: 8fda93937a8c18f2b4c434c02bbad2a4fc835df6
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+            -ExpectedCommit $env:TARGET_COMMIT `
+            -ExpectedTree $env:TARGET_TREE `
+            -RuntimeProjectRoot $env:PRODUCTION_ROOT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $head = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (git -C $env:PRODUCTION_ROOT rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $origin = (git -C $env:PRODUCTION_ROOT remote get-url origin).Trim()
+          $dirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+          if ($head -ne $env:TARGET_COMMIT -or $tree -ne $env:TARGET_TREE -or $dirty.Count -ne 0) { throw "FINAL_SOURCE_MISMATCH" }
+          if ($origin -notmatch 'thiennguyen3004931-sudo/xauusd-ai-master-core(?:\.git)?$') { throw "FINAL_PRIVATE_ORIGIN_MISMATCH" }
+
+          Write-Host "PRIVATE_SOURCE=MERGED_APPROVED"
+          Write-Host "RUNNING_SOURCE=EXACT_PRIVATE_SOURCE"
+          Write-Host "SOURCE_EQUIVALENCE=PASS"
+          Write-Host "POST_CUTOVER_SAFETY=PASS"
+          Write-Host "M8_PRODUCTION_CUTOVER=PASS"
+          Write-Host "RUNTIME_SOURCE_COMMIT=$env:TARGET_COMMIT"
+          Write-Host "RUNTIME_SOURCE_TREE=$env:TARGET_TREE"
+          Write-Host "ALL_8_COMPONENT_ATTESTATIONS=EXACT"
+          Write-Host "FINAL_MODE=PAUSE"
+          Write-Host "FINAL_ARM=DISARMED"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
+
+      - name: Fail-closed boundary
+        if: failure()
+        shell: powershell
+        continue-on-error: true
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          try {
+            $config = Get-Content -LiteralPath (Join-Path $env:PRODUCTION_ROOT '.runtime\phase7c-executor-task-config.json') -Raw | ConvertFrom-Json
+            $control = ([string]$config.controlApiUrl).TrimEnd('/')
+            $payload = @{ mode = 'PAUSE'; source = 'm8-post-cutover-finalize-failclosed' } | ConvertTo-Json -Compress
+            Invoke-RestMethod -Uri "$control/api/v1/phase7c/bot-mode" -Method Post -ContentType 'application/json' -Body $payload -TimeoutSec 8 | Out-Null
+          } catch {}
+          Write-Host "M8_FINALIZE_FAIL_CLOSED=PAUSE_EXPECTED"
+          Write-Host "ARM_ACTION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
