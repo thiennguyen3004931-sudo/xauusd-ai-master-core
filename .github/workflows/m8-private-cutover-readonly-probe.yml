@@ -185,6 +185,82 @@ jobs:
             Write-Host "XAUUSD_PENDING_ORDERS=UNAVAILABLE"
           }
 
+      - name: MT5 bridge OS-level read-only diagnostics
+        if: always()
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Stop"
+          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $config = Get-Content -LiteralPath (Join-Path $production ".runtime\phase7c-executor-task-config.json") -Raw | ConvertFrom-Json
+          $accountLib = Join-Path $production "scripts\lib\phase7c-account-mode.ps1"
+          . $accountLib
+
+          function Resolve-ProdPath([string]$p) {
+            if ([System.IO.Path]::IsPathRooted($p)) { return [System.IO.Path]::GetFullPath($p) }
+            return [System.IO.Path]::GetFullPath((Join-Path $production $p))
+          }
+
+          $envFile = Resolve-ProdPath ([string]$config.envFile)
+          $accountMode = ConvertTo-Phase7CAccountMode ([string]$config.accountMode)
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode $accountMode
+
+          $hostName = [string]$envInfo.bridgeHost
+          $port = [int]$envInfo.bridgePort
+          Write-Host "M8_DIAGNOSTIC=MT5_BRIDGE_OS_READ_ONLY"
+          Write-Host "BRIDGE_HOST=$hostName"
+          Write-Host "BRIDGE_PORT=$port"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "TASK_MUTATION=NONE"
+          Write-Host "BRIDGE_RESTART=NONE"
+
+          try {
+            $tnc = Test-NetConnection -ComputerName $hostName -Port $port -WarningAction SilentlyContinue
+            Write-Host "BRIDGE_TCP_TEST=$($tnc.TcpTestSucceeded)"
+          } catch {
+            Write-Host "BRIDGE_TCP_TEST=ERROR"
+            Write-Host "BRIDGE_TCP_ERROR_TYPE=$($_.Exception.GetType().Name)"
+          }
+
+          try {
+            $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop)
+            Write-Host "BRIDGE_LISTENER_COUNT=$($listeners.Count)"
+            foreach ($listener in $listeners) {
+              Write-Host "BRIDGE_LISTENER_PID=$($listener.OwningProcess)"
+              try {
+                $p = Get-Process -Id $listener.OwningProcess -ErrorAction Stop
+                Write-Host "BRIDGE_LISTENER_PROCESS_NAME=$($p.ProcessName)"
+                Write-Host "BRIDGE_LISTENER_PROCESS_START_TIME=$($p.StartTime.ToString('o'))"
+              } catch {
+                Write-Host "BRIDGE_LISTENER_PROCESS_LOOKUP=FAIL"
+              }
+            }
+          } catch {
+            Write-Host "BRIDGE_LISTENER_COUNT=0"
+            Write-Host "BRIDGE_LISTENER_ERROR_TYPE=$($_.Exception.GetType().Name)"
+          }
+
+          try {
+            $services = @(Get-Service | Where-Object { $_.Name -match "MT5|Bridge|XAUUSD" -or $_.DisplayName -match "MT5|Bridge|XAUUSD" })
+            Write-Host "BRIDGE_RELATED_SERVICE_COUNT=$($services.Count)"
+            foreach ($svc in $services) {
+              Write-Host "BRIDGE_RELATED_SERVICE=$($svc.Name)|STATUS=$($svc.Status)"
+            }
+          } catch {
+            Write-Host "BRIDGE_RELATED_SERVICE_QUERY=FAIL"
+          }
+
+          try {
+            Import-Module ScheduledTasks -ErrorAction Stop
+            $tasks = @(Get-ScheduledTask | Where-Object { $_.TaskName -match "MT5|Bridge|XAUUSD" })
+            Write-Host "BRIDGE_RELATED_TASK_COUNT=$($tasks.Count)"
+            foreach ($task in $tasks) {
+              Write-Host "BRIDGE_RELATED_TASK=$($task.TaskName)|STATE=$($task.State)"
+            }
+          } catch {
+            Write-Host "BRIDGE_RELATED_TASK_QUERY=FAIL"
+          }
+
       - name: Probe completion boundary
         if: always()
         shell: powershell
