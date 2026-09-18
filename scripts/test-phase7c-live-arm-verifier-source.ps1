@@ -54,6 +54,15 @@ Assert-Contains $source 'tempfile.TemporaryDirectory' 'temporary arm storage con
 Assert-Contains $source '$ErrorActionPreference = "Continue"' 'native unittest stderr compatibility'
 Assert-Contains $source '$LASTEXITCODE' 'native unittest exit-code gate'
 Assert-Contains $source 'LIVE_ARM_REGRESSION_TESTS=PASS' 'regression completion marker'
+Assert-Contains $source '$ExpectedLiveArmTests' 'dynamic expected LIVE ARM test count'
+Assert-Contains $source '[regex]::Matches($TestSource' 'test-source method discovery'
+Assert-Contains $source '$RanMatch' 'unittest summary count parser'
+Assert-Contains $source '$RanCount -ne $ExpectedLiveArmTests' 'executed test count equality gate'
+Assert-Contains $source 'DISCOVERED_LIVE_ARM_TEST_COUNT=' 'discovered test count evidence'
+Assert-Contains $source 'LIVE_ARM_TEST_COUNT=$RanCount' 'executed test count evidence'
+Assert-NotContains $source "Ran\\s+4\\s+tests" 'hard-coded four-test summary gate'
+Assert-NotContains $source 'LIVE_ARM_TEST_COUNT=4' 'hard-coded four-test count evidence'
+Assert-NotContains $source 'Expected exactly 4 LIVE ARM regression tests.' 'hard-coded four-test failure message'
 
 # Mutation boundary must be verified from source.
 Assert-Contains $source 'self\._require_trading\(\)' 'mutation guard source scan'

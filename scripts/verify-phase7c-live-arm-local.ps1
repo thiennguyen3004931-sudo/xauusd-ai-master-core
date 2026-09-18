@@ -323,6 +323,12 @@ if (-not $TestSource.Contains("tempfile.TemporaryDirectory")) {
   Fail "LIVE ARM regression no longer uses temporary arm storage."
 }
 
+$ExpectedLiveArmTests = ([regex]::Matches($TestSource, '(?m)^\s+def\s+test_[A-Za-z0-9_]+\s*\(')).Count
+if ($ExpectedLiveArmTests -le 0) {
+  Fail "LIVE ARM regression source exposes no discoverable test methods."
+}
+Write-Host "DISCOVERED_LIVE_ARM_TEST_COUNT=$ExpectedLiveArmTests"
+
 Push-Location $BridgeDir
 try {
   $SavedErrorActionPreference = $ErrorActionPreference
@@ -355,15 +361,21 @@ try {
   if ($TestText -notmatch '(?m)^OK\s*$') {
     Fail "LIVE ARM regression exited 0 without unittest OK."
   }
-  if ($TestText -notmatch 'Ran\s+4\s+tests') {
-    Fail "Expected exactly 4 LIVE ARM regression tests."
+
+  $RanMatch = [regex]::Match($TestText, '(?m)^Ran\s+(\d+)\s+tests?\s+in\b')
+  if (-not $RanMatch.Success) {
+    Fail "LIVE ARM regression output is missing the unittest Ran N tests summary."
+  }
+  $RanCount = [int]$RanMatch.Groups[1].Value
+  if ($RanCount -ne $ExpectedLiveArmTests) {
+    Fail "LIVE ARM regression executed test count does not match source discovery. Expected=$ExpectedLiveArmTests Actual=$RanCount"
   }
 }
 finally {
   Pop-Location
 }
 
-Write-Host "LIVE_ARM_TEST_COUNT=4"
+Write-Host "LIVE_ARM_TEST_COUNT=$RanCount"
 Write-Host "LIVE_ARM_REGRESSION_TESTS=PASS"
 
 # ============================================================
