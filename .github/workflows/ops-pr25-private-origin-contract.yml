@@ -1,0 +1,42 @@
+name: Ops PR25 Private Origin Contract
+
+on:
+  push:
+    branches:
+      - ops/pr25-private-origin-contract
+    paths:
+      - '.github/workflows/ops-pr25-private-origin-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: pr25-private-origin-contract
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR25 head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: fix/source-transition-private-origin
+          clean: true
+
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: 3b4600766ddd8bc95a28d4d86de042b205b739af
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$actual"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actual -ne $env:EXPECTED_HEAD) { throw "CHECKED_OUT_HEAD_MISMATCH" }
+
+      - name: Source transition origin contract - PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-production-source-transition-rollout-source.ps1
+
+      - name: Source transition origin contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-production-source-transition-rollout-source.ps1
