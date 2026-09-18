@@ -1,0 +1,42 @@
+name: Ops PR24 Preserve ARM Contract
+
+on:
+  push:
+    branches:
+      - ops/pr24-preserve-arm-contract
+    paths:
+      - '.github/workflows/ops-pr24-preserve-arm-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: pr24-preserve-arm-contract
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR24 head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: fix/source-transition-preserve-initial-arm
+          clean: true
+
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: cc8e581c1b06a2868d6f07e473c624cad5b30ec0
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$actual"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actual -ne $env:EXPECTED_HEAD) { throw "CHECKED_OUT_HEAD_MISMATCH" }
+
+      - name: Source transition contract - PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-production-source-transition-rollout-source.ps1
+
+      - name: Source transition contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-production-source-transition-rollout-source.ps1
