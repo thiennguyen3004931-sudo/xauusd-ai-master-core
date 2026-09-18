@@ -1,0 +1,94 @@
+name: Ops Post-AUTO Bridge Array Proof 77f13bbd
+
+on:
+  push:
+    branches:
+      - ops/post-auto-bridge-array-proof-77f13bbd
+    paths:
+      - '.github/workflows/ops-post-auto-bridge-array-proof-77f13bbd.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    name: post-auto-bridge-array-proof
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout exact private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Read two canonical bridge snapshots with raw JSON parsing
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $root = $env:PRODUCTION_ROOT
+          . (Join-Path $root 'scripts\lib\phase7c-account-mode.ps1')
+          $state = Get-Content -LiteralPath (Join-Path $root '.runtime\phase7c-account-mode.json') -Raw | ConvertFrom-Json
+          $envFile = [string]$state.envFile
+          if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $root $envFile }
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+          $base = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers = @{ "x-mt5-api-key" = $envInfo.apiKey }
+
+          function Read-BridgeArray([string]$Path) {
+            $resp = Invoke-WebRequest -Uri "$base$Path" -Headers $headers -UseBasicParsing -TimeoutSec 10
+            $raw = ([string]$resp.Content).Trim()
+            if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq '[]') { return @() }
+            $parsed = $raw | ConvertFrom-Json
+            return @($parsed | Where-Object { $null -ne $_ })
+          }
+
+          function Snapshot([string]$Label) {
+            $positions = @(Read-BridgeArray '/v1/positions?symbol=XAUUSD')
+            $orders = @(Read-BridgeArray '/v1/orders?symbol=XAUUSD')
+            $bot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 10
+            $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+            $regime = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/live-regime?symbol=XAUUSD&count=320' -Method Get -TimeoutSec 12
+            $decision = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/decision-monitor?symbol=XAUUSD' -Method Get -TimeoutSec 12
+
+            Write-Host "$($Label)_BOT_MODE=$($bot.state.mode)"
+            Write-Host "$($Label)_READY=$($life.ready)"
+            Write-Host "$($Label)_ARM_STATUS=$($life.bridge.liveArmStatus)"
+            Write-Host "$($Label)_POSITIONS=$($positions.Count)"
+            Write-Host "$($Label)_PENDING_ORDERS=$($orders.Count)"
+            Write-Host "$($Label)_REGIME=$($regime.regime)"
+            Write-Host "$($Label)_RECOMMENDED=$($regime.recommendedMode)"
+            Write-Host "$($Label)_CONFIDENCE=$($regime.confidence)"
+            Write-Host "$($Label)_DECISION_POSITION_COUNT=$($decision.position.count)"
+            Write-Host "$($Label)_DECISION_POSITION_STATE=$($decision.position.state)"
+            Write-Host "$($Label)_PRETRADE_STRATEGY=$($decision.preTrade.strategy)"
+            Write-Host "$($Label)_PRETRADE_APPROVED=$($decision.preTrade.approved)"
+            Write-Host "$($Label)_PRETRADE_STAGE=$($decision.preTrade.stage)"
+            Write-Host "$($Label)_PRETRADE_REASON=$($decision.preTrade.decisionReason)"
+
+            foreach ($p in $positions) {
+              Write-Host "$($Label)_POSITION=TICKET=$($p.ticket)|SIDE=$($p.side)|VOLUME=$($p.volume)|ENTRY=$($p.entry)|SL=$($p.stopLoss)|TP=$($p.takeProfit)"
+            }
+            foreach ($o in $orders) {
+              Write-Host "$($Label)_ORDER=TICKET=$($o.ticket)|TYPE=$($o.type)|VOLUME=$($o.volume)|PRICE=$($o.price)|MAGIC=$($o.magic)|COMMENT=$($o.comment)"
+            }
+          }
+
+          Snapshot 'PROOF1'
+          Start-Sleep -Seconds 5
+          Snapshot 'PROOF2'
+
+      - name: Read-only boundary
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "PROOF_READ_ONLY=TRUE"
+          Write-Host "PROOF_HTTP_METHODS=GET_ONLY"
+          Write-Host "PROOF_MODE_MUTATION=NONE"
+          Write-Host "PROOF_ARM_MUTATION=NONE"
+          Write-Host "PROOF_ORDER_MUTATION=NONE"
+          Write-Host "PROOF_POSITION_MUTATION=NONE"
+          Write-Host "PROOF_LIVE_TEST_ORDER=NONE"
