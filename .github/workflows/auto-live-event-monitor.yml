@@ -8,6 +8,12 @@ on:
     paths:
       - 'scripts/ops/auto-live-event-monitor.ps1'
       - '.github/workflows/auto-live-event-monitor.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/ops/auto-live-event-monitor.ps1'
+      - '.github/workflows/auto-live-event-monitor.yml'
   workflow_dispatch:
     inputs:
       notify:
