@@ -113,6 +113,78 @@ jobs:
             -ExpectedMainCommit $currentRuntimeCommit `
             -TimeoutSeconds 12
 
+      - name: Resilient runtime safety snapshot
+        if: always()
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Stop"
+          $production = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $configPath = Join-Path $production ".runtime\phase7c-executor-task-config.json"
+          $accountLib = Join-Path $production "scripts\lib\phase7c-account-mode.ps1"
+
+          Write-Host "M8_DIAGNOSTIC=RESILIENT_RUNTIME_SAFETY_SNAPSHOT"
+          Write-Host "READ_ONLY=TRUE"
+          Write-Host "HTTP_METHODS=GET_ONLY"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+
+          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+          $control = ([string]$config.controlApiUrl).TrimEnd("/")
+
+          $mode = Invoke-RestMethod -Uri "$control/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+          $arm = Invoke-RestMethod -Uri "$control/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+          $lifecycle = Invoke-RestMethod -Uri "$control/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 8
+          $source = Invoke-RestMethod -Uri "$control/api/v1/phase7c/runtime-source-attestation" -Method Get -TimeoutSec 8
+
+          Write-Host "BOT_MODE=$($mode.state.mode)"
+          Write-Host "ARM=$($arm.liveArmStatus)"
+          Write-Host "LIVE_EXECUTION_ARMED=$($arm.liveExecutionArmed)"
+          Write-Host "LIFECYCLE_RUNNING=$($lifecycle.running)"
+          Write-Host "LIFECYCLE_READY=$($lifecycle.ready)"
+          Write-Host "ACCOUNT_MODE=$($lifecycle.accountMode.accountMode)"
+          Write-Host "CONTROL_API_MT5_REACHABLE=$($lifecycle.bridge.reachable)"
+          Write-Host "RUNTIME_SOURCE_OVERALL=$($source.overall)"
+          Write-Host "RUNTIME_SOURCE_COMMIT=$($source.deployment.sourceCommit)"
+          Write-Host "RUNTIME_SOURCE_TREE=$($source.deployment.sourceTree)"
+
+          . $accountLib
+          function Resolve-ProdPath([string]$p) {
+            if ([System.IO.Path]::IsPathRooted($p)) { return [System.IO.Path]::GetFullPath($p) }
+            return [System.IO.Path]::GetFullPath((Join-Path $production $p))
+          }
+
+          $envFile = Resolve-ProdPath ([string]$config.envFile)
+          $accountMode = ConvertTo-Phase7CAccountMode ([string]$config.accountMode)
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode $accountMode
+          $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers = @{ "x-mt5-api-key" = $envInfo.apiKey }
+
+          try {
+            $health = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers $headers -Method Get -TimeoutSec 8
+            $healthy = [bool]$health.connected -and [string]$health.status -eq "ok"
+            Write-Host "MT5_BRIDGE_HEALTH=$(if ($healthy) { 'PASS' } else { 'FAIL' })"
+            Write-Host "MT5_BRIDGE_CONNECTED=$($health.connected)"
+            Write-Host "MT5_BRIDGE_STATUS=$($health.status)"
+
+            $positionsResponse = Invoke-WebRequest -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 8
+            $ordersResponse = Invoke-WebRequest -Uri "$bridgeBase/v1/orders?symbol=XAUUSD" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 8
+            $positionsRaw = ([string]$positionsResponse.Content).Trim()
+            $ordersRaw = ([string]$ordersResponse.Content).Trim()
+            $positions = if ([string]::IsNullOrWhiteSpace($positionsRaw) -or $positionsRaw -eq "[]") { @() } else { @($positionsRaw | ConvertFrom-Json) }
+            $orders = if ([string]::IsNullOrWhiteSpace($ordersRaw) -or $ordersRaw -eq "[]") { @() } else { @($ordersRaw | ConvertFrom-Json) }
+            Write-Host "XAUUSD_POSITIONS=$($positions.Count)"
+            Write-Host "XAUUSD_PENDING_ORDERS=$($orders.Count)"
+          } catch {
+            Write-Host "MT5_BRIDGE_HEALTH=FAIL"
+            Write-Host "MT5_BRIDGE_ERROR_TYPE=$($_.Exception.GetType().Name)"
+            Write-Host "XAUUSD_POSITIONS=UNAVAILABLE"
+            Write-Host "XAUUSD_PENDING_ORDERS=UNAVAILABLE"
+          }
+
       - name: Probe completion boundary
         if: always()
         shell: powershell
