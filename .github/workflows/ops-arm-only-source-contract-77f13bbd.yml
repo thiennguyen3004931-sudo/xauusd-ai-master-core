@@ -1,0 +1,67 @@
+name: Ops ARM-Only Source Contract 77f13bbd
+
+on:
+  push:
+    branches:
+      - ops/arm-only-source-contract-77f13bbd
+    paths:
+      - '.github/workflows/ops-arm-only-source-contract-77f13bbd.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  arm-only-source-contract:
+    name: arm-only-source-contract
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout exact private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: 77f13bbd8e20875ed924a22a865c306551dad582
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$actual"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actual -ne $env:EXPECTED_HEAD) { throw "CHECKED_OUT_HEAD_MISMATCH" }
+
+      - name: LIVE ARM source contract - PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-live-arm-source.ps1
+
+      - name: LIVE ARM source contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-live-arm-source.ps1
+
+      - name: Web LIVE ARM + AUTO separation contract - PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-web-live-arm-demo-auto-source.ps1
+
+      - name: Web LIVE ARM + AUTO separation contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-web-live-arm-demo-auto-source.ps1
+
+      - name: LIVE ARM verifier source contract - PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-live-arm-verifier-source.ps1
+
+      - name: LIVE ARM verifier source contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-live-arm-verifier-source.ps1
+
+      - name: Contract summary
+        shell: powershell
+        run: |
+          Write-Host "ARM_ONLY_SOURCE_CONTRACT=PASS"
+          Write-Host "ARM_AUTO_SEPARATION=PASS"
+          Write-Host "ORDER_SEND_IN_CONTROL_PATH=FALSE"
+          Write-Host "AUTO_AFTER_ARM=FALSE"
