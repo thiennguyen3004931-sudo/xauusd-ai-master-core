@@ -1,0 +1,68 @@
+name: Ops M8 Read-Only Preflight 86b7cd81
+
+on:
+  push:
+    branches:
+      - ops/m8-readonly-preflight-86b7cd81
+    paths:
+      - '.github/workflows/ops-m8-readonly-preflight-86b7cd81.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  m8-readonly-preflight:
+    name: m8-readonly-preflight-86b7cd81
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact canonical private main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify exact approved main
+        shell: powershell
+        env:
+          EXPECTED_COMMIT: 86b7cd81b34b171c8601fbfbf6c42c10259e7e4c
+          EXPECTED_TREE: 8fda93937a8c18f2b4c434c02bbad2a4fc835df6
+        run: |
+          $actualHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $actualTree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$actualHead"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_COMMIT"
+          Write-Host "CHECKED_OUT_TREE=$actualTree"
+          Write-Host "EXPECTED_TREE=$env:EXPECTED_TREE"
+          if ($actualHead -ne $env:EXPECTED_COMMIT) { throw "CHECKED_OUT_HEAD_MISMATCH" }
+          if ($actualTree -ne $env:EXPECTED_TREE) { throw "CHECKED_OUT_TREE_MISMATCH" }
+
+      - name: Run canonical M8 read-only production preflight
+        shell: powershell
+        env:
+          EXPECTED_COMMIT: 86b7cd81b34b171c8601fbfbf6c42c10259e7e4c
+          EXPECTED_TREE: 8fda93937a8c18f2b4c434c02bbad2a4fc835df6
+          RUNTIME_PROJECT_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+            -ExpectedCommit $env:EXPECTED_COMMIT `
+            -ExpectedTree $env:EXPECTED_TREE `
+            -RuntimeProjectRoot $env:RUNTIME_PROJECT_ROOT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Mutation boundary
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "READ_ONLY=TRUE"
+          Write-Host "PRODUCTION_CUTOVER=NOT_PERFORMED"
+          Write-Host "GIT_MUTATION=NONE"
+          Write-Host "TASK_MUTATION=NONE"
+          Write-Host "PROCESS_MUTATION=NONE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
