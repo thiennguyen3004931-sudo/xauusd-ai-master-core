@@ -1,0 +1,70 @@
+name: Ops LIVE ARM Read-Only Verify 86b7cd81
+
+on:
+  push:
+    branches:
+      - ops/live-arm-readonly-verify-86b7cd81
+    paths:
+      - '.github/workflows/ops-live-arm-readonly-verify-86b7cd81.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  live-arm-readonly-verify:
+    name: live-arm-readonly-verify-production
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout private main for workflow provenance
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify private main provenance
+        shell: powershell
+        env:
+          EXPECTED_MAIN: fdd5b80a1ae6f018dbc9b8623d49dabbbdf5b32d
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_MAIN=$actual"
+          Write-Host "EXPECTED_MAIN=$env:EXPECTED_MAIN"
+          if ($actual -ne $env:EXPECTED_MAIN) { throw "PRIVATE_MAIN_CHANGED" }
+
+      - name: Verify production source identity before audit
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+          EXPECTED_PRODUCTION: 86b7cd81b34b171c8601fbfbf6c42c10259e7e4c
+        run: |
+          $head = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $dirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+          Write-Host "PRODUCTION_HEAD=$head"
+          Write-Host "PRODUCTION_DIRTY_COUNT=$($dirty.Count)"
+          if ($head -ne $env:EXPECTED_PRODUCTION) { throw "PRODUCTION_HEAD_CHANGED" }
+          if ($dirty.Count -ne 0) { throw "PRODUCTION_WORKTREE_DIRTY" }
+
+      - name: Run canonical LIVE ARM verifier read-only
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $script = Join-Path $env:PRODUCTION_ROOT 'scripts\verify-phase7c-live-arm-local.ps1'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -WorkDir (Join-Path $env:PRODUCTION_ROOT '.runtime')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Read-only safety boundary
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "READ_ONLY=TRUE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ACCOUNT_SWITCH=NONE"
+          Write-Host "TASK_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
