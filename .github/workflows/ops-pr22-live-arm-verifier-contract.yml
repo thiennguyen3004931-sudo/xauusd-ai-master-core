@@ -1,0 +1,40 @@
+name: Ops PR22 LIVE ARM Verifier Contract
+
+on:
+  push:
+    branches:
+      - ops/pr22-live-arm-verifier-contract
+    paths:
+      - '.github/workflows/ops-pr22-live-arm-verifier-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-contract:
+    name: pr22-live-arm-verifier-contract
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR22 head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: fix/live-arm-verifier-dynamic-test-count
+          clean: true
+
+      - name: Verify exact head
+        shell: powershell
+        env:
+          EXPECTED_HEAD: 1e24ab0d0b69e0a7fbe596395e425d64ece5929a
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$actual"
+          Write-Host "EXPECTED_HEAD=$env:EXPECTED_HEAD"
+          if ($actual -ne $env:EXPECTED_HEAD) { throw "CHECKED_OUT_HEAD_MISMATCH" }
+
+      - name: Run LIVE ARM verifier source contract
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-phase7c-live-arm-verifier-source.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
