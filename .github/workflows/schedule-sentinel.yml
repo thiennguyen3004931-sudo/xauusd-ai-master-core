@@ -1,0 +1,31 @@
+name: GitHub Schedule Sentinel
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '3-58/5 * * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  sentinel:
+    name: github-schedule-sentinel
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+
+    steps:
+      - name: Emit scheduler evidence
+        shell: powershell
+        run: |
+          Write-Host "SCHEDULE_SENTINEL=PASS"
+          Write-Host "SCHEDULE_SENTINEL_EVENT=${{ github.event_name }}"
+          Write-Host "SCHEDULE_SENTINEL_SHA=${{ github.sha }}"
+          Write-Host "SCHEDULE_SENTINEL_REF=${{ github.ref }}"
+          Write-Host "PRODUCTION_MUTATION=NONE"
+          Write-Host "TRADING_LOGIC_MUTATION=NONE"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
