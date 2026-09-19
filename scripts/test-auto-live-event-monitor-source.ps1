@@ -39,7 +39,8 @@ function Assert-NotMatch {
 }
 
 Assert-Literal $Workflow "name: AUTO LIVE Read-Only Event Monitor" 'workflow identity'
-Assert-Literal $Workflow "cron: '2-57/5 * * * *'" 'five-minute offset schedule'
+Assert-Literal $Workflow "cron: '2-52/10 * * * *'" 'staggered schedule A'
+Assert-Literal $Workflow "cron: '7-57/10 * * * *'" 'staggered schedule B'
 Assert-Literal $Workflow 'issues: write' 'issue-only persistence permission'
 Assert-Literal $Workflow 'contents: read' 'read-only repository content permission'
 Assert-Literal $Workflow 'runs-on: [self-hosted, Windows, X64, xauusd-core-ci]' 'canonical self-hosted runner labels'
