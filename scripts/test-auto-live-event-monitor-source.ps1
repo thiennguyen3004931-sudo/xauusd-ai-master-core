@@ -130,7 +130,7 @@ foreach ($StateField in @(
 
 $GitHubCalls = [regex]::Matches(
   $Monitor,
-  '(?m)^\s*Invoke-GitHubJson\s+-Method\s+(Get|Post|Patch|Put|Delete)\s+-Uri\s+([^\r\n]+)'
+  '(?m)^\s*(?:\$[A-Za-z_][A-Za-z0-9_]*\s*=\s*)?Invoke-GitHubJson\s+-Method\s+(Get|Post|Patch|Put|Delete)\s+-Uri\s+([^\r\n]+)'
 )
 if ($GitHubCalls.Count -ne 3) {
   throw "Expected exactly 3 GitHub issue persistence calls, found $($GitHubCalls.Count)."
