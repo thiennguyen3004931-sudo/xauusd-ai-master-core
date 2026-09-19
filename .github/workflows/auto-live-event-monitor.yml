@@ -22,7 +22,7 @@ on:
         default: false
         type: boolean
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '2-57/5 * * * *'
 
 permissions:
   contents: read
