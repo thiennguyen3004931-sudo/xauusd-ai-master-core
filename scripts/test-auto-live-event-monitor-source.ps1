@@ -48,6 +48,8 @@ Assert-Literal $Workflow '$notify = $false' 'validation defaults to no persisten
 Assert-Literal $Workflow "github.event_name }}' -eq 'schedule'" 'schedule event detection'
 Assert-Literal $Workflow '$notify = $true' 'scheduled persistence enabled'
 Assert-Literal $Workflow "inputs.notify }}' -eq 'true'" 'manual notify opt-in'
+Assert-Literal $Workflow "[monitor-notify-bootstrap]" 'temporary one-shot notify bootstrap marker'
+Assert-Literal $Workflow "github.ref }}' -eq 'refs/heads/main'" 'bootstrap limited to main'
 Assert-Literal $Workflow 'EXPECTED_SOURCE_COMMIT: 77f13bbd8e20875ed924a22a865c306551dad582' 'pinned production source'
 Assert-Literal $Workflow "MONITOR_ISSUE_NUMBER: '28'" 'canonical event ledger issue'
 Assert-Literal $Workflow 'MONITOR_PRODUCTION_READ_ONLY=TRUE' 'read-only safety summary'
