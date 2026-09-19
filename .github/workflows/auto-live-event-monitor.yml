@@ -45,6 +45,10 @@ jobs:
           fetch-depth: 0
           clean: true
 
+      - name: Static monitor safety contract
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-auto-live-event-monitor-source.ps1
+
       - name: Run read-only production monitor
         shell: powershell
         env:
