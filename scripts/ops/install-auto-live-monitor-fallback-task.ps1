@@ -71,7 +71,32 @@ if (-not (Test-Path -LiteralPath $pwsh)) {
   throw "WINDOWS_POWERSHELL_NOT_FOUND=$pwsh"
 }
 
-$userId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$userId = [string]$identity.Name
+$expectedSid = [string]$identity.User.Value
+$defaultDomain = $env:COMPUTERNAME
+if ($userId -match '^([^\\]+)\\') {
+  $defaultDomain = $Matches[1]
+}
+
+function Resolve-PrincipalSid {
+  param(
+    [Parameter(Mandatory = $true)][string]$Account,
+    [Parameter(Mandatory = $true)][string]$DefaultDomain
+  )
+
+  try {
+    if ($Account -match '\\') {
+      $ntAccount = New-Object System.Security.Principal.NTAccount($Account)
+    } else {
+      $ntAccount = New-Object System.Security.Principal.NTAccount($DefaultDomain, $Account)
+    }
+    return [string]$ntAccount.Translate([System.Security.Principal.SecurityIdentifier]).Value
+  } catch {
+    throw "TASK_PRINCIPAL_SID_RESOLUTION_FAILED account=$Account domain=$DefaultDomain error=$($_.Exception.Message)"
+  }
+}
+
 $actionArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Repository "{1}" -Workflow "{2}" -Ref "{3}" -MinGapMinutes 4' -f $installedTrigger, $Repository, $Workflow, $Ref
 $action = New-ScheduledTaskAction -Execute $pwsh -Argument $actionArgs
 $startAt = (Get-Date).AddMinutes(1)
@@ -85,8 +110,10 @@ Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
 $registered = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $info = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction Stop
 
-if ($registered.Principal.UserId -ne $userId) {
-  throw "TASK_PRINCIPAL_MISMATCH expected=$userId actual=$($registered.Principal.UserId)"
+$actualPrincipalUser = [string]$registered.Principal.UserId
+$actualSid = Resolve-PrincipalSid -Account $actualPrincipalUser -DefaultDomain $defaultDomain
+if (-not [string]::Equals($expectedSid, $actualSid, [System.StringComparison]::OrdinalIgnoreCase)) {
+  throw "TASK_PRINCIPAL_SID_MISMATCH expected_user=$userId expected_sid=$expectedSid actual_user=$actualPrincipalUser actual_sid=$actualSid"
 }
 if ($registered.Principal.RunLevel -ne 'Limited') {
   throw "TASK_RUNLEVEL_NOT_LIMITED actual=$($registered.Principal.RunLevel)"
@@ -98,6 +125,8 @@ if ($registered.Settings.MultipleInstances -ne 'IgnoreNew') {
 Write-Host "WINDOWS_FALLBACK_TASK=$TaskName"
 Write-Host "WINDOWS_FALLBACK_TASK_STATE=$($registered.State)"
 Write-Host "WINDOWS_FALLBACK_TASK_USER=$userId"
+Write-Host "WINDOWS_FALLBACK_TASK_PRINCIPAL=$actualPrincipalUser"
+Write-Host "WINDOWS_FALLBACK_TASK_PRINCIPAL_SID=$actualSid"
 Write-Host "WINDOWS_FALLBACK_TASK_RUNLEVEL=$($registered.Principal.RunLevel)"
 Write-Host "WINDOWS_FALLBACK_INTERVAL_MINUTES=$IntervalMinutes"
 Write-Host "WINDOWS_FALLBACK_NEXT_RUN=$($info.NextRunTime.ToString('o'))"
