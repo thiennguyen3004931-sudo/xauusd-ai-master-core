@@ -55,7 +55,7 @@ Assert-Literal $Trigger "Get-Process -Name 'Runner.Listener'" 'runner-online gua
 Assert-Literal $Trigger "'run', 'list'" 'existing-run query'
 Assert-Literal $Trigger "'queued', 'in_progress', 'waiting', 'pending', 'requested'" 'active-run guard'
 Assert-Literal $Trigger '[int]$MinGapMinutes = 4' 'recent-run gap guard'
-Assert-Literal $Trigger "'workflow', 'run', $Workflow" 'canonical workflow dispatch'
+Assert-Literal $Trigger '''workflow'', ''run'', $Workflow' 'canonical workflow dispatch'
 Assert-Literal $Trigger "'-f', 'notify=true'" 'notification persistence enabled'
 Assert-Literal $Trigger 'FALLBACK_DISPATCH=SKIP_RUNNER_NOT_LISTENING' 'offline no-backlog guard'
 Assert-Literal $Trigger 'FALLBACK_DISPATCH=SKIP_ACTIVE_RUN' 'duplicate active-run guard'
