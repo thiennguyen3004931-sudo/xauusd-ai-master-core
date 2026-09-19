@@ -62,8 +62,6 @@ jobs:
             $notify = $true
           } elseif ('${{ github.event_name }}' -eq 'workflow_dispatch' -and '${{ inputs.notify }}' -eq 'true') {
             $notify = $true
-          } elseif ('${{ github.event_name }}' -eq 'push' -and '${{ github.ref }}' -eq 'refs/heads/main' -and '${{ github.event.head_commit.message }}'.Contains('[monitor-notify-bootstrap]')) {
-            $notify = $true
           }
 
           $params = @{
