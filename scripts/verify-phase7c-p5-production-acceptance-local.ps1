@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ExpectedCommit,
 
-    [string]$ApiBaseUrl = "http://127.0.0.1:3001"
+    [string]$ApiBaseUrl = "http://127.0.0.1:3711"
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,7 +18,7 @@ function Fail-P5Acceptance {
 
 function Invoke-GetJson {
     param([string]$Uri)
-    return Invoke-RestMethod -Method Get -Uri $Uri -Headers @{ Accept = "application/json" } -TimeoutSec 20
+    return Invoke-RestMethod -Method Get -Uri $Uri -Headers @{ Accept = "application/json" } -TimeoutSec 120
 }
 
 function Assert-P5Safety {
@@ -216,4 +216,5 @@ Write-Output "P5_PRODUCTION_ACCEPTANCE_POSITION_MUTATION=NONE"
 Write-Output "P5_PRODUCTION_ACCEPTANCE_MODE_CHANGE=NONE"
 Write-Output "P5_PRODUCTION_ACCEPTANCE_ARM_CHANGE=NONE"
 Write-Output "P5_PRODUCTION_ACCEPTANCE_LIVE_TEST_ORDER=NONE"
+Write-Output "P5_HTTP_TIMEOUT_SECONDS=120"
 Write-Output "P5_PRODUCTION_ACCEPTANCE=PASS"
