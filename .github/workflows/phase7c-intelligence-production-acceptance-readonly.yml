@@ -30,7 +30,7 @@ permissions:
 env:
   EXPECTED_PRODUCTION_COMMIT: 77f13bbd8e20875ed924a22a865c306551dad582
   PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
-  API_BASE_URL: http://127.0.0.1:3001
+  API_BASE_URL: http://127.0.0.1:3711
 
 jobs:
   validate:
