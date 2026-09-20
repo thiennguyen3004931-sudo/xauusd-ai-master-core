@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   contract-and-build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 22
     steps:
       - name: Checkout
@@ -94,7 +94,7 @@ jobs:
         run: git diff --check origin/${{ github.base_ref }}...HEAD
 
   production-acceptance-source-contract:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 8
     steps:
       - name: Checkout

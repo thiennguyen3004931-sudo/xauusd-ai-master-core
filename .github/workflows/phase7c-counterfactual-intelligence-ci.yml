@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   contract-and-build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 18
     steps:
       - name: Checkout
@@ -68,7 +68,7 @@ jobs:
         run: pnpm --filter @xauusd/web... build
 
   production-acceptance-source-contract:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 8
     steps:
       - name: Checkout
