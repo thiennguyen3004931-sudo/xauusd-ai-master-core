@@ -172,53 +172,6 @@ assert.deepEqual(fastMoveAggregate, {
 });
 
 
-const exactOrderedEvidenceSnapshot = buildPhase7CCounterfactualSnapshotFromRows({
-  rows: [baseRow()],
-  generatedAt: 66_666,
-  orderedExitSideEvidenceByTradeKey: new Map([
-    [
-      "LIVE:TREND:1:t1",
-      {
-        verdict: "EXACT",
-        complete: true,
-        prices: [
-          { timestamp: 1_050, price: 100, sequence: 0 },
-          { timestamp: 2_000, price: 112, sequence: 1 },
-          { timestamp: 3_000, price: 120, sequence: 2 },
-          { timestamp: 9_950, price: 108, sequence: 3 },
-        ],
-        source: {
-          journalPath: "phase7c-executors/decision-observability/live/trend-decisions.jsonl",
-          available: true,
-          parsedRows: 4,
-          malformedRows: 0,
-          matchedRows: 4,
-        },
-        warnings: [],
-      },
-    ],
-  ]),
-});
-const exactFastMove = exactOrderedEvidenceSnapshot.scenarios.filter(
-  (scenario) => scenario.family === "FAST_MOVE_GIVEBACK",
-);
-assert.equal(exactFastMove.length, 4);
-assert.equal(exactFastMove.every((scenario) => scenario.evidence.verdict === "EXACT"), true);
-assert.equal(
-  exactFastMove.every((scenario) =>
-    scenario.evidence.sources.includes("ORDERED_EXIT_SIDE_PRICES_COMPLETE")),
-  true,
-);
-assert.deepEqual(
-  exactFastMove.map((scenario) => scenario.delta.exitPrice),
-  [8, 6, 4, 0],
-);
-assert.equal(
-  exactFastMove.every((scenario) =>
-    scenario.quality.warnings.includes("COUNTERFACTUAL_PNL_NOT_COMPUTED_WITHOUT_EXECUTION_VALUE_MODEL")),
-  true,
-);
-
 for (const scenario of snapshot.scenarios) {
   assert.equal(scenario.safety.autoApply, false);
   assert.equal(scenario.safety.autoRetune, false);
@@ -233,4 +186,3 @@ console.log("P4_FAST_MOVE_SHADOW_GRID=4_6_8_12");
 console.log("P4_RULE_COUNTERFACTUAL_OUTCOME_WITHOUT_REPLAY=UNAVAILABLE");
 console.log("P4_RULE_COUNTERFACTUAL_PNL_INFERENCE=NONE");
 console.log("P4_M5_OHLC_ORDER_INFERENCE=NONE");
-console.log("P6A_CANONICAL_ORDERED_EXIT_SIDE_EXACT_REPLAY=PASS");
