@@ -112,6 +112,7 @@ const decisionAudit = createPhase7CDecisionAudit({
   symbol,
   configuration: { riskPercent, maxLot },
 });
+const exitSideEvidencePath = path.join(decisionAudit.root, "sideway-exit-side-samples.jsonl");
 let state = loadState();
 
 console.log("PHASE7C_SIDEWAY_CONTROLLER=STARTING");
@@ -1174,6 +1175,44 @@ async function closeFixedTpIfTriggered(position, quote) {
   }
 }
 
+function recordManagementExitSideSample({ managed, quote, exitSidePrice }) {
+  const timestamp = Number(quote.timestamp);
+  const bid = Number(quote.bid);
+  const ask = Number(quote.ask);
+  if (
+    !Number.isFinite(timestamp) ||
+    timestamp <= 0 ||
+    !Number.isFinite(bid) ||
+    !Number.isFinite(ask) ||
+    bid <= 0 ||
+    ask <= 0 ||
+    ask < bid ||
+    !Number.isFinite(exitSidePrice) ||
+    exitSidePrice <= 0
+  ) {
+    return;
+  }
+  try {
+    fs.mkdirSync(path.dirname(exitSideEvidencePath), { recursive: true });
+    const record = {
+      event: "MANAGEMENT_EXIT_SIDE_SAMPLE",
+      source: "CANONICAL_MANAGEMENT_OBSERVED_QUOTE",
+      strategy: "SIDEWAY",
+      symbol,
+      timestamp: Number(quote.timestamp),
+      ticket: managed.ticket,
+      side: managed.side,
+      bid: Number(quote.bid),
+      ask: Number(quote.ask),
+      exitSidePrice,
+      evidenceVersion: 1,
+    };
+    fs.appendFileSync(exitSideEvidencePath, `${JSON.stringify(record)}\n`, "utf8");
+  } catch (error) {
+    console.warn(`PHASE7C_SIDEWAY_EVIDENCE_WRITE_SKIPPED=${errorMessage(error)}`);
+  }
+}
+
 async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   const managed = state.managed;
 
@@ -1231,6 +1270,7 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   const favorable = managed.side === "BUY"
     ? marketPrice - managed.entry
     : managed.entry - marketPrice;
+  recordManagementExitSideSample({ managed, quote, exitSidePrice: marketPrice });
 
   if (!managed.breakEvenApplied && favorable >= 6) {
     const beStop = roundPrice(managed.entry, Number(spec.digits ?? 2));

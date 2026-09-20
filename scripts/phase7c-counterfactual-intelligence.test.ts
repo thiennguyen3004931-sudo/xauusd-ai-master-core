@@ -171,6 +171,7 @@ assert.deepEqual(fastMoveAggregate, {
   deteriorationCount: 1,
 });
 
+
 for (const scenario of snapshot.scenarios) {
   assert.equal(scenario.safety.autoApply, false);
   assert.equal(scenario.safety.autoRetune, false);
