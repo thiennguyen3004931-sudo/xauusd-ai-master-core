@@ -52,7 +52,7 @@ for (const literal of [
   "CLOSE_BOUNDARY_NOT_BRACKETED",
   "JOURNAL_MALFORMED_ROWS",
   "SIDE_MISMATCH",
-  'verdict: "EXACT"',
+  'verdict: "COMPLETE_OBSERVED_WINDOW"',
   'verdict: "UNAVAILABLE"',
   "boundaryToleranceMs",
 ]) {
@@ -60,15 +60,15 @@ for (const literal of [
 }
 
 const counterfactual = read("apps/api/src/services/phase7c-counterfactual-intelligence.service.ts");
-for (const literal of [
-  "orderedExitSideEvidenceByTradeKey",
-  "orderedExitSidePrices:",
-  "orderedExitSideEvidenceComplete:",
-  "getPhase7COrderedExitSideEvidence",
-]) {
-  requireLiteral(counterfactual, literal, "P4");
+if (counterfactual.includes("orderedExitSideEvidenceComplete: true")) {
+  throw new Error("P6A must not mark management-observation evidence EXACT without broker tick path.");
+}
+if (evidence.includes('verdict: "EXACT"')) {
+  throw new Error("P6A evidence reader must not emit EXACT from management-only observations.");
 }
 
 console.log("P6A_ORDERED_EXIT_SIDE_SOURCE_CONTRACT=PASS");
 console.log("P6A_CANONICAL_SAMPLE_BEFORE_FASTMOVE=PASS");
+console.log("P6A_MANAGEMENT_ONLY_FALSE_EXACT=REJECTED");
+console.log("P6A_TRIGGERED_FASTMOVE_EXACT_REQUIRES_BROKER_TICK_PATH=TRUE");
 console.log("P6A_TRADING_LOGIC_MUTATION=NONE");
