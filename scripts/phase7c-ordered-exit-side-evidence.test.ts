@@ -63,7 +63,7 @@ try {
     boundaryToleranceMs: 120,
   });
 
-  assert.equal(exact.verdict, "EXACT");
+  assert.equal(exact.verdict, "COMPLETE_OBSERVED_WINDOW");
   assert.equal(exact.complete, true);
   assert.deepEqual(
     exact.prices.map((row) => [row.timestamp, row.price, row.sequence]),
@@ -163,7 +163,8 @@ try {
   assert.equal(malformed.warnings.includes("JOURNAL_MALFORMED_ROWS"), true);
 
   console.log("P6A_ORDERED_EXIT_SIDE_EVIDENCE_TEST=PASS");
-  console.log("P6A_EXACT_SOURCE=CANONICAL_MANAGEMENT_OBSERVED_QUOTES");
+  console.log("P6A_OBSERVED_WINDOW_SOURCE=CANONICAL_MANAGEMENT_OBSERVED_QUOTES");
+  console.log("P6A_TRIGGERED_FASTMOVE_EXACT_REQUIRES_BROKER_TICK_PATH=TRUE");
   console.log("P6A_INCOMPLETE_HISTORY_FAIL_CLOSED=PASS");
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
