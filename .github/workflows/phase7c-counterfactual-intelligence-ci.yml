@@ -6,6 +6,9 @@ on:
       - "apps/api/src/contracts/phase7c-counterfactual-intelligence.schema.ts"
       - "apps/api/src/services/phase7c-counterfactual-evaluator.service.ts"
       - "apps/api/src/services/phase7c-counterfactual-intelligence.service.ts"
+      - "apps/api/src/services/phase7c-ordered-exit-side-evidence.service.ts"
+      - "scripts/run-phase7b-demo-controller.ts"
+      - "scripts/run-phase7c-sideway-controller.mjs"
       - "apps/api/src/routes/phase7c-counterfactual-intelligence.route.ts"
       - "apps/api/src/app.ts"
       - "apps/web/src/phase7c-counterfactual-intelligence-types.ts"
@@ -14,6 +17,8 @@ on:
       - "apps/web/src/pages/Phase7CControlCenterShellPage.tsx"
       - "scripts/phase7c-counterfactual-evaluator.test.ts"
       - "scripts/phase7c-counterfactual-intelligence.test.ts"
+      - "scripts/phase7c-ordered-exit-side-evidence.test.ts"
+      - "scripts/test-phase7c-ordered-exit-side-source.mjs"
       - "scripts/test-phase7c-counterfactual-api-source.mjs"
       - "scripts/test-phase7c-counterfactual-intelligence-source.mjs"
       - "scripts/test-phase7c-p4-production-acceptance-source.ps1"
@@ -57,6 +62,12 @@ jobs:
 
       - name: P4 counterfactual snapshot contract
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-counterfactual-intelligence.test.ts
+
+      - name: P6A ordered exit-side evidence RED/GREEN contract
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-ordered-exit-side-evidence.test.ts
+
+      - name: P6A canonical quote evidence source contract
+        run: node scripts/test-phase7c-ordered-exit-side-source.mjs
 
       - name: P4 GET-only API source contract
         run: node scripts/test-phase7c-counterfactual-api-source.mjs
