@@ -1174,6 +1174,38 @@ async function closeFixedTpIfTriggered(position, quote) {
   }
 }
 
+function recordManagementExitSideSample({ managed, quote, exitSidePrice }) {
+  const timestamp = Number(quote.timestamp);
+  const bid = Number(quote.bid);
+  const ask = Number(quote.ask);
+  if (
+    !Number.isFinite(timestamp) ||
+    timestamp <= 0 ||
+    !Number.isFinite(bid) ||
+    !Number.isFinite(ask) ||
+    bid <= 0 ||
+    ask <= 0 ||
+    ask < bid ||
+    !Number.isFinite(exitSidePrice) ||
+    exitSidePrice <= 0
+  ) {
+    return;
+  }
+  try {
+    journal("MANAGEMENT_EXIT_SIDE_SAMPLE", {
+      timestamp: Number(quote.timestamp),
+      ticket: managed.ticket,
+      side: managed.side,
+      bid: Number(quote.bid),
+      ask: Number(quote.ask),
+      exitSidePrice,
+      evidenceVersion: 1,
+    });
+  } catch (error) {
+    console.warn(`PHASE7C_SIDEWAY_EVIDENCE_WRITE_SKIPPED=${errorMessage(error)}`);
+  }
+}
+
 async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   const managed = state.managed;
 
@@ -1231,6 +1263,7 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   const favorable = managed.side === "BUY"
     ? marketPrice - managed.entry
     : managed.entry - marketPrice;
+  recordManagementExitSideSample({ managed, quote, exitSidePrice: marketPrice });
 
   if (!managed.breakEvenApplied && favorable >= 6) {
     const beStop = roundPrice(managed.entry, Number(spec.digits ?? 2));
