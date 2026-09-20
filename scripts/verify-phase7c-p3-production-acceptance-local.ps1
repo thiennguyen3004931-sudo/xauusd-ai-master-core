@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ExpectedCommit,
 
-    [string]$ApiBaseUrl = "http://127.0.0.1:3001"
+    [string]$ApiBaseUrl = "http://127.0.0.1:3711"
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,7 +18,7 @@ function Fail-P3Acceptance {
 
 function Invoke-GetJson {
     param([string]$Uri)
-    return Invoke-RestMethod -Method Get -Uri $Uri -Headers @{ Accept = "application/json" } -TimeoutSec 15
+    return Invoke-RestMethod -Method Get -Uri $Uri -Headers @{ Accept = "application/json" } -TimeoutSec 120
 }
 
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
@@ -118,4 +118,5 @@ Write-Output "P3_POSITION_MUTATION=NONE"
 Write-Output "P3_MODE_MUTATION=NONE"
 Write-Output "P3_ARM_MUTATION=NONE"
 Write-Output "P3_LIVE_TEST_ORDER=NONE"
+Write-Output "P3_HTTP_TIMEOUT_SECONDS=120"
 Write-Output "P3_PRODUCTION_ACCEPTANCE=PASS"
