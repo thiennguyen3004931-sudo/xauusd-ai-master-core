@@ -76,13 +76,13 @@ function eventOf(record: RawRecord): string {
 function ticketOf(record: RawRecord): string | null {
   const management = recordObject(record.management);
   const raw = recordObject(record.raw);
-  return scalar(management?.ticket) ?? scalar(raw?.ticket);
+  return scalar(record.ticket) ?? scalar(management?.ticket) ?? scalar(raw?.ticket);
 }
 
 function sideOf(record: RawRecord): Side | null {
   const setup = recordObject(record.setup);
   const raw = recordObject(record.raw);
-  const value = String(setup?.side ?? raw?.side ?? "").trim().toUpperCase();
+  const value = String(record.side ?? setup?.side ?? raw?.side ?? "").trim().toUpperCase();
   return value === "BUY" || value === "SELL" ? value : null;
 }
 
@@ -101,7 +101,9 @@ function relativeJournalCandidates(
   accountMode: AccountMode,
   strategy: Strategy,
 ): string[] {
-  const fileName = strategy === "TREND" ? "trend-decisions.jsonl" : "sideway-decisions.jsonl";
+  const fileName = strategy === "TREND"
+    ? "trend-exit-side-samples.jsonl"
+    : "sideway-exit-side-samples.jsonl";
   const base = path.join("phase7c-executors", "decision-observability");
   const accountAware = path.join(base, accountMode.toLowerCase(), fileName);
   if (accountMode === "LIVE") return [accountAware];

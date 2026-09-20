@@ -301,6 +301,7 @@ const decisionAudit = createPhase7CDecisionAudit({
   symbol,
   configuration: { fixedLot: fixedVolume },
 });
+const exitSideEvidencePath = path.join(decisionAudit.root, "trend-exit-side-samples.jsonl");
 let state = loadState(statePath);
 
 console.log("PHASE7B_DEMO_STRATEGY=M15_TRIPLE_PATTERN_SUPERTREND_STRUCTURE_RIDER_MA_CONFIDENCE_FVG_CONTEXT");
@@ -1659,7 +1660,12 @@ function recordManagementExitSideSample({
     return;
   }
   try {
-    journal("MANAGEMENT_EXIT_SIDE_SAMPLE", {
+    fs.mkdirSync(path.dirname(exitSideEvidencePath), { recursive: true });
+    const record = {
+      event: "MANAGEMENT_EXIT_SIDE_SAMPLE",
+      source: "CANONICAL_MANAGEMENT_OBSERVED_QUOTE",
+      strategy: "TREND",
+      symbol,
       timestamp: Number(quote.timestamp),
       ticket: managed.ticket,
       side: managed.side,
@@ -1667,7 +1673,8 @@ function recordManagementExitSideSample({
       ask: Number(quote.ask),
       exitSidePrice,
       evidenceVersion: 1,
-    });
+    };
+    fs.appendFileSync(exitSideEvidencePath, `${JSON.stringify(record)}\n`, "utf8");
   } catch (error) {
     console.warn(`PHASE7B_DEMO_EVIDENCE_WRITE_SKIPPED=${errorMessage(error)}`);
   }

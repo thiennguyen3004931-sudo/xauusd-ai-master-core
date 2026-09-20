@@ -16,20 +16,17 @@ function auditRow(input: {
   evidenceVersion?: number;
 }) {
   return {
-    schemaVersion: 1,
-    timestamp: input.timestamp,
     event: "MANAGEMENT_EXIT_SIDE_SAMPLE",
-    setup: { side: input.side ?? "BUY" },
-    management: { ticket: input.ticket ?? "123" },
-    raw: {
-      timestamp: input.timestamp,
-      ticket: input.ticket ?? "123",
-      side: input.side ?? "BUY",
-      exitSidePrice: input.exitSidePrice ?? 100,
-      bid: input.bid ?? input.exitSidePrice ?? 100,
-      ask: input.ask ?? (input.exitSidePrice ?? 100) + 0.2,
-      evidenceVersion: input.evidenceVersion ?? 1,
-    },
+    source: "CANONICAL_MANAGEMENT_OBSERVED_QUOTE",
+    strategy: "TREND",
+    symbol: "XAUUSD",
+    timestamp: input.timestamp,
+    ticket: input.ticket ?? "123",
+    side: input.side ?? "BUY",
+    exitSidePrice: input.exitSidePrice ?? 100,
+    bid: input.bid ?? input.exitSidePrice ?? 100,
+    ask: input.ask ?? (input.exitSidePrice ?? 100) + 0.2,
+    evidenceVersion: input.evidenceVersion ?? 1,
   };
 }
 
@@ -37,7 +34,7 @@ function writeRows(root: string, rows: unknown[]) {
   const dir = path.join(root, "phase7c-executors", "decision-observability", "live");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
-    path.join(dir, "trend-decisions.jsonl"),
+    path.join(dir, "trend-exit-side-samples.jsonl"),
     rows.map((row) => JSON.stringify(row)).join("\n") + "\n",
     "utf8",
   );
@@ -138,7 +135,7 @@ try {
     "phase7c-executors",
     "decision-observability",
     "live",
-    "trend-decisions.jsonl",
+    "trend-exit-side-samples.jsonl",
   );
   fs.writeFileSync(
     journalPath,

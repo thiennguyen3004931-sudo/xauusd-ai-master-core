@@ -112,6 +112,7 @@ const decisionAudit = createPhase7CDecisionAudit({
   symbol,
   configuration: { riskPercent, maxLot },
 });
+const exitSideEvidencePath = path.join(decisionAudit.root, "sideway-exit-side-samples.jsonl");
 let state = loadState();
 
 console.log("PHASE7C_SIDEWAY_CONTROLLER=STARTING");
@@ -1192,7 +1193,12 @@ function recordManagementExitSideSample({ managed, quote, exitSidePrice }) {
     return;
   }
   try {
-    journal("MANAGEMENT_EXIT_SIDE_SAMPLE", {
+    fs.mkdirSync(path.dirname(exitSideEvidencePath), { recursive: true });
+    const record = {
+      event: "MANAGEMENT_EXIT_SIDE_SAMPLE",
+      source: "CANONICAL_MANAGEMENT_OBSERVED_QUOTE",
+      strategy: "SIDEWAY",
+      symbol,
       timestamp: Number(quote.timestamp),
       ticket: managed.ticket,
       side: managed.side,
@@ -1200,7 +1206,8 @@ function recordManagementExitSideSample({ managed, quote, exitSidePrice }) {
       ask: Number(quote.ask),
       exitSidePrice,
       evidenceVersion: 1,
-    });
+    };
+    fs.appendFileSync(exitSideEvidencePath, `${JSON.stringify(record)}\n`, "utf8");
   } catch (error) {
     console.warn(`PHASE7C_SIDEWAY_EVIDENCE_WRITE_SKIPPED=${errorMessage(error)}`);
   }

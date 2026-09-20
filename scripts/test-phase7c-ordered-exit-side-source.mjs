@@ -31,9 +31,15 @@ for (const [file, label] of [
 ]) {
   const source = read(file);
   assertSampleBeforeFastMove(source, label);
+  if (source.includes('journal("MANAGEMENT_EXIT_SIDE_SAMPLE"')) {
+    throw new Error(`${label} must not pollute canonical decision/management journals with high-frequency P6A samples`);
+  }
   for (const literal of [
     "recordManagementExitSideSample({",
-    'journal("MANAGEMENT_EXIT_SIDE_SAMPLE"',
+    "exitSideEvidencePath",
+    'event: "MANAGEMENT_EXIT_SIDE_SAMPLE"',
+    'source: "CANONICAL_MANAGEMENT_OBSERVED_QUOTE"',
+    "fs.appendFileSync(exitSideEvidencePath",
     "timestamp: Number(quote.timestamp)",
     "ticket: managed.ticket",
     "side: managed.side",
@@ -50,6 +56,8 @@ for (const [file, label] of [
 }
 
 const evidence = read("apps/api/src/services/phase7c-ordered-exit-side-evidence.service.ts");
+requireLiteral(evidence, "trend-exit-side-samples.jsonl", "ORDERED_EVIDENCE");
+requireLiteral(evidence, "sideway-exit-side-samples.jsonl", "ORDERED_EVIDENCE");
 for (const literal of [
   "MANAGEMENT_EXIT_SIDE_SAMPLE",
   "OPEN_BOUNDARY_NOT_BRACKETED",
