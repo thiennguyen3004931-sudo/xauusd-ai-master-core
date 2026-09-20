@@ -36,7 +36,7 @@ permissions:
 
 jobs:
   contract-and-build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 18
     steps:
       - name: Checkout
