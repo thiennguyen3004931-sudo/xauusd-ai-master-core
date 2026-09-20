@@ -31,7 +31,10 @@ foreach ($required in @(
     'POSITION_MUTATION=NONE',
     'MODE_CHANGE=NONE',
     'ARM_CHANGE=NONE',
-    'LIVE_TEST_ORDER=NONE'
+    'LIVE_TEST_ORDER=NONE',
+    'http://127.0.0.1:3711',
+    '-TimeoutSec 120',
+    'P5_HTTP_TIMEOUT_SECONDS=120'
 )) {
     if (-not $text.Contains($required)) {
         throw "Missing required verifier marker: $required"
