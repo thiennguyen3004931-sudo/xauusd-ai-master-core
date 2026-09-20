@@ -16,9 +16,9 @@ function requireLiteral(source, needle, label) {
 function assertSampleBeforeFastMove(source, label) {
   const manageStart = source.indexOf("async function managePosition");
   if (manageStart < 0) throw new Error(`${label} missing managePosition`);
-  const sample = source.indexOf('journal("MANAGEMENT_EXIT_SIDE_SAMPLE"', manageStart);
+  const sample = source.indexOf("recordManagementExitSideSample({", manageStart);
   const fastMove = source.indexOf("fastMoveProfitLockCandidate({", manageStart);
-  if (sample < 0) throw new Error(`${label} missing MANAGEMENT_EXIT_SIDE_SAMPLE journal event`);
+  if (sample < 0) throw new Error(`${label} missing management exit-side sample call`);
   if (fastMove < 0) throw new Error(`${label} missing FastMove evaluation`);
   if (sample > fastMove) {
     throw new Error(`${label} must persist the exit-side sample before FastMove evaluation`);
@@ -32,6 +32,7 @@ for (const [file, label] of [
   const source = read(file);
   assertSampleBeforeFastMove(source, label);
   for (const literal of [
+    "recordManagementExitSideSample({",
     'journal("MANAGEMENT_EXIT_SIDE_SAMPLE"',
     "timestamp: Number(quote.timestamp)",
     "ticket: managed.ticket",
@@ -40,6 +41,9 @@ for (const [file, label] of [
     "ask: Number(quote.ask)",
     "exitSidePrice:",
     "evidenceVersion: 1",
+    "try {",
+    "catch (error)",
+    "EVIDENCE_WRITE_SKIPPED",
   ]) {
     requireLiteral(source, literal, label);
   }
