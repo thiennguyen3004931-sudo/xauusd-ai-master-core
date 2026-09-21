@@ -1,6 +1,7 @@
 import { accountModeAllowsBroker, getPhase7CAccountModeState } from "./phase7c-account-mode.service";
 import { phase7CBotModeService } from "./phase7c-bot-mode.service";
 import { getPhase7CLifecycleRuntimeStatus } from "./phase7c-lifecycle.service";
+import { getPhase7CRuntimeSourceAttestationSnapshot } from "./phase7c-runtime-source-attestation.service";
 import type { Mt5TelemetrySnapshot } from "./mt5.service";
 
 export type Phase7CAutoActivationChecks = {
@@ -14,12 +15,15 @@ export type Phase7CAutoActivationChecks = {
   terminalTradeAllowed: boolean;
   expertTradeAllowed: boolean;
   zeroXauusdPositions: boolean;
+  zeroXauusdPendingOrders: boolean;
+  runtimeSourceExact: boolean;
   liveArmSatisfied: boolean;
 };
 
 export function evaluatePhase7CAutoActivation(telemetry: Mt5TelemetrySnapshot) {
   const accountMode = getPhase7CAccountModeState();
   const lifecycle = getPhase7CLifecycleRuntimeStatus();
+  const runtimeSource = getPhase7CRuntimeSourceAttestationSnapshot();
   const liveArmSatisfied =
     accountMode.accountMode === "LIVE"
       ? telemetry.health?.liveExecutionArmed === true && telemetry.health?.liveArmStatus === "ARMED"
@@ -36,6 +40,8 @@ export function evaluatePhase7CAutoActivation(telemetry: Mt5TelemetrySnapshot) {
     terminalTradeAllowed: telemetry.health?.terminalTradeAllowed === true,
     expertTradeAllowed: telemetry.health?.expertTradeAllowed === true,
     zeroXauusdPositions: telemetry.positions.length === 0,
+    zeroXauusdPendingOrders: telemetry.pendingOrders.length === 0,
+    runtimeSourceExact: runtimeSource.overall === "EXACT_MATCH",
     liveArmSatisfied,
   };
   const blockedBy = Object.entries(checks)
@@ -49,6 +55,8 @@ export function evaluatePhase7CAutoActivation(telemetry: Mt5TelemetrySnapshot) {
     botMode: lifecycle.mode.mode,
     liveArmRequired: accountMode.accountMode === "LIVE",
     liveArmStatus: telemetry.health?.liveArmStatus ?? null,
+    runtimeSourceOverall: runtimeSource.overall,
+    runtimeSourceCommit: runtimeSource.deployment?.sourceCommit ?? null,
     checks,
     blockedBy,
   };
