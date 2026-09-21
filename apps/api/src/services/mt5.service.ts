@@ -5,6 +5,7 @@ import {
   Mt5BrokerConfigValidator,
   type Mt5BridgeHealth,
   type Mt5BridgePosition,
+  type Mt5BridgePendingOrder,
   type Mt5BridgeQuote,
   type Mt5BridgeSymbolSpec,
   type Mt5BrokerConfig,
@@ -27,6 +28,7 @@ export interface Mt5TelemetrySnapshot {
   quote: Mt5BridgeQuote | null;
   spec: Mt5BridgeSymbolSpec | null;
   positions: Mt5BridgePosition[];
+  pendingOrders: Mt5BridgePendingOrder[];
   checkedAt: number;
 }
 
@@ -113,6 +115,7 @@ export async function getMt5Telemetry(
       quote: null,
       spec: null,
       positions: [],
+      pendingOrders: [],
       checkedAt,
     };
   }
@@ -132,6 +135,7 @@ export async function getMt5Telemetry(
       quote: null,
       spec: null,
       positions: [],
+      pendingOrders: [],
       checkedAt,
     };
   }
@@ -156,14 +160,16 @@ export async function getMt5Telemetry(
         quote: null,
         spec: null,
         positions: [],
+        pendingOrders: [],
         checkedAt,
       };
     }
 
-    const [quote, spec, positions] = await Promise.all([
+    const [quote, spec, positions, pendingOrders] = await Promise.all([
       client.quote(symbol),
       client.symbolSpec(symbol),
       client.openPositions(symbol),
+      client.pendingOrders(symbol),
     ]);
 
     let status: DashboardServiceStatus = "HEALTHY";
@@ -193,6 +199,7 @@ export async function getMt5Telemetry(
       quote,
       spec,
       positions,
+      pendingOrders,
       checkedAt,
     };
   } catch (error) {
@@ -209,6 +216,7 @@ export async function getMt5Telemetry(
       quote: null,
       spec: null,
       positions: [],
+      pendingOrders: [],
       checkedAt,
     };
   }
