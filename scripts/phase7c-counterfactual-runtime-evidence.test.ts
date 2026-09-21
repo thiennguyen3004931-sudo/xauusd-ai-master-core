@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+// P6C contract: async provider wiring must preserve management-cycle timing and fail closed.
 import {
   PHASE7C_PERFORMANCE_EFFECTIVENESS_SCHEMA_VERSION,
   type Phase7CPerformanceEffectivenessRow,
