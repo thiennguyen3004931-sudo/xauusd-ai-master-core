@@ -1,4 +1,4 @@
-name: M8 Post-Failure Read-Only Diagnostics
+name: M8 Target Runtime Recovery f142d628
 
 on:
   push:
@@ -11,69 +11,145 @@ permissions:
   contents: read
 
 env:
+  TARGET_COMMIT: f142d62838746ada79ad3aa90573e6fa885e82f9
+  TARGET_TREE: 4ad4c1c02cd11883617ca0f1fa8581527a3ec26b
   PRODUCTION_ROOT: 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+  API_BASE_URL: http://127.0.0.1:3711
 
 jobs:
-  diagnose:
-    name: m8-post-failure-readonly-diagnostics
+  recover:
+    name: m8-target-runtime-recovery-self-hosted
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
-    timeout-minutes: 10
+    timeout-minutes: 35
     steps:
       - name: Checkout target source
         uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
 
-      - name: Read production source and runtime diagnostics
+      - name: Guard target production source
         shell: powershell
         run: |
           $root = $env:PRODUCTION_ROOT
-          Write-Host "DIAG_PRODUCTION_ROOT=$root"
           Push-Location $root
           try {
-            Write-Host "DIAG_BRANCH=$((git branch --show-current).Trim())"
-            Write-Host "DIAG_HEAD=$((git rev-parse HEAD).Trim())"
-            Write-Host "DIAG_TREE=$((git rev-parse 'HEAD^{tree}').Trim())"
+            $branch = (git branch --show-current).Trim()
+            $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+            $tree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
             $dirty = @(git status --porcelain --untracked-files=normal)
-            Write-Host "DIAG_DIRTY_COUNT=$($dirty.Count)"
+            if ($branch -ne 'main') { throw "PRODUCTION_BRANCH_MISMATCH=$branch" }
+            if ($head -ne $env:TARGET_COMMIT) { throw "PRODUCTION_HEAD_MISMATCH=$head" }
+            if ($tree -ne $env:TARGET_TREE) { throw "PRODUCTION_TREE_MISMATCH=$tree" }
+            if ($dirty.Count -ne 0) { throw "PRODUCTION_WORKTREE_DIRTY=$($dirty.Count)" }
           } finally { Pop-Location }
+          Write-Host "RECOVERY_TARGET_SOURCE=PASS|HEAD=$env:TARGET_COMMIT|TREE=$env:TARGET_TREE"
 
-          foreach ($taskName in @('XAUUSD-Phase7B-Web','XAUUSD-Phase7C-Executors')) {
+      - name: Prebuild API dependency graph on target
+        shell: powershell
+        run: |
+          Push-Location $env:PRODUCTION_ROOT
+          try {
+            pnpm build '--filter=@xauusd/api...'
+            if ($LASTEXITCODE -ne 0) { throw "TARGET_API_PREBUILD_FAILED=$LASTEXITCODE" }
+            $dirty = @(git status --porcelain --untracked-files=normal)
+            if ($dirty.Count -ne 0) { throw "TARGET_API_PREBUILD_TRACKED_DRIFT=$($dirty.Count)" }
+          } finally { Pop-Location }
+          Write-Host 'RECOVERY_TARGET_API_PREBUILD=PASS'
+
+      - name: Restore canonical Web API task
+        shell: powershell
+        run: |
+          $taskName = 'XAUUSD-Phase7B-Web'
+          $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+          if ($task.State -eq 'Running') { Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop; Start-Sleep -Seconds 2 }
+          Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+          Write-Host 'RECOVERY_WEB_TASK_START=PASS'
+
+          $deadline = (Get-Date).AddSeconds(180)
+          $apiReady = $false
+          $uiReady = $false
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 2
             try {
-              $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-              $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
-              Write-Host "DIAG_TASK=$taskName|STATE=$($task.State)|LAST_RESULT=$($info.LastTaskResult)|LAST_RUN=$($info.LastRunTime)|NEXT_RUN=$($info.NextRunTime)"
-              foreach ($a in @($task.Actions)) {
-                Write-Host "DIAG_TASK_ACTION=$taskName|EXECUTE=$($a.Execute)|ARGUMENTS=$($a.Arguments)"
-              }
-            } catch { Write-Host "DIAG_TASK=$taskName|ERROR=$($_.Exception.Message)" }
+              $mode = Invoke-RestMethod -Uri "$env:API_BASE_URL/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 3
+              if ([string]$mode.state.mode -eq 'PAUSE') { $apiReady = $true }
+            } catch {}
+            try {
+              $ui = Invoke-WebRequest -Uri "$env:API_BASE_URL/api/v1/phase7c-ui/mt5?symbol=XAUUSD" -UseBasicParsing -TimeoutSec 3
+              if ($ui.StatusCode -eq 200 -and [string]$ui.Content -match '(?m)^version=2$' -and [string]$ui.Content -match '(?m)^accountMode=LIVE$' -and [string]$ui.Content -match '(?m)^mt5Connected=true$') { $uiReady = $true }
+            } catch {}
+            if ($apiReady -and $uiReady) { break }
           }
-
-          foreach ($port in @(3711,5717,8765)) {
-            $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
-            if ($listeners.Count -eq 0) { Write-Host "DIAG_PORT=$port|LISTEN=FALSE"; continue }
-            foreach ($l in $listeners) {
-              $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($l.OwningProcess)" -ErrorAction SilentlyContinue
-              Write-Host "DIAG_PORT=$port|LISTEN=TRUE|PID=$($l.OwningProcess)|NAME=$($proc.Name)|CMD=$($proc.CommandLine)"
+          if (-not $apiReady -or -not $uiReady) {
+            $logDir = Join-Path $env:PRODUCTION_ROOT '.runtime\phase7b-web'
+            foreach ($name in @('api.out.log','api.err.log','web.out.log','web.err.log')) {
+              $path = Join-Path $logDir $name
+              Write-Host "RECOVERY_LOG_BEGIN=$name"
+              if (Test-Path -LiteralPath $path) { Get-Content -LiteralPath $path -Tail 120 }
+              Write-Host "RECOVERY_LOG_END=$name"
             }
+            throw "RECOVERY_WEB_API_NOT_READY|API=$apiReady|UI=$uiReady"
+          }
+          Write-Host 'RECOVERY_WEB_API_READY=PASS'
+
+      - name: Verify fail-closed state before canonical recovery
+        shell: powershell
+        run: |
+          $mode = Invoke-RestMethod -Uri "$env:API_BASE_URL/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+          $arm = Invoke-RestMethod -Uri "$env:API_BASE_URL/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+          if ([string]$mode.state.mode -ne 'PAUSE') { throw "RECOVERY_MODE_NOT_PAUSE=$($mode.state.mode)" }
+          if ([string]$arm.liveArmStatus -ne 'DISARMED' -or [bool]$arm.liveExecutionArmed) { throw 'RECOVERY_ARM_NOT_DISARMED' }
+          Write-Host 'RECOVERY_PRE_CANONICAL_MODE=PAUSE'
+          Write-Host 'RECOVERY_PRE_CANONICAL_ARM=DISARMED'
+
+      - name: Run canonical target recovery
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:PRODUCTION_ROOT\scripts\recover-phase7c-runtime-ready-stable-deploy-local.ps1" `
+            -ExpectedCommit $env:TARGET_COMMIT `
+            -TimeoutSeconds 300
+
+      - name: Post-cutover M8 proof
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+            -ExpectedCommit $env:TARGET_COMMIT `
+            -ExpectedTree $env:TARGET_TREE `
+            -RuntimeProjectRoot $env:PRODUCTION_ROOT
+
+      - name: P3 P4 P5 production acceptance
+        shell: powershell
+        run: |
+          foreach ($phase in @('p3','p4','p5')) {
+            $path = Join-Path $env:PRODUCTION_ROOT "scripts\verify-phase7c-$phase-production-acceptance-local.ps1"
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $path -ProjectRoot $env:PRODUCTION_ROOT -ExpectedCommit $env:TARGET_COMMIT -ApiBaseUrl $env:API_BASE_URL
+            if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_ACCEPTANCE_FAILED=$phase" }
+            Write-Host "PRODUCTION_ACCEPTANCE_$($phase.ToUpperInvariant())=PASS"
           }
 
-          $logDir = Join-Path $root '.runtime\phase7b-web'
-          foreach ($name in @('api.out.log','api.err.log','web.out.log','web.err.log')) {
-            $path = Join-Path $logDir $name
-            Write-Host "DIAG_LOG_BEGIN=$name"
-            if (Test-Path -LiteralPath $path) { Get-Content -LiteralPath $path -Tail 160 } else { Write-Host 'MISSING' }
-            Write-Host "DIAG_LOG_END=$name"
-          }
+      - name: Intelligence evidence quality baseline
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:PRODUCTION_ROOT\scripts\verify-phase7c-intelligence-evidence-quality-baseline-local.ps1" `
+            -ProjectRoot $env:PRODUCTION_ROOT `
+            -ExpectedCommit $env:TARGET_COMMIT `
+            -ApiBaseUrl $env:API_BASE_URL
 
-          $statePath = Join-Path $root '.runtime\phase7c-lifecycle-broker\state\state.json'
-          if (Test-Path -LiteralPath $statePath) {
-            Write-Host 'DIAG_BROKER_STATE_BEGIN'
-            Get-Content -LiteralPath $statePath -Raw
-            Write-Host 'DIAG_BROKER_STATE_END'
-          }
-
-          Write-Host 'DIAG_PRODUCTION_MUTATION=NONE'
-          Write-Host 'DIAG_ORDER_MUTATION=NONE'
-          Write-Host 'DIAG_POSITION_MUTATION=NONE'
-          Write-Host 'DIAG_ARM_MUTATION=NONE'
+      - name: Final target safety proof
+        shell: powershell
+        run: |
+          $mode = Invoke-RestMethod -Uri "$env:API_BASE_URL/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+          $arm = Invoke-RestMethod -Uri "$env:API_BASE_URL/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+          $runtime = Invoke-RestMethod -Uri "$env:API_BASE_URL/api/v1/phase7c/runtime-source-attestation" -Method Get -TimeoutSec 8
+          if ([string]$mode.state.mode -ne 'PAUSE') { throw 'FINAL_MODE_NOT_PAUSE' }
+          if ([string]$arm.liveArmStatus -ne 'DISARMED' -or [bool]$arm.liveExecutionArmed) { throw 'FINAL_ARM_NOT_DISARMED' }
+          if ([string]$runtime.overall -ne 'EXACT_MATCH') { throw "FINAL_RUNTIME_SOURCE_NOT_EXACT=$($runtime.overall)" }
+          if ([string]$runtime.deployment.sourceCommit -ne $env:TARGET_COMMIT) { throw "FINAL_SOURCE_COMMIT_MISMATCH=$($runtime.deployment.sourceCommit)" }
+          if ([string]$runtime.deployment.sourceTree -ne $env:TARGET_TREE) { throw "FINAL_SOURCE_TREE_MISMATCH=$($runtime.deployment.sourceTree)" }
+          Write-Host "M8_PRODUCTION_CUTOVER=PASS"
+          Write-Host "RUNNING_SOURCE=$env:TARGET_COMMIT"
+          Write-Host "RUNNING_TREE=$env:TARGET_TREE"
+          Write-Host 'FINAL_MODE=PAUSE'
+          Write-Host 'FINAL_ARM=DISARMED'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
