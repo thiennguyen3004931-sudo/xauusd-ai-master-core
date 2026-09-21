@@ -879,7 +879,15 @@ class Mt5Gateway:
             return None
         is_buy = request.side == "BUY"
         expected_type = int(getattr(self.mt5, "POSITION_TYPE_BUY", 0) if is_buy else getattr(self.mt5, "POSITION_TYPE_SELL", 1))
-        candidates = [row for row in rows if int(row.type) == expected_type]
+        expected_magic = int(request.magicNumber)
+        expected_comment = self._comment(request.clientOrderId)
+        candidates = [
+            row
+            for row in rows
+            if int(row.type) == expected_type
+            and int(getattr(row, "magic", 0) or 0) == expected_magic
+            and str(getattr(row, "comment", "") or "") == expected_comment
+        ]
         if not candidates:
             return None
         newest = max(candidates, key=lambda row: int(getattr(row, "time_msc", int(row.time) * 1000)))
@@ -972,6 +980,8 @@ class Mt5Gateway:
             "swap": float(row.swap),
             "commission": 0.0,
             "openedAt": int(getattr(row, "time_msc", int(row.time) * 1000)),
+            "magic": int(getattr(row, "magic", 0) or 0),
+            "comment": str(getattr(row, "comment", "") or ""),
         }
 
     def _terminal_version(self) -> str | None:
