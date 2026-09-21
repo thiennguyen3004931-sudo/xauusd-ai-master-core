@@ -24,6 +24,10 @@ on:
       - "scripts/verify-phase7c-p4-production-acceptance-local.ps1"
       - "scripts/verify-phase7c-p5-production-acceptance-local.ps1"
 
+concurrency:
+  group: phase7c-intelligence-acceptance-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
