@@ -1,79 +1,107 @@
-name: Private M8 Read-Only Preflight
+name: Private M8 Approved Cutover f142d628
 
 on:
-  workflow_dispatch:
-    inputs:
-      expected_commit:
-        description: Exact approved private main commit SHA
-        required: true
-        type: string
-      expected_tree:
-        description: Exact approved private main tree SHA
-        required: true
-        type: string
-      runtime_project_root:
-        description: Current production project root on the self-hosted Windows runner
-        required: true
-        type: string
+  push:
+    branches:
+      - ops/m8-approved-cutover-f142d628
+    paths:
+      - ".github/workflows/private-m8-readonly-preflight.yml"
 
 permissions:
   contents: read
 
+env:
+  APPROVED_CURRENT_COMMIT: 77f13bbd8e20875ed924a22a865c306551dad582
+  APPROVED_TARGET_COMMIT: f142d62838746ada79ad3aa90573e6fa885e82f9
+  APPROVED_TARGET_TREE: 4ad4c1c02cd11883617ca0f1fa8581527a3ec26b
+  APPROVED_REMOTE_MAIN: f142d62838746ada79ad3aa90573e6fa885e82f9
+  APPROVED_HELPER_BLOB: d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f
+  PRODUCTION_ROOT: 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+  API_BASE_URL: http://127.0.0.1:3711
+  APPROVED_BRANCH: ops/m8-approved-cutover-f142d628
+
 jobs:
-  m8-readonly-preflight:
-    name: m8-readonly-preflight-self-hosted
+  approved-cutover:
+    name: m8-approved-cutover-self-hosted
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout private main candidate
+      - name: Checkout exact approved main
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: main
 
-      - name: Verify exact approved candidate
+      - name: Verify approval pins
         shell: powershell
-        env:
-          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
-          EXPECTED_TREE: ${{ inputs.expected_tree }}
         run: |
-          if ($env:EXPECTED_COMMIT -notmatch '^[0-9a-fA-F]{40}$') {
-            Write-Error "EXPECTED_COMMIT_INVALID"
-            exit 1
-          }
-          if ($env:EXPECTED_TREE -notmatch '^[0-9a-fA-F]{40}$') {
-            Write-Error "EXPECTED_TREE_INVALID"
-            exit 1
-          }
+          if ('${{ github.event_name }}' -ne 'push') { throw 'APPROVAL_EVENT_INVALID' }
+          if ('${{ github.ref }}' -ne "refs/heads/$env:APPROVED_BRANCH") { throw 'APPROVAL_BRANCH_INVALID' }
 
-          $actualHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
-          $actualTree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
-          $expectedHead = $env:EXPECTED_COMMIT.Trim().ToLowerInvariant()
-          $expectedTree = $env:EXPECTED_TREE.Trim().ToLowerInvariant()
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $helperBlob = (git rev-parse "$env:APPROVED_TARGET_COMMIT`:scripts/rollout-phase7c-production-source-transition-local.ps1").Trim().ToLowerInvariant()
 
-          Write-Host "CHECKED_OUT_HEAD=$actualHead"
-          Write-Host "EXPECTED_HEAD=$expectedHead"
-          Write-Host "CHECKED_OUT_TREE=$actualTree"
-          Write-Host "EXPECTED_TREE=$expectedTree"
+          if ($head -ne $env:APPROVED_TARGET_COMMIT) { throw "TARGET_HEAD_MISMATCH actual=$head" }
+          if ($tree -ne $env:APPROVED_TARGET_TREE) { throw "TARGET_TREE_MISMATCH actual=$tree" }
+          if ($helperBlob -ne $env:APPROVED_HELPER_BLOB) { throw "HELPER_BLOB_MISMATCH actual=$helperBlob" }
 
-          if ($actualHead -ne $expectedHead) {
-            Write-Error "CHECKED_OUT_HEAD_MISMATCH"
-            exit 1
-          }
-          if ($actualTree -ne $expectedTree) {
-            Write-Error "CHECKED_OUT_TREE_MISMATCH"
-            exit 1
-          }
+          Write-Host "M8_APPROVAL_TARGET_HEAD=$head"
+          Write-Host "M8_APPROVAL_TARGET_TREE=$tree"
+          Write-Host "M8_APPROVAL_HELPER_BLOB=$helperBlob"
+          Write-Host "M8_APPROVAL_PRODUCTION_MUTATION=AUTHORIZED"
 
-      - name: Run canonical M8 read-only preflight
+      - name: Fresh M8 read-only preflight
         shell: powershell
-        env:
-          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
-          EXPECTED_TREE: ${{ inputs.expected_tree }}
-          RUNTIME_PROJECT_ROOT: ${{ inputs.runtime_project_root }}
         run: |
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
-            -ExpectedCommit $env:EXPECTED_COMMIT `
-            -ExpectedTree $env:EXPECTED_TREE `
-            -RuntimeProjectRoot $env:RUNTIME_PROJECT_ROOT
+            -ExpectedCommit $env:APPROVED_TARGET_COMMIT `
+            -ExpectedTree $env:APPROVED_TARGET_TREE `
+            -RuntimeProjectRoot $env:PRODUCTION_ROOT
+
+      - name: Execute approved production source transition
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\rollout-phase7c-production-source-transition-local.ps1 `
+            -ProjectRoot $env:PRODUCTION_ROOT `
+            -ExpectedCurrentCommit $env:APPROVED_CURRENT_COMMIT `
+            -TargetCommit $env:APPROVED_TARGET_COMMIT `
+            -ExpectedRemoteMainCommit $env:APPROVED_REMOTE_MAIN `
+            -ExpectedHelperBlobSha1 $env:APPROVED_HELPER_BLOB `
+            -ExpectedInitialArm DISARMED `
+            -ExpectedInitialRuntimeState HEALTHY `
+            -TimeoutSeconds 300
+
+      - name: Post-cutover M8 proof
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+            -ExpectedCommit $env:APPROVED_TARGET_COMMIT `
+            -ExpectedTree $env:APPROVED_TARGET_TREE `
+            -RuntimeProjectRoot $env:PRODUCTION_ROOT
+
+      - name: P5 production acceptance
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:PRODUCTION_ROOT\scripts\verify-phase7c-p5-production-acceptance-local.ps1" `
+            -ProjectRoot $env:PRODUCTION_ROOT `
+            -ExpectedCommit $env:APPROVED_TARGET_COMMIT `
+            -ApiBaseUrl $env:API_BASE_URL
+
+      - name: Intelligence evidence quality baseline
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:PRODUCTION_ROOT\scripts\verify-phase7c-intelligence-evidence-quality-baseline-local.ps1" `
+            -ProjectRoot $env:PRODUCTION_ROOT `
+            -ExpectedCommit $env:APPROVED_TARGET_COMMIT `
+            -ApiBaseUrl $env:API_BASE_URL
+
+      - name: Final safety markers
+        shell: powershell
+        run: |
+          Write-Host "M8_APPROVED_CUTOVER_TARGET=$env:APPROVED_TARGET_COMMIT"
+          Write-Host "M8_APPROVED_CUTOVER_TREE=$env:APPROVED_TARGET_TREE"
+          Write-Host "M8_APPROVED_CUTOVER_FINAL_MODE=PAUSE"
+          Write-Host "M8_APPROVED_CUTOVER_FINAL_ARM=DISARMED"
+          Write-Host "M8_APPROVED_CUTOVER_LIVE_TEST_ORDER=NONE"
