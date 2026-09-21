@@ -255,10 +255,12 @@ jobs:
             Write-Host "PHASE7C_POWERSHELL_PARSE_PASS=$file"
           }
       - name: Verify MT5 panel is read-only
+        shell: pwsh
         run: |
-          grep -q 'WebRequest("GET"' mt5/XAUUSD_AI_Master_Decision_Panel.mq5
-          grep -q 'ORDER PERMISSION = ' mt5/XAUUSD_AI_Master_Decision_Panel.mq5
-          ! grep -Eq 'OrderSend|CTrade|PositionClose|PositionModify' mt5/XAUUSD_AI_Master_Decision_Panel.mq5
+          $panel = Get-Content mt5/XAUUSD_AI_Master_Decision_Panel.mq5 -Raw
+          if (-not $panel.Contains('WebRequest("GET"')) { throw "MT5_PANEL_GET_ASSERTION_MISSING" }
+          if (-not $panel.Contains('ORDER PERMISSION = ')) { throw "MT5_PANEL_PERMISSION_ASSERTION_MISSING" }
+          if ($panel -match 'OrderSend|CTrade|PositionClose|PositionModify') { throw "MT5_PANEL_WRITE_PRIMITIVE_FORBIDDEN" }
 
   notifier-regression:
     name: notifier-supervision-regression

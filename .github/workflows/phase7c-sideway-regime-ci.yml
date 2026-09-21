@@ -151,9 +151,9 @@ jobs:
         run: pnpm --filter @xauusd/web... build
 
       - name: Validate legacy Trend ESM transform
-        shell: bash
+        shell: pwsh
         run: |
-          node <<'NODE'
+          @'
           const fs = require("node:fs");
           const ts = require("typescript");
           const source = fs.readFileSync("scripts/run-phase7b-demo-controller.ts", "utf8");
@@ -177,12 +177,15 @@ jobs:
             process.exit(1);
           }
           fs.writeFileSync(".phase7c-trend-legacy-ci.mjs", transformed.outputText, "utf8");
-          NODE
+          '@ | Set-Content -Path .phase7c-trend-transform-ci.cjs -Encoding utf8
+          node .phase7c-trend-transform-ci.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check .phase7c-trend-legacy-ci.mjs
-          rm -f .phase7c-trend-legacy-ci.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item .phase7c-trend-transform-ci.cjs,.phase7c-trend-legacy-ci.mjs -Force
 
       - name: Parse Phase7C Node controllers
-        shell: bash
+        shell: pwsh
         run: |
           node --check scripts/run-phase7c-telegram-mode-controller.mjs
           node --check scripts/run-phase7c-regime-notifier.mjs
@@ -201,20 +204,31 @@ jobs:
           node --check scripts/verify-phase7c-broker-clock-local.mjs
 
       - name: Dry-run broker clock controller patch
-        shell: bash
+        shell: pwsh
         run: |
           node scripts/apply-phase7c-broker-clock-fix-local.mjs
-          rm -rf .phase7c-broker-clock-ci
-          mkdir -p .phase7c-broker-clock-ci/scripts
-          cp scripts/run-phase7b-demo-controller.ts .phase7c-broker-clock-ci/scripts/
-          cp scripts/run-phase7c-sideway-controller.mjs .phase7c-broker-clock-ci/scripts/
-          PHASE7C_BROKER_CLOCK_PATCH_ROOT="$PWD/.phase7c-broker-clock-ci" \
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $patchRoot = Join-Path $PWD ".phase7c-broker-clock-ci"
+          Remove-Item $patchRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force (Join-Path $patchRoot "scripts") | Out-Null
+          Copy-Item scripts/run-phase7b-demo-controller.ts (Join-Path $patchRoot "scripts")
+          Copy-Item scripts/run-phase7c-sideway-controller.mjs (Join-Path $patchRoot "scripts")
+          $previousPatchRoot = $env:PHASE7C_BROKER_CLOCK_PATCH_ROOT
+          try {
+            $env:PHASE7C_BROKER_CLOCK_PATCH_ROOT = $patchRoot
             node scripts/apply-phase7c-broker-clock-fix-local.mjs --apply
-          node --check .phase7c-broker-clock-ci/scripts/run-phase7c-sideway-controller.mjs
-          grep -q 'const now = Number(quote.timestamp);' .phase7c-broker-clock-ci/scripts/run-phase7b-demo-controller.ts
-          grep -q 'managed.partialActivatedAt = Number(quote.timestamp);' .phase7c-broker-clock-ci/scripts/run-phase7b-demo-controller.ts
-          grep -q 'brokerClockOffsetMs' .phase7c-broker-clock-ci/scripts/run-phase7c-sideway-controller.mjs
-          rm -rf .phase7c-broker-clock-ci
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            $env:PHASE7C_BROKER_CLOCK_PATCH_ROOT = $previousPatchRoot
+          }
+          node --check (Join-Path $patchRoot "scripts/run-phase7c-sideway-controller.mjs")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $trendSource = Get-Content (Join-Path $patchRoot "scripts/run-phase7b-demo-controller.ts") -Raw
+          $sidewaySource = Get-Content (Join-Path $patchRoot "scripts/run-phase7c-sideway-controller.mjs") -Raw
+          if (-not $trendSource.Contains('const now = Number(quote.timestamp);')) { throw "BROKER_CLOCK_TREND_NOW_ASSERTION_MISSING" }
+          if (-not $trendSource.Contains('managed.partialActivatedAt = Number(quote.timestamp);')) { throw "BROKER_CLOCK_PARTIAL_ASSERTION_MISSING" }
+          if (-not $sidewaySource.Contains('brokerClockOffsetMs')) { throw "BROKER_CLOCK_SIDEWAY_OFFSET_ASSERTION_MISSING" }
+          Remove-Item $patchRoot -Recurse -Force
 
       - name: Parse Phase7C PowerShell launchers
         shell: pwsh
@@ -262,34 +276,39 @@ jobs:
           }
 
       - name: Verify MT5 panel is read-only
-        shell: bash
+        shell: pwsh
         run: |
-          grep -q 'WebRequest("GET"' mt5/XAUUSD_AI_Master_Decision_Panel.mq5
-          grep -q 'ORDER PERMISSION = ' mt5/XAUUSD_AI_Master_Decision_Panel.mq5
-          ! grep -Eq 'OrderSend|CTrade|PositionClose|PositionModify' mt5/XAUUSD_AI_Master_Decision_Panel.mq5
+          $panel = Get-Content mt5/XAUUSD_AI_Master_Decision_Panel.mq5 -Raw
+          if (-not $panel.Contains('WebRequest("GET"')) { throw "MT5_PANEL_GET_ASSERTION_MISSING" }
+          if (-not $panel.Contains('ORDER PERMISSION = ')) { throw "MT5_PANEL_PERMISSION_ASSERTION_MISSING" }
+          if ($panel -match 'OrderSend|CTrade|PositionClose|PositionModify') { throw "MT5_PANEL_WRITE_PRIMITIVE_FORBIDDEN" }
 
       - name: Validate unarmed activation contract
-        shell: bash
+        shell: pwsh
         run: |
-          grep -q '\$preflightArgs += "-Once"' scripts/activate-phase7c-local.ps1
-          grep -q 'PHASE7C_EXECUTORS_SHADOW=PASS' scripts/activate-phase7c-local.ps1
-          grep -q 'PHASE7C_EXECUTOR_SUPERVISOR_MODE=TELEGRAM_ONLY' scripts/activate-phase7c-local.ps1
-          grep -q "pnpm --filter '@xauusd/api...' build" scripts/activate-phase7c-local.ps1
-          grep -q "pnpm --filter '@xauusd/web...' build" scripts/activate-phase7c-local.ps1
-          grep -q 'PHASE7C_ACTIVATE_LOT_ACTIVE=PASS' scripts/activate-phase7c-local.ps1
-          grep -q '\$expectedActiveArmed = \$ArmExecutors.IsPresent' scripts/activate-phase7c-local.ps1
-          grep -q '\$activeProbe.restartRequired -eq \$false' scripts/activate-phase7c-local.ps1
-          grep -q '\$activeProbe.restartRequired -eq \$true' scripts/activate-phase7c-local.ps1
-          grep -q 'SHADOW_BOUND_UNARMED' scripts/activate-phase7c-local.ps1
-          grep -q 'PHASE7C_ACTIVATE_ENTRY_FREEZE_MODE=PERSISTENT_BOT_MODE_PRESERVED' scripts/activate-phase7c-local.ps1
-          grep -q 'PHASE7C_ACTIVATE_BOT_STALE_RECOVERY=SAFE_COLD_START_PENDING_LOCAL_AND_BROKER_CHECKS' scripts/activate-phase7c-local.ps1
-          grep -q 'PHASE7C_ACTIVATE_MT5_OFFLINE_RECOVERY=SAFE_RESTART_PENDING_LOCAL_AND_BROKER_CHECKS' scripts/activate-phase7c-local.ps1
-          grep -q 'MT5_OFFLINE_PLUS_LOCAL_STATE_PLUS_BRIDGE' scripts/activate-phase7c-local.ps1
-          grep -q 'PHASE7C_ACTIVATE_CORE_PORTS_CLEAN=PASS' scripts/activate-phase7c-local.ps1
-          grep -q 'Stop-ProjectCoreProcesses' scripts/activate-phase7c-local.ps1
-          grep -Fq 'phase7b-(api|web)-background-v\d+' scripts/activate-phase7c-local.ps1
-          grep -q 'PHASE7C_ACTIVATE_LOT_ACTIVE_DETAIL' scripts/activate-phase7c-local.ps1
-          grep -q 'PHASE7C_EXECUTOR_STOP=FAIL|REMAINING=' scripts/stop-phase7c-executors-local.ps1
-          grep -q 'PHASE7C_LOT_SETTINGS_FILE' scripts/run-phase7b-api-runtime-local.ps1
-          grep -q 'PHASE7C_ACTIVE_LOT_SETTINGS_FILE' scripts/run-phase7b-api-runtime-local.ps1
-          grep -q 'PHASE7C_RUNTIME_ROOT' scripts/run-phase7b-api-runtime-local.ps1
+          function Assert-Literal([string]$Path, [string]$Needle) {
+            $content = Get-Content $Path -Raw
+            if (-not $content.Contains($Needle)) { throw "MISSING_LITERAL=$Path|$Needle" }
+          }
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' '$preflightArgs += "-Once"'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'PHASE7C_EXECUTORS_SHADOW=PASS'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'PHASE7C_EXECUTOR_SUPERVISOR_MODE=TELEGRAM_ONLY'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' "pnpm --filter '@xauusd/api...' build"
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' "pnpm --filter '@xauusd/web...' build"
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'PHASE7C_ACTIVATE_LOT_ACTIVE=PASS'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' '$expectedActiveArmed = $ArmExecutors.IsPresent'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' '$activeProbe.restartRequired -eq $false'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' '$activeProbe.restartRequired -eq $true'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'SHADOW_BOUND_UNARMED'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'PHASE7C_ACTIVATE_ENTRY_FREEZE_MODE=PERSISTENT_BOT_MODE_PRESERVED'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'PHASE7C_ACTIVATE_BOT_STALE_RECOVERY=SAFE_COLD_START_PENDING_LOCAL_AND_BROKER_CHECKS'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'PHASE7C_ACTIVATE_MT5_OFFLINE_RECOVERY=SAFE_RESTART_PENDING_LOCAL_AND_BROKER_CHECKS'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'MT5_OFFLINE_PLUS_LOCAL_STATE_PLUS_BRIDGE'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'PHASE7C_ACTIVATE_CORE_PORTS_CLEAN=PASS'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'Stop-ProjectCoreProcesses'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'phase7b-(api|web)-background-v\d+'
+          Assert-Literal 'scripts/activate-phase7c-local.ps1' 'PHASE7C_ACTIVATE_LOT_ACTIVE_DETAIL'
+          Assert-Literal 'scripts/stop-phase7c-executors-local.ps1' 'PHASE7C_EXECUTOR_STOP=FAIL|REMAINING='
+          Assert-Literal 'scripts/run-phase7b-api-runtime-local.ps1' 'PHASE7C_LOT_SETTINGS_FILE'
+          Assert-Literal 'scripts/run-phase7b-api-runtime-local.ps1' 'PHASE7C_ACTIVE_LOT_SETTINGS_FILE'
+          Assert-Literal 'scripts/run-phase7b-api-runtime-local.ps1' 'PHASE7C_RUNTIME_ROOT'
