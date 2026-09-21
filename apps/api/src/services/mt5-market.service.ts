@@ -115,6 +115,14 @@ export async function getMt5AllPositions() {
   return getClient().getPositions();
 }
 
+export async function getMt5HistoricalTicks(
+  symbol: string,
+  fromMs: number,
+  toMs: number,
+) {
+  return getClient().getHistoricalTicks(symbol, fromMs, toMs);
+}
+
 export async function getMt5RealMarketData(
   symbol: string,
   timeframe: Timeframe,

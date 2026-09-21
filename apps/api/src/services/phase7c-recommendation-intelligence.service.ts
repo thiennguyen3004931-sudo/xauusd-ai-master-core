@@ -19,7 +19,7 @@ import type {
   Phase7CCounterfactualSnapshot,
 } from "../contracts/phase7c-counterfactual-intelligence.schema";
 import { getPhase7CPerformanceEffectivenessSnapshot } from "./phase7c-performance-effectiveness.service";
-import { buildPhase7CCounterfactualSnapshotFromRows } from "./phase7c-counterfactual-intelligence.service";
+import { getPhase7CCounterfactualIntelligence } from "./phase7c-counterfactual-intelligence.service";
 import {
   evaluatePhase7CRecommendationCandidate,
   MIN_SAMPLE_FOR_HIGH_CONFIDENCE,
@@ -301,10 +301,7 @@ export async function getPhase7CRecommendationIntelligence(
   query: Phase7CRecommendationQuery = {},
 ): Promise<Phase7CRecommendationSnapshot> {
   const effectiveness = await getPhase7CPerformanceEffectivenessSnapshot(query);
-  const counterfactual = buildPhase7CCounterfactualSnapshotFromRows({
-    rows: effectiveness.rows,
-    generatedAt: effectiveness.generatedAt,
-  });
+  const counterfactual = await getPhase7CCounterfactualIntelligence(query);
   return buildPhase7CRecommendationSnapshotFromEvidence({
     effectiveness,
     counterfactual,

@@ -1,3 +1,4 @@
+import path from "node:path";
 import type {
   Phase7CPerformanceEffectivenessRow,
   Phase7CPerformanceManagementEvent,
@@ -15,6 +16,12 @@ import {
   evaluateFastMoveCounterfactual,
   phase7CCounterfactualSafety,
 } from "./phase7c-counterfactual-evaluator.service";
+import { getPhase7COrderedExitSideEvidence } from "./phase7c-ordered-exit-side-evidence.service";
+import {
+  buildPhase7CFastMoveReplayEvidence,
+  type Phase7CFastMoveReplayEvidenceResult,
+} from "./phase7c-fastmove-replay-evidence.service";
+import { getMt5HistoricalTicks } from "./mt5-market.service";
 
 const FAST_MOVE_SHADOW_GIVEBACK_GRID = [4, 6, 8, 12] as const;
 
@@ -27,6 +34,15 @@ export interface Phase7CCounterfactualQuery {
   days?: number;
   symbol?: string;
   limit?: number;
+}
+
+export type Phase7CFastMoveEvidenceProvider = (
+  row: Phase7CPerformanceEffectivenessRow,
+) => Promise<Phase7CFastMoveReplayEvidenceResult>;
+
+export interface Phase7CCounterfactualRowsWithEvidenceInput
+  extends Phase7CCounterfactualRowsInput {
+  evidenceProvider: Phase7CFastMoveEvidenceProvider;
 }
 
 function round(value: number, digits = 4): number {
@@ -168,7 +184,10 @@ function managementScenario(
   };
 }
 
-function scenariosForRow(row: Phase7CPerformanceEffectivenessRow): Phase7CCounterfactualScenario[] {
+function scenariosForRow(
+  row: Phase7CPerformanceEffectivenessRow,
+  fastMoveEvidence?: Phase7CFastMoveReplayEvidenceResult,
+): Phase7CCounterfactualScenario[] {
   const scenarios: Phase7CCounterfactualScenario[] = [];
   for (const givebackPrice of FAST_MOVE_SHADOW_GIVEBACK_GRID) {
     scenarios.push(
@@ -188,9 +207,11 @@ function scenariosForRow(row: Phase7CPerformanceEffectivenessRow): Phase7CCounte
         managementEvents: row.management.events,
         orderedExitSidePrices: [],
         orderedExitSideEvidenceComplete: false,
-        managementExitSideSamples: [],
-        brokerExitSideTicks: [],
-        exactFastMovePathEvidenceComplete: false,
+        managementExitSideSamples: fastMoveEvidence?.managementSamples ?? [],
+        brokerExitSideTicks: fastMoveEvidence?.brokerTicks ?? [],
+        exactFastMovePathEvidenceComplete:
+          fastMoveEvidence?.complete === true &&
+          fastMoveEvidence.verdict === "EXACT_PATH",
         alternativeGivebackPrice: givebackPrice,
       }),
     );
@@ -246,11 +267,11 @@ function familyAggregate(
   };
 }
 
-export function buildPhase7CCounterfactualSnapshotFromRows(
-  input: Phase7CCounterfactualRowsInput,
+function buildCounterfactualSnapshot(
+  rows: Phase7CPerformanceEffectivenessRow[],
+  generatedAt: number | undefined,
+  scenarios: Phase7CCounterfactualScenario[],
 ): Phase7CCounterfactualSnapshot {
-  const rows = [...input.rows];
-  const scenarios = rows.flatMap(scenariosForRow);
   const exactCount = scenarios.filter((scenario) => scenario.evidence.verdict === "EXACT").length;
   const boundedCount = scenarios.filter((scenario) => scenario.evidence.verdict === "BOUNDED").length;
   const unavailableCount = scenarios.filter((scenario) => scenario.evidence.verdict === "UNAVAILABLE").length;
@@ -263,7 +284,7 @@ export function buildPhase7CCounterfactualSnapshotFromRows(
 
   return {
     schemaVersion: PHASE7C_COUNTERFACTUAL_INTELLIGENCE_SCHEMA_VERSION,
-    generatedAt: Number.isFinite(Number(input.generatedAt)) ? Number(input.generatedAt) : Date.now(),
+    generatedAt: Number.isFinite(Number(generatedAt)) ? Number(generatedAt) : Date.now(),
     source: "PHASE7C_COUNTERFACTUAL_INTELLIGENCE",
     readOnly: true,
     shadowOnly: true,
@@ -293,6 +314,97 @@ export function buildPhase7CCounterfactualSnapshotFromRows(
   };
 }
 
+export function buildPhase7CCounterfactualSnapshotFromRows(
+  input: Phase7CCounterfactualRowsInput,
+): Phase7CCounterfactualSnapshot {
+  const rows = [...input.rows];
+  return buildCounterfactualSnapshot(
+    rows,
+    input.generatedAt,
+    rows.flatMap((row) => scenariosForRow(row)),
+  );
+}
+
+export async function buildPhase7CCounterfactualSnapshotFromRowsWithEvidence(
+  input: Phase7CCounterfactualRowsWithEvidenceInput,
+): Promise<Phase7CCounterfactualSnapshot> {
+  const rows = [...input.rows];
+  const groups: Phase7CCounterfactualScenario[][] = [];
+  for (const row of rows) {
+    let evidence: Phase7CFastMoveReplayEvidenceResult;
+    try {
+      evidence = await input.evidenceProvider(row);
+    } catch {
+      evidence = {
+        verdict: "UNAVAILABLE",
+        complete: false,
+        managementSamples: [],
+        brokerTicks: [],
+        warnings: ["RUNTIME_FAST_MOVE_EVIDENCE_PROVIDER_FAILED"],
+      };
+    }
+    groups.push(scenariosForRow(row, evidence));
+  }
+  return buildCounterfactualSnapshot(rows, input.generatedAt, groups.flat());
+}
+
+function phase7CRuntimeRoot(): string {
+  const configured = process.env.PHASE7C_RUNTIME_ROOT?.trim();
+  if (configured) return path.resolve(configured);
+  const demoDir = process.env.PHASE7B_DEMO_WORK_DIR?.trim();
+  if (demoDir) return path.resolve(demoDir, "..");
+  return path.resolve(process.cwd(), ".runtime");
+}
+
+export async function runtimeFastMoveEvidenceProvider(
+  row: Phase7CPerformanceEffectivenessRow,
+): Promise<Phase7CFastMoveReplayEvidenceResult> {
+  const observed = getPhase7COrderedExitSideEvidence({
+    runtimeRoot: phase7CRuntimeRoot(),
+    accountMode: row.accountMode,
+    strategy: row.strategy,
+    positionId: row.positionId,
+    side: row.side,
+    openedAt: row.openedAt,
+    closedAt: row.closedAt,
+  });
+
+  if (!observed.complete) {
+    return {
+      verdict: "UNAVAILABLE",
+      complete: false,
+      managementSamples: observed.prices,
+      brokerTicks: [],
+      warnings: observed.warnings.length > 0
+        ? [...observed.warnings]
+        : ["MANAGEMENT_OBSERVED_WINDOW_INCOMPLETE"],
+    };
+  }
+
+  try {
+    const brokerTicks = await getMt5HistoricalTicks(
+      row.symbol,
+      row.openedAt,
+      row.closedAt,
+    );
+    return buildPhase7CFastMoveReplayEvidence({
+      side: row.side,
+      openedAt: row.openedAt,
+      closedAt: row.closedAt,
+      observed,
+      brokerTicks,
+    });
+  } catch {
+    return {
+      verdict: "UNAVAILABLE",
+      complete: false,
+      managementSamples: observed.prices,
+      brokerTicks: [],
+      warnings: ["BROKER_TICK_PATH_UNAVAILABLE"],
+    };
+  }
+}
+
 export async function getPhase7CCounterfactualIntelligence(
   query: Phase7CCounterfactualQuery = {},
 ): Promise<Phase7CCounterfactualSnapshot> {
@@ -301,8 +413,9 @@ export async function getPhase7CCounterfactualIntelligence(
     symbol: query.symbol,
     limit: query.limit,
   });
-  return buildPhase7CCounterfactualSnapshotFromRows({
+  return buildPhase7CCounterfactualSnapshotFromRowsWithEvidence({
     rows: effectiveness.rows,
     generatedAt: effectiveness.generatedAt,
+    evidenceProvider: runtimeFastMoveEvidenceProvider,
   });
 }

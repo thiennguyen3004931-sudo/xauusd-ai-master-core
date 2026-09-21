@@ -8,6 +8,17 @@ export interface Mt5MarketDataClientOptions {
   timeoutMs?: number;
 }
 
+export interface Mt5HistoricalTick {
+  symbol: string;
+  brokerSymbol: string;
+  timestamp: number;
+  sequence: number;
+  bid: number;
+  ask: number;
+  last: number;
+  volume: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -187,6 +198,82 @@ export class Mt5MarketDataClient {
     }
 
     return payload as Mt5BridgeDeal[];
+  }
+
+  async getHistoricalTicks(
+    symbol: string,
+    fromMs: number,
+    toMs: number,
+  ): Promise<Mt5HistoricalTick[]> {
+    if (
+      !Number.isFinite(fromMs) ||
+      !Number.isFinite(toMs) ||
+      fromMs < 0 ||
+      toMs <= fromMs
+    ) {
+      throw new Error("Invalid MT5 tick-history range.");
+    }
+
+    const params = new URLSearchParams({
+      fromMs: String(Math.trunc(fromMs)),
+      toMs: String(Math.trunc(toMs)),
+    });
+    const payload = await this.getJson(
+      `/v1/history/ticks/${encodeURIComponent(symbol)}?${params.toString()}`,
+    );
+
+    if (!Array.isArray(payload)) {
+      throw new Error("MT5 tick-history response is not an array.");
+    }
+
+    return payload.map((item, index): Mt5HistoricalTick => {
+      if (!isRecord(item)) {
+        throw new Error(`Invalid MT5 tick[${index}] payload.`);
+      }
+      const rowSymbol = item.symbol;
+      const brokerSymbol = item.brokerSymbol;
+      const timestamp = item.timestamp;
+      const sequence = item.sequence;
+      const bid = item.bid;
+      const ask = item.ask;
+      const last = item.last;
+      const volume = item.volume;
+      if (
+        rowSymbol !== symbol ||
+        typeof brokerSymbol !== "string" ||
+        brokerSymbol.length === 0 ||
+        typeof timestamp !== "number" ||
+        !Number.isFinite(timestamp) ||
+        typeof sequence !== "number" ||
+        !Number.isInteger(sequence) ||
+        sequence < 0 ||
+        typeof bid !== "number" ||
+        !Number.isFinite(bid) ||
+        bid <= 0 ||
+        typeof ask !== "number" ||
+        !Number.isFinite(ask) ||
+        ask <= 0 ||
+        ask < bid ||
+        typeof last !== "number" ||
+        !Number.isFinite(last) ||
+        last < 0 ||
+        typeof volume !== "number" ||
+        !Number.isFinite(volume) ||
+        volume < 0
+      ) {
+        throw new Error(`MT5 tick[${index}] failed canonical validation.`);
+      }
+      return {
+        symbol,
+        brokerSymbol,
+        timestamp,
+        sequence,
+        bid,
+        ask,
+        last,
+        volume,
+      };
+    });
   }
 
   async getPositions(symbol?: string): Promise<Mt5BridgePosition[]> {
