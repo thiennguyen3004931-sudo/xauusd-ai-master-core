@@ -26,6 +26,11 @@ on:
       - "scripts/test-phase7c-ordered-exit-side-source.mjs"
       - "scripts/phase7c-fastmove-replay-evidence.test.ts"
       - "scripts/phase7c-fastmove-exact-path.test.ts"
+      - "scripts/phase7c-counterfactual-runtime-evidence.test.ts"
+      - "scripts/test-phase7c-p6c-runtime-evidence-wiring-source.mjs"
+      - "packages/mt5-broker/src/market/Mt5MarketDataClient.ts"
+      - "apps/api/src/services/mt5-market.service.ts"
+      - "apps/api/src/services/phase7c-recommendation-intelligence.service.ts"
       - "scripts/test-phase7c-p6b-broker-tick-path-source.mjs"
       - "scripts/test-phase7c-counterfactual-api-source.mjs"
       - "scripts/test-phase7c-counterfactual-intelligence-source.mjs"
@@ -88,6 +93,12 @@ jobs:
 
       - name: P6B GET-only broker tick path source contract
         run: node scripts/test-phase7c-p6b-broker-tick-path-source.mjs
+
+      - name: P6C runtime evidence wiring contract
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-counterfactual-runtime-evidence.test.ts
+
+      - name: P6C runtime source wiring contract
+        run: node scripts/test-phase7c-p6c-runtime-evidence-wiring-source.mjs
 
       - name: P4 GET-only API source contract
         run: node scripts/test-phase7c-counterfactual-api-source.mjs
