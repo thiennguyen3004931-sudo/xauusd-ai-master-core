@@ -12,6 +12,7 @@ from .broker_time import (
     normalize_deals,
     normalize_positions,
     normalize_quote,
+    normalize_ticks,
     normalize_trading_day_boundary,
 )
 from .config import Settings
@@ -19,6 +20,7 @@ from .errors import BridgeError
 from .forming_candles import candles_with_forming
 from .guarded_gateway import GuardedMt5Gateway
 from .historical_candles import historical_candles
+from .historical_ticks import historical_ticks
 from .ledger import IdempotencyLedger
 from .models import CloseRequest, ModifyRequest, OrderRequest
 
@@ -96,6 +98,11 @@ def candle_history(
     return normalize_candles(
         historical_candles(gateway, symbol, timeframe, fromMs, toMs)
     )
+
+
+@app.get("/v1/history/ticks/{symbol}", dependencies=[Depends(verify_api_key)])
+def tick_history(symbol: str, fromMs: int, toMs: int):
+    return normalize_ticks(historical_ticks(gateway, symbol, fromMs, toMs))
 
 
 @app.get("/v1/symbols/{symbol}/spec", dependencies=[Depends(verify_api_key)])

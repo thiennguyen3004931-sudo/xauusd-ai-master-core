@@ -188,6 +188,9 @@ function scenariosForRow(row: Phase7CPerformanceEffectivenessRow): Phase7CCounte
         managementEvents: row.management.events,
         orderedExitSidePrices: [],
         orderedExitSideEvidenceComplete: false,
+        managementExitSideSamples: [],
+        brokerExitSideTicks: [],
+        exactFastMovePathEvidenceComplete: false,
         alternativeGivebackPrice: givebackPrice,
       }),
     );
@@ -282,7 +285,7 @@ export function buildPhase7CCounterfactualSnapshotFromRows(
     scenarios,
     notes: [
       "P4 is SHADOW_ONLY and read-only. It never applies parameters, changes strategy/risk, or mutates orders, positions, mode, or ARM state.",
-      "M5 OHLC is not treated as ordered intrabar evidence; historical Fast-Move scenarios remain BOUNDED or UNAVAILABLE unless complete canonical ordered exit-side evidence exists.",
+      "M5 OHLC is not treated as ordered intrabar evidence; historical Fast-Move scenarios remain BOUNDED or UNAVAILABLE unless complete canonical management-sample plus broker tick-path evidence exists.",
       "BOUNDED scenarios may compare explicit locked-profit floors, but counterfactual exit, PnL, and realized-R remain null when they are not provable.",
       "RULE_OBSERVATION remains UNAVAILABLE without canonical rule replay evidence; MANAGEMENT_EXIT_POLICY may be BOUNDED with exact observed management evidence. Neither manufactures missed-trade PnL or causal claims.",
       "P4 produces evidence and deltas, not a recommendation; P5 recommendation logic remains a separate future subsystem with AUTO_RETUNE disabled.",

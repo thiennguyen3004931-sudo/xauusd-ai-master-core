@@ -77,6 +77,16 @@ def normalize_candles(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return output
 
 
+def normalize_ticks(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for row in rows:
+        normalized = dict(row)
+        if row.get("timestamp") is not None:
+            normalized["timestamp"] = normalize_timestamp_ms(row["timestamp"])
+        output.append(normalized)
+    return output
+
+
 def normalize_deals(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     for row in rows:
