@@ -91,7 +91,7 @@ permissions:
 
 jobs:
   source-contract:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -176,7 +176,7 @@ jobs:
         run: .\scripts\test-phase7c-stopped-midpoint-runner-sha-normalization-source.ps1
 
   safety-regression:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 15
     steps:
       - name: Checkout

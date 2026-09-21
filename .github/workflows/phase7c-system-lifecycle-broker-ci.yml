@@ -87,7 +87,7 @@ permissions:
 
 jobs:
   source-contract:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -100,7 +100,7 @@ jobs:
         run: .\scripts\test-phase7c-system-lifecycle-broker-source.ps1
 
   protocol-safety-contract:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -113,7 +113,7 @@ jobs:
         run: .\scripts\test-phase7c-system-lifecycle-broker-contract.ps1
 
   acl-source-contract:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -126,7 +126,7 @@ jobs:
         run: .\scripts\test-phase7c-lifecycle-broker-acl-source.ps1
 
   api-build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 18
     steps:
       - name: Checkout
@@ -144,7 +144,7 @@ jobs:
         run: pnpm --filter @xauusd/api... build
 
   web-lifecycle-regression:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 24
     steps:
       - name: Checkout
@@ -173,7 +173,7 @@ jobs:
         run: pnpm --filter @xauusd/web... build
 
   sideway-regression:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -262,7 +262,7 @@ jobs:
 
   notifier-regression:
     name: notifier-supervision-regression
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -285,7 +285,7 @@ jobs:
         run: node --test ./scripts/phase7c-sideway-production-telegram-sample.test.mjs
 
   windows-full-regression:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 24
     steps:
       - name: Checkout

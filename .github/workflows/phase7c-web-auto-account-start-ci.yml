@@ -50,7 +50,7 @@ permissions:
 
 jobs:
   web-auto-account-start:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 20
     steps:
       - name: Checkout

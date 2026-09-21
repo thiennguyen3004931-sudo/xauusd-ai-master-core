@@ -37,7 +37,7 @@ permissions:
 
 jobs:
   source-safety-windows:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 8
     steps:
       - name: Checkout
@@ -68,7 +68,7 @@ jobs:
         run: .\scripts\test-phase7c-web-client-localization-runtime-source.ps1
 
   web-build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 12
     steps:
       - name: Checkout
