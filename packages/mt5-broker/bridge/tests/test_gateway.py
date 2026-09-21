@@ -83,7 +83,8 @@ class FakeMt5:
         self.send_calls += 1
         self.position = SimpleNamespace(ticket=2001, symbol=request.get("symbol", "XAUUSD"), type=0,
             volume=request.get("volume", 0.2), price_open=2400.0, sl=request.get("sl", 2395.0),
-            tp=request.get("tp", 2411.0), profit=0.0, swap=0.0, time=1700000000, time_msc=1700000000000)
+            tp=request.get("tp", 2411.0), profit=0.0, swap=0.0, time=1700000000, time_msc=1700000000000,
+            magic=request.get("magic", 0), comment=request.get("comment", ""))
         return SimpleNamespace(retcode=10009, order=1001, deal=3001, price=2400.0,
             volume=request.get("volume", 0.2), comment="done")
     def positions_get(self, symbol=None, ticket=None):
@@ -279,6 +280,29 @@ class GatewayTests(unittest.TestCase):
 
             self.assertEqual(fake.check_calls, 0)
             self.assertEqual(fake.send_calls, 0)
+            ledger.close()
+
+    def test_market_fill_position_exposes_exact_bot_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = FakeMt5()
+            ledger = IdempotencyLedger(Path(directory) / "ledger.sqlite3")
+            gateway = Mt5Gateway(settings(Path(directory) / "ledger.sqlite3"), ledger, fake)
+            self.assertTrue(gateway.start())
+            request = OrderRequest(
+                symbol="XAUUSD", side="BUY", orderType="MARKET", timeInForce="IOC",
+                volume=0.2, requestedPrice=2400, stopLoss=2395, takeProfit=2411,
+                deviationPoints=50, magicNumber=260806, comment="test",
+                clientOrderId="p7b-im-1789998340000-BUY", idempotencyKey="provenance-key")
+
+            response = gateway.place_order(request)
+
+            self.assertTrue(response["accepted"])
+            self.assertIsNotNone(response["position"])
+            self.assertEqual(response["position"]["magic"], 260806)
+            self.assertEqual(
+                response["position"]["comment"],
+                Mt5Gateway._comment(request.clientOrderId),
+            )
             ledger.close()
 
     def test_comment_is_ascii_and_broker_safe_length(self):
