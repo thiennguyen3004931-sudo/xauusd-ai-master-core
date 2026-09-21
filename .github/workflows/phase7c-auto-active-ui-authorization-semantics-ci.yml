@@ -16,6 +16,10 @@ on:
       - "scripts/test-phase7c-auto-active-ui-authorization-semantics.mjs"
       - ".github/workflows/phase7c-auto-active-ui-authorization-semantics-ci.yml"
 
+concurrency:
+  group: phase7c-auto-ui-authorization-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

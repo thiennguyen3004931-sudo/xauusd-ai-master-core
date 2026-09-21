@@ -41,6 +41,10 @@ on:
       - "scripts/test-phase7c-api-canonical-account-env-bootstrap.mjs"
       - ".github/workflows/phase7c-web-auto-account-start-ci.yml"
 
+concurrency:
+  group: phase7c-web-auto-account-start-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

@@ -82,6 +82,10 @@ on:
       - "apps/web/src/ui/Phase7CRuntimeSourceAttestationCard.tsx"
       - ".github/workflows/phase7c-runtime-ready-stable-recovery-deploy-ci.yml"
 
+concurrency:
+  group: phase7c-runtime-ready-recovery-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

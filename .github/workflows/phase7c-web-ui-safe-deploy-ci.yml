@@ -28,6 +28,10 @@ on:
       - "scripts/test-phase7c-web-vi-localization.mjs"
       - ".github/workflows/phase7c-web-ui-safe-deploy-ci.yml"
 
+concurrency:
+  group: phase7c-web-ui-safe-deploy-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

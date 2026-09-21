@@ -50,6 +50,10 @@ on:
       - "scripts/run-phase7c-sideway-controller.mjs"
       - ".github/workflows/phase7c-semi-auto-trend-management-ci.yml"
 
+concurrency:
+  group: phase7c-semi-auto-trend-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

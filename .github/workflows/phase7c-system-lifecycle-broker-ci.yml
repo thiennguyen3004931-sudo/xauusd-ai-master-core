@@ -78,6 +78,10 @@ on:
       - "apps/web/**"
       - ".github/workflows/phase7c-system-lifecycle-broker-ci.yml"
 
+concurrency:
+  group: phase7c-system-lifecycle-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

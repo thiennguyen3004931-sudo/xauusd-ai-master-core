@@ -30,6 +30,10 @@ on:
       - "scripts/test-phase7c-control-center-v2-compact-ui-source.mjs"
       - ".github/workflows/phase7c-web-account-semantic-ci.yml"
 
+concurrency:
+  group: phase7c-web-account-semantic-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

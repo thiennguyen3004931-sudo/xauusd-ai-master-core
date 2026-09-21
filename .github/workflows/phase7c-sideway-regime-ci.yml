@@ -82,6 +82,10 @@ on:
       - "scripts/verify-phase7c-forward-dashboard-task-local.ps1"
       - ".github/workflows/phase7c-sideway-regime-ci.yml"
 
+concurrency:
+  group: phase7c-sideway-regime-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
