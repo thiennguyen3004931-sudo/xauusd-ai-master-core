@@ -203,32 +203,26 @@ jobs:
           node --check scripts/apply-phase7c-broker-clock-fix-local.mjs
           node --check scripts/verify-phase7c-broker-clock-local.mjs
 
-      - name: Dry-run broker clock controller patch
+      - name: Verify broker clock controller patch is fully applied
         shell: pwsh
         run: |
-          node scripts/apply-phase7c-broker-clock-fix-local.mjs
+          $output = node scripts/apply-phase7c-broker-clock-fix-local.mjs 2>&1
+          $output | ForEach-Object { Write-Host $_ }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $patchRoot = Join-Path $PWD ".phase7c-broker-clock-ci"
-          Remove-Item $patchRoot -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force (Join-Path $patchRoot "scripts") | Out-Null
-          Copy-Item scripts/run-phase7b-demo-controller.ts (Join-Path $patchRoot "scripts")
-          Copy-Item scripts/run-phase7c-sideway-controller.mjs (Join-Path $patchRoot "scripts")
-          $previousPatchRoot = $env:PHASE7C_BROKER_CLOCK_PATCH_ROOT
-          try {
-            $env:PHASE7C_BROKER_CLOCK_PATCH_ROOT = $patchRoot
-            node scripts/apply-phase7c-broker-clock-fix-local.mjs --apply
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          } finally {
-            $env:PHASE7C_BROKER_CLOCK_PATCH_ROOT = $previousPatchRoot
+          $joined = ($output -join [Environment]::NewLine)
+          if (-not $joined.Contains('PHASE7C_BROKER_CLOCK_PATCH_MODE=CHECK_ONLY')) {
+            throw "BROKER_CLOCK_CHECK_MODE_MISSING"
           }
-          node --check (Join-Path $patchRoot "scripts/run-phase7c-sideway-controller.mjs")
+          if (-not $joined.Contains('PHASE7C_BROKER_CLOCK_CHANGES_NEEDED=0')) {
+            throw "BROKER_CLOCK_PATCH_NOT_FULLY_APPLIED"
+          }
+          node --check scripts/run-phase7c-sideway-controller.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $trendSource = Get-Content (Join-Path $patchRoot "scripts/run-phase7b-demo-controller.ts") -Raw
-          $sidewaySource = Get-Content (Join-Path $patchRoot "scripts/run-phase7c-sideway-controller.mjs") -Raw
+          $trendSource = Get-Content scripts/run-phase7b-demo-controller.ts -Raw
+          $sidewaySource = Get-Content scripts/run-phase7c-sideway-controller.mjs -Raw
           if (-not $trendSource.Contains('const now = Number(quote.timestamp);')) { throw "BROKER_CLOCK_TREND_NOW_ASSERTION_MISSING" }
           if (-not $trendSource.Contains('managed.partialActivatedAt = Number(quote.timestamp);')) { throw "BROKER_CLOCK_PARTIAL_ASSERTION_MISSING" }
           if (-not $sidewaySource.Contains('brokerClockOffsetMs')) { throw "BROKER_CLOCK_SIDEWAY_OFFSET_ASSERTION_MISSING" }
-          Remove-Item $patchRoot -Recurse -Force
 
       - name: Parse Phase7C PowerShell launchers
         shell: pwsh
