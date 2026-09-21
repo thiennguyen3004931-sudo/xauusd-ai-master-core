@@ -181,6 +181,41 @@ test("runtime transform attaches pending and unresolved events to the correct li
   );
 });
 
+test("accepted Trend position recovery uses exact MT5 magic/comment provenance before broker-normalized prices", () => {
+  const controllerSource = fs.readFileSync(controllerPath, "utf8");
+  const gatewayPath = path.join(
+    scriptsDir,
+    "..",
+    "packages",
+    "mt5-broker",
+    "bridge",
+    "mt5_bridge",
+    "mt5_gateway.py",
+  );
+  const gatewaySource = fs.readFileSync(gatewayPath, "utf8");
+
+  const matcherStart = controllerSource.indexOf("function matchPendingTrendPosition(");
+  const matcherEnd = controllerSource.indexOf("function managedFromPending(", matcherStart);
+  assert.notEqual(matcherStart, -1, "pending-position matcher must exist");
+  assert.notEqual(matcherEnd, -1, "managed-from-pending boundary must exist");
+  const matcher = controllerSource.slice(matcherStart, matcherEnd);
+
+  assert.match(matcher, /PENDING_MAGIC_MISMATCH/);
+  assert.match(matcher, /PENDING_COMMENT_MISMATCH/);
+  assert.match(matcher, /PENDING_POSITION_MATCHED_BY_BROKER_PROVENANCE/);
+  assert.match(matcher, /phase7CBrokerComment\(pending\.orderId\)/);
+  assert.ok(
+    matcher.indexOf("PENDING_POSITION_MATCHED_BY_BROKER_PROVENANCE") <
+      matcher.indexOf("const priceTolerance"),
+    "exact bot provenance must resolve ownership before SL/TP normalization checks",
+  );
+
+  assert.match(gatewaySource, /"magic": int\(getattr\(row, "magic"/);
+  assert.match(gatewaySource, /"comment": str\(getattr\(row, "comment"/);
+  assert.match(gatewaySource, /expected_magic = int\(request\.magicNumber\)/);
+  assert.match(gatewaySource, /expected_comment = self\._comment\(request\.clientOrderId\)/);
+});
+
 test("pending Trend recovery matches the broker TP actually sent when fixed TP is enabled", () => {
   const source = fs.readFileSync(controllerPath, "utf8");
   const matcherStart = source.indexOf("function matchPendingTrendPosition(");
