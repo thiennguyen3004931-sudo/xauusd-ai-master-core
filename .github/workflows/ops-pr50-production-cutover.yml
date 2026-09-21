@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: 429f657c882dfd411f72dff6ecf2e370cca9cbf6
+          ref: main
 
       - name: Verify exact merged target
         shell: powershell
