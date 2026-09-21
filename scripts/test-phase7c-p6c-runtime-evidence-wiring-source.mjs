@@ -34,14 +34,17 @@ for (const literal of [
 }
 assert.doesNotMatch(counterfactual, /\bfetch\s*\(/);
 
-assert.match(recommendation, /getPhase7CCounterfactualIntelligence/);
+assert.match(recommendation, /buildPhase7CCounterfactualSnapshotFromRowsWithEvidence/);
+assert.match(recommendation, /runtimeFastMoveEvidenceProvider/);
 assert.match(
   recommendation,
-  /const counterfactual\s*=\s*await getPhase7CCounterfactualIntelligence\(query\)/,
+  /const counterfactual\s*=\s*await buildPhase7CCounterfactualSnapshotFromRowsWithEvidence\(\{/,
 );
+assert.match(recommendation, /rows:\s*effectiveness\.rows/);
+assert.match(recommendation, /evidenceProvider:\s*runtimeFastMoveEvidenceProvider/);
 assert.doesNotMatch(
   recommendation,
-  /const counterfactual\s*=\s*buildPhase7CCounterfactualSnapshotFromRows\(/,
+  /getPhase7CCounterfactualIntelligence\(query\)/,
 );
 
 for (const literal of [
