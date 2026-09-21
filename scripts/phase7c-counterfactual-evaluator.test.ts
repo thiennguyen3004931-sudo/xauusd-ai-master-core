@@ -14,14 +14,21 @@ const exact = evaluateFastMoveCounterfactual({
   exactCorrelation: true,
   exactManagementEvidence: true,
   managementEvents: [],
-  orderedExitSideEvidenceComplete: true,
-  orderedExitSidePrices: [
+  managementExitSideSamples: [
     { timestamp: 1_000, price: 100 },
     { timestamp: 2_000, price: 110 },
     { timestamp: 3_000, price: 118 },
     { timestamp: 4_000, price: 116 },
     { timestamp: 5_000, price: 112 },
   ],
+  brokerExitSideTicks: [
+    { timestamp: 1_000, sequence: 0, price: 100 },
+    { timestamp: 2_000, sequence: 1, price: 110 },
+    { timestamp: 3_000, sequence: 2, price: 118 },
+    { timestamp: 4_000, sequence: 3, price: 116 },
+    { timestamp: 5_000, sequence: 4, price: 112 },
+  ],
+  exactFastMovePathEvidenceComplete: true,
   alternativeGivebackPrice: 6,
 });
 
@@ -29,6 +36,7 @@ assert.equal(exact.schemaVersion, PHASE7C_COUNTERFACTUAL_INTELLIGENCE_SCHEMA_VER
 assert.equal(exact.family, "FAST_MOVE_GIVEBACK");
 assert.equal(exact.mode, "SHADOW_ONLY");
 assert.equal(exact.evidence.verdict, "EXACT");
+assert.equal(exact.evidence.sources.includes("MANAGEMENT_SAMPLES_PLUS_BROKER_TICKS_COMPLETE"), true);
 assert.equal(exact.baseline.activationPrice, 10);
 assert.equal(exact.baseline.givebackPrice, 10);
 assert.equal(exact.alternative.givebackPrice, 6);
@@ -64,6 +72,34 @@ assert.equal(incompleteOrdered.shadowOutcome.exitPrice, null);
 assert.equal(incompleteOrdered.delta.exitPrice, null);
 assert.equal(
   incompleteOrdered.quality.warnings.includes("ORDERED_EXIT_SIDE_EVIDENCE_INCOMPLETE"),
+  true,
+);
+
+const legacyComplete = evaluateFastMoveCounterfactual({
+  tradeKey: "LIVE:TREND:1c:t1c",
+  positionId: "1c",
+  strategy: "TREND",
+  side: "BUY",
+  entry: 100,
+  actualExit: 112,
+  actualNetPnl: 12,
+  actualRealizedR: null,
+  exactCorrelation: true,
+  exactManagementEvidence: false,
+  managementEvents: [],
+  orderedExitSideEvidenceComplete: true,
+  orderedExitSidePrices: [
+    { timestamp: 1_000, price: 100 },
+    { timestamp: 2_000, price: 110 },
+    { timestamp: 3_000, price: 118 },
+    { timestamp: 5_000, price: 112 },
+  ],
+  alternativeGivebackPrice: 6,
+});
+
+assert.notEqual(legacyComplete.evidence.verdict, "EXACT");
+assert.equal(
+  legacyComplete.quality.warnings.includes("ORDERED_EXIT_SIDE_PRICES_REQUIRE_BROKER_TICKS"),
   true,
 );
 
@@ -124,7 +160,7 @@ assert.equal(unavailable.delta.exitPrice, null);
 assert.equal(unavailable.delta.lockedProfitPrice, null);
 assert.equal(unavailable.quality.warnings.includes("CORRELATION_NOT_EXACT"), true);
 
-for (const scenario of [exact, incompleteOrdered, bounded, unavailable]) {
+for (const scenario of [exact, incompleteOrdered, legacyComplete, bounded, unavailable]) {
   assert.equal(scenario.safety.readOnly, true);
   assert.equal(scenario.safety.shadowOnly, true);
   assert.equal(scenario.safety.strategyMutation, false);
@@ -140,5 +176,6 @@ for (const scenario of [exact, incompleteOrdered, bounded, unavailable]) {
 
 console.log("P4_COUNTERFACTUAL_EVALUATOR_TEST=PASS");
 console.log("P4_EVIDENCE_VERDICTS=EXACT_BOUNDED_UNAVAILABLE");
-console.log("P4_EXACT_REPLAY_REQUIRES_COMPLETE_ORDERED_EVIDENCE=PASS");
+console.log("P4_EXACT_REPLAY_REQUIRES_CYCLE_PLUS_TICK_EVIDENCE=PASS");
+console.log("P4_LEGACY_ORDERED_PRICES_FALSE_EXACT=REJECTED");
 console.log("P4_COUNTERFACTUAL_PNL_INFERENCE=NONE_WITHOUT_EXECUTION_EVIDENCE");

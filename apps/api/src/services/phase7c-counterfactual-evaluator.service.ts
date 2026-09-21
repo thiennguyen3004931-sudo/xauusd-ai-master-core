@@ -14,10 +14,16 @@ import {
 const CURRENT_ACTIVATION_PRICE = 10;
 const CURRENT_GIVEBACK_PRICE = 10;
 const EPSILON = 1e-9;
+const LEGACY_ORDERED_EXIT_SIDE_PRICES_WARNING =
+  "ORDERED_EXIT_SIDE_PRICES_REQUIRE_BROKER_TICKS";
 
 export interface Phase7COrderedExitSidePrice {
   timestamp: number;
   price: number;
+}
+
+export interface Phase7CBrokerExitSideTick extends Phase7COrderedExitSidePrice {
+  sequence: number;
 }
 
 export interface Phase7CFastMoveCounterfactualInput {
@@ -36,6 +42,9 @@ export interface Phase7CFastMoveCounterfactualInput {
   managementEvents: readonly Phase7CPerformanceManagementEvent[];
   orderedExitSidePrices?: readonly Phase7COrderedExitSidePrice[];
   orderedExitSideEvidenceComplete?: boolean;
+  managementExitSideSamples?: readonly Phase7COrderedExitSidePrice[];
+  brokerExitSideTicks?: readonly Phase7CBrokerExitSideTick[];
+  exactFastMovePathEvidenceComplete?: boolean;
   alternativeGivebackPrice: number;
 }
 
@@ -152,50 +161,84 @@ function validOrderedPrices(
   ) {
     return null;
   }
-  ordered.sort((left, right) => left.timestamp - right.timestamp);
   for (let index = 1; index < ordered.length; index += 1) {
-    if (ordered[index].timestamp <= ordered[index - 1].timestamp) return null;
+    if (ordered[index]!.timestamp <= ordered[index - 1]!.timestamp) return null;
   }
   return ordered;
 }
 
-function replayOrderedPrices(
+function validBrokerTicks(
+  ticks: readonly Phase7CBrokerExitSideTick[],
+): Phase7CBrokerExitSideTick[] | null {
+  if (ticks.length === 0) return null;
+  const ordered = ticks.map((tick) => ({
+    timestamp: Number(tick.timestamp),
+    sequence: Number(tick.sequence),
+    price: Number(tick.price),
+  }));
+  if (
+    ordered.some(
+      (tick) =>
+        !Number.isFinite(tick.timestamp) ||
+        !Number.isInteger(tick.sequence) ||
+        tick.sequence < 0 ||
+        !Number.isFinite(tick.price) ||
+        tick.price <= 0,
+    )
+  ) {
+    return null;
+  }
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1]!;
+    const current = ordered[index]!;
+    if (
+      current.timestamp < previous.timestamp ||
+      current.sequence <= previous.sequence
+    ) {
+      return null;
+    }
+  }
+  return ordered;
+}
+
+function replayManagementCyclesWithBrokerTicks(
   side: Phase7CPerformanceSide,
   entry: number,
-  prices: readonly Phase7COrderedExitSidePrice[],
+  samples: readonly Phase7COrderedExitSidePrice[],
+  ticks: readonly Phase7CBrokerExitSideTick[],
   givebackPrice: number,
   fallbackExit: number,
-): ReplayResult {
-  if (prices.length === 0) {
-    return { triggered: false, stopHit: false, exitPrice: null, lockedProfitPrice: null };
+): ReplayResult | null {
+  if (samples.length === 0 || ticks.length === 0) return null;
+
+  const sampleTickIndexes: number[] = [];
+  let searchFrom = 0;
+  for (const sample of samples) {
+    let matchedIndex = -1;
+    for (let index = searchFrom; index < ticks.length; index += 1) {
+      const tick = ticks[index]!;
+      if (tick.timestamp < sample.timestamp) continue;
+      if (tick.timestamp > sample.timestamp) break;
+      if (Math.abs(tick.price - sample.price) <= EPSILON) {
+        matchedIndex = index;
+        break;
+      }
+    }
+    if (matchedIndex < 0) return null;
+    sampleTickIndexes.push(matchedIndex);
+    searchFrom = matchedIndex + 1;
   }
 
   let bestFavorablePrice = entry;
   let triggered = false;
   let stopPrice: number | null = null;
+  let nextSample = 0;
 
-  for (const sample of prices) {
-    bestFavorablePrice = side === "BUY"
-      ? Math.max(bestFavorablePrice, sample.price)
-      : Math.min(bestFavorablePrice, sample.price);
-    const favorable = favorableDistance(side, entry, bestFavorablePrice);
-    if (favorable + EPSILON >= CURRENT_ACTIVATION_PRICE) {
-      triggered = true;
-      const candidate = side === "BUY"
-        ? bestFavorablePrice - givebackPrice
-        : bestFavorablePrice + givebackPrice;
-      const candidateLocked = favorableDistance(side, entry, candidate);
-      if (candidateLocked > 0) {
-        stopPrice = stopPrice === null
-          ? candidate
-          : side === "BUY"
-            ? Math.max(stopPrice, candidate)
-            : Math.min(stopPrice, candidate);
-      }
-    }
+  for (let tickIndex = 0; tickIndex < ticks.length; tickIndex += 1) {
+    const tick = ticks[tickIndex]!;
 
     if (stopPrice !== null) {
-      const hit = side === "BUY" ? sample.price <= stopPrice : sample.price >= stopPrice;
+      const hit = side === "BUY" ? tick.price <= stopPrice : tick.price >= stopPrice;
       if (hit) {
         const exitPrice = round(stopPrice);
         return {
@@ -206,8 +249,33 @@ function replayOrderedPrices(
         };
       }
     }
+
+    if (nextSample < samples.length && sampleTickIndexes[nextSample] === tickIndex) {
+      const sample = samples[nextSample]!;
+      bestFavorablePrice = side === "BUY"
+        ? Math.max(bestFavorablePrice, sample.price)
+        : Math.min(bestFavorablePrice, sample.price);
+
+      const favorable = favorableDistance(side, entry, bestFavorablePrice);
+      if (favorable + EPSILON >= CURRENT_ACTIVATION_PRICE) {
+        triggered = true;
+        const candidate = side === "BUY"
+          ? bestFavorablePrice - givebackPrice
+          : bestFavorablePrice + givebackPrice;
+        const candidateLocked = favorableDistance(side, entry, candidate);
+        if (candidateLocked > 0) {
+          stopPrice = stopPrice === null
+            ? candidate
+            : side === "BUY"
+              ? Math.max(stopPrice, candidate)
+              : Math.min(stopPrice, candidate);
+        }
+      }
+      nextSample += 1;
+    }
   }
 
+  if (nextSample !== samples.length) return null;
   const exitPrice = round(fallbackExit);
   return {
     triggered,
@@ -238,7 +306,7 @@ export function evaluateFastMoveCounterfactual(
 
   const base = {
     schemaVersion: PHASE7C_COUNTERFACTUAL_INTELLIGENCE_SCHEMA_VERSION,
-    scenarioId: `${input.tradeKey}:FAST_MOVE_GIVEBACK:${alternativeGivebackPrice}`,
+    scenarioId: input.tradeKey + ":FAST_MOVE_GIVEBACK:" + alternativeGivebackPrice,
     tradeKey: input.tradeKey,
     positionId: input.positionId,
     strategy: input.strategy,
@@ -287,34 +355,45 @@ export function evaluateFastMoveCounterfactual(
     };
   }
 
-  const orderedInput = input.orderedExitSidePrices ?? [];
-  const ordered = validOrderedPrices(orderedInput);
-  const orderedEvidenceComplete = input.orderedExitSideEvidenceComplete === true;
-  const orderedEvidenceReplayable = orderedEvidenceComplete && ordered !== null;
-  const orderedEvidenceWarning = orderedInput.length > 0 && !orderedEvidenceReplayable
-    ? orderedEvidenceComplete
-      ? "ORDERED_EXIT_SIDE_EVIDENCE_INVALID"
-      : "ORDERED_EXIT_SIDE_EVIDENCE_INCOMPLETE"
+  const legacyOrderedInput = input.orderedExitSidePrices ?? [];
+  const legacyOrdered = validOrderedPrices(legacyOrderedInput);
+  const legacyOrderedEvidenceComplete = input.orderedExitSideEvidenceComplete === true;
+  const legacyOrderedWarning = legacyOrderedInput.length > 0
+    ? legacyOrderedEvidenceComplete && legacyOrdered !== null
+      ? LEGACY_ORDERED_EXIT_SIDE_PRICES_WARNING
+      : legacyOrderedEvidenceComplete
+        ? "ORDERED_EXIT_SIDE_EVIDENCE_INVALID"
+        : "ORDERED_EXIT_SIDE_EVIDENCE_INCOMPLETE"
     : null;
 
-  if (orderedEvidenceReplayable && ordered !== null) {
-    const replay = replayOrderedPrices(
-      input.side,
-      entry,
-      ordered,
-      alternativeGivebackPrice,
-      actualExit,
-    );
+  const managementSamples = validOrderedPrices(input.managementExitSideSamples ?? []);
+  const brokerTicks = validBrokerTicks(input.brokerExitSideTicks ?? []);
+  const exactPathClaimed = input.exactFastMovePathEvidenceComplete === true;
+  const exactPathReplay = exactPathClaimed && managementSamples !== null && brokerTicks !== null
+    ? replayManagementCyclesWithBrokerTicks(
+        input.side,
+        entry,
+        managementSamples,
+        brokerTicks,
+        alternativeGivebackPrice,
+        actualExit,
+      )
+    : null;
+
+  if (exactPathReplay !== null) {
     const actualComparableLocked = favorableDistance(input.side, entry, actualExit);
     const shadowOutcome: Phase7CCounterfactualOutcome = {
-      exitPrice: replay.exitPrice,
+      exitPrice: exactPathReplay.exitPrice,
       netPnl: null,
       realizedR: null,
-      lockedProfitPrice: replay.lockedProfitPrice,
+      lockedProfitPrice: exactPathReplay.lockedProfitPrice,
     };
     return {
       ...base,
-      evidence: { verdict: "EXACT", sources: ["ORDERED_EXIT_SIDE_PRICES_COMPLETE"] },
+      evidence: {
+        verdict: "EXACT",
+        sources: ["MANAGEMENT_SAMPLES_PLUS_BROKER_TICKS_COMPLETE"],
+      },
       actualOutcome: {
         ...actualOutcome,
         lockedProfitPrice: actualComparableLocked,
@@ -333,6 +412,10 @@ export function evaluateFastMoveCounterfactual(
       },
     };
   }
+
+  const exactPathWarning = exactPathClaimed
+    ? "FAST_MOVE_EXACT_PATH_EVIDENCE_INVALID"
+    : null;
 
   if (input.exactManagementEvidence) {
     const bounded = boundedAlternativeLockedProfit(
@@ -366,7 +449,8 @@ export function evaluateFastMoveCounterfactual(
         },
         quality: {
           warnings: [
-            ...(orderedEvidenceWarning ? [orderedEvidenceWarning] : []),
+            ...(legacyOrderedWarning ? [legacyOrderedWarning] : []),
+            ...(exactPathWarning ? [exactPathWarning] : []),
             "COUNTERFACTUAL_EXIT_NOT_PROVABLE",
             "COUNTERFACTUAL_PNL_NOT_PROVABLE",
           ],
@@ -382,13 +466,17 @@ export function evaluateFastMoveCounterfactual(
     shadowOutcome: unavailableOutcome(),
     delta: { exitPrice: null, netPnl: null, realizedR: null, lockedProfitPrice: null },
     quality: {
-      warnings: orderedEvidenceWarning
-        ? [orderedEvidenceWarning]
-        : [
-            input.exactManagementEvidence
-              ? "ORDERED_OR_EXPLICIT_FAST_MOVE_EVIDENCE_MISSING"
-              : "MANAGEMENT_EVIDENCE_NOT_EXACT",
-          ],
+      warnings: [
+        ...(legacyOrderedWarning ? [legacyOrderedWarning] : []),
+        ...(exactPathWarning ? [exactPathWarning] : []),
+        ...(!legacyOrderedWarning && !exactPathWarning
+          ? [
+              input.exactManagementEvidence
+                ? "ORDERED_OR_EXPLICIT_FAST_MOVE_EVIDENCE_MISSING"
+                : "MANAGEMENT_EVIDENCE_NOT_EXACT",
+            ]
+          : []),
+      ],
     },
   };
 }
