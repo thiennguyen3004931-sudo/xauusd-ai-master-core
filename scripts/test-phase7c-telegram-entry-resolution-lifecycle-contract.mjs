@@ -100,6 +100,8 @@ test("accepted-but-not-yet-resolved is transient on Telegram and recovered fill 
 
   assert.equal(notifications.length, 2);
   assert.match(notifications[0].text, /SELL PENDING/);
+  assert.match(notifications[0].text, /CHỜ MT5 XÁC NHẬN/);
+  assert.doesNotMatch(notifications[0].text, /CHƯA VÀO MT5/);
   assert.doesNotMatch(notifications[0].text, /Position chưa resolve/i);
   assert.match(notifications[1].text, /SELL FILLED/);
   assert.match(notifications[1].text, /POSITION-1/);
