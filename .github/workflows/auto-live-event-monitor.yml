@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/auto-live-event-monitor-77f13bbd
     paths:
       - 'scripts/ops/auto-live-event-monitor.ps1'
       - '.github/workflows/auto-live-event-monitor.yml'
@@ -31,7 +30,7 @@ permissions:
 
 concurrency:
   group: auto-live-readonly-monitor
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   monitor:
