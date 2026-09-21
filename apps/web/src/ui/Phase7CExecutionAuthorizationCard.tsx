@@ -33,6 +33,8 @@ const CHECK_LABELS: Record<string, string> = {
   terminalTradeAllowed: "MT5 terminal cho phép trading",
   expertTradeAllowed: "MT5 Algo/Expert Trading bật",
   zeroXauusdPositions: "XAUUSD positions = 0",
+  zeroXauusdPendingOrders: "XAUUSD pending orders = 0",
+  runtimeSourceExact: "Runtime source = EXACT_MATCH",
   bridgeSessionAvailable: "Bridge session hợp lệ",
   currentlyDisarmed: "LIVE hiện DISARMED",
   currentlyArmed: "LIVE hiện ARMED",
