@@ -15,20 +15,9 @@ on:
         description: Current production project root on the self-hosted Windows runner
         required: true
         type: string
-  push:
-    branches:
-      - ops/p6d-m8-readonly-preflight-f142d628
-    paths:
-      - ".github/workflows/private-m8-readonly-preflight.yml"
 
 permissions:
   contents: read
-
-env:
-  ONE_SHOT_EXPECTED_COMMIT: f142d62838746ada79ad3aa90573e6fa885e82f9
-  ONE_SHOT_EXPECTED_TREE: 4ad4c1c02cd11883617ca0f1fa8581527a3ec26b
-  ONE_SHOT_RUNTIME_PROJECT_ROOT: 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
-  ONE_SHOT_BRANCH: ops/p6d-m8-readonly-preflight-f142d628
 
 jobs:
   m8-readonly-preflight:
@@ -43,42 +32,25 @@ jobs:
           fetch-depth: 0
           ref: main
 
-      - name: Guard one-shot trigger
-        shell: powershell
-        run: |
-          if ('${{ github.event_name }}' -eq 'push') {
-            if ('${{ github.ref }}' -ne "refs/heads/$env:ONE_SHOT_BRANCH") {
-              Write-Error "ONE_SHOT_BRANCH_MISMATCH"
-              exit 1
-            }
-          }
-          Write-Host "M8_ONE_SHOT_TRIGGER=PASS"
-          Write-Host "M8_ONE_SHOT_PRODUCTION_MUTATION=NONE"
-
       - name: Verify exact approved candidate
         shell: powershell
         env:
-          DISPATCH_EXPECTED_COMMIT: ${{ inputs.expected_commit }}
-          DISPATCH_EXPECTED_TREE: ${{ inputs.expected_tree }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
         run: |
-          $expectedCommit = ([string]$env:DISPATCH_EXPECTED_COMMIT).Trim()
-          $expectedTree = ([string]$env:DISPATCH_EXPECTED_TREE).Trim()
-          if ([string]::IsNullOrWhiteSpace($expectedCommit)) { $expectedCommit = $env:ONE_SHOT_EXPECTED_COMMIT }
-          if ([string]::IsNullOrWhiteSpace($expectedTree)) { $expectedTree = $env:ONE_SHOT_EXPECTED_TREE }
-
-          if ($expectedCommit -notmatch '^[0-9a-fA-F]{40}$') {
+          if ($env:EXPECTED_COMMIT -notmatch '^[0-9a-fA-F]{40}$') {
             Write-Error "EXPECTED_COMMIT_INVALID"
             exit 1
           }
-          if ($expectedTree -notmatch '^[0-9a-fA-F]{40}$') {
+          if ($env:EXPECTED_TREE -notmatch '^[0-9a-fA-F]{40}$') {
             Write-Error "EXPECTED_TREE_INVALID"
             exit 1
           }
 
           $actualHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
           $actualTree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
-          $expectedHead = $expectedCommit.Trim().ToLowerInvariant()
-          $expectedTree = $expectedTree.Trim().ToLowerInvariant()
+          $expectedHead = $env:EXPECTED_COMMIT.Trim().ToLowerInvariant()
+          $expectedTree = $env:EXPECTED_TREE.Trim().ToLowerInvariant()
 
           Write-Host "CHECKED_OUT_HEAD=$actualHead"
           Write-Host "EXPECTED_HEAD=$expectedHead"
@@ -97,18 +69,11 @@ jobs:
       - name: Run canonical M8 read-only preflight
         shell: powershell
         env:
-          DISPATCH_EXPECTED_COMMIT: ${{ inputs.expected_commit }}
-          DISPATCH_EXPECTED_TREE: ${{ inputs.expected_tree }}
-          DISPATCH_RUNTIME_PROJECT_ROOT: ${{ inputs.runtime_project_root }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
+          RUNTIME_PROJECT_ROOT: ${{ inputs.runtime_project_root }}
         run: |
-          $expectedCommit = ([string]$env:DISPATCH_EXPECTED_COMMIT).Trim()
-          $expectedTree = ([string]$env:DISPATCH_EXPECTED_TREE).Trim()
-          $runtimeProjectRoot = ([string]$env:DISPATCH_RUNTIME_PROJECT_ROOT).Trim()
-          if ([string]::IsNullOrWhiteSpace($expectedCommit)) { $expectedCommit = $env:ONE_SHOT_EXPECTED_COMMIT }
-          if ([string]::IsNullOrWhiteSpace($expectedTree)) { $expectedTree = $env:ONE_SHOT_EXPECTED_TREE }
-          if ([string]::IsNullOrWhiteSpace($runtimeProjectRoot)) { $runtimeProjectRoot = $env:ONE_SHOT_RUNTIME_PROJECT_ROOT }
-
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
-            -ExpectedCommit $expectedCommit `
-            -ExpectedTree $expectedTree `
-            -RuntimeProjectRoot $runtimeProjectRoot
+            -ExpectedCommit $env:EXPECTED_COMMIT `
+            -ExpectedTree $env:EXPECTED_TREE `
+            -RuntimeProjectRoot $env:RUNTIME_PROJECT_ROOT
