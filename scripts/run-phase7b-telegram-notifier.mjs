@@ -597,7 +597,7 @@ async function formatEvent(event, enrichment) {
     if (recovery.active) {
       return fullCard(
         "🛟",
-        `🟡 DAILY RECOVERY ${side} PENDING · ${symbol} · CHƯA VÀO MT5`,
+        `🟡 DAILY RECOVERY ${side} PENDING · ${symbol} · CHỜ MT5 XÁC NHẬN`,
         [
           line(
             "⏱",
@@ -667,7 +667,7 @@ async function formatEvent(event, enrichment) {
     if (isSideway) {
       return fullCard(
         sideIcon(side),
-        `🟡 ${side} SIDEWAY PENDING · ${symbol} · CHƯA VÀO MT5`,
+        `🟡 ${side} SIDEWAY PENDING · ${symbol} · CHỜ MT5 XÁC NHẬN`,
         [
           line("⏱", "M5", time),
           line(
@@ -702,7 +702,7 @@ async function formatEvent(event, enrichment) {
 
     return fullCard(
       sideIcon(side),
-      `🟡 ${side} PENDING · ${symbol} · CHƯA VÀO MT5`,
+      `🟡 ${side} PENDING · ${symbol} · CHỜ MT5 XÁC NHẬN`,
       [
         line("⏱", "M15", time),
         line(
