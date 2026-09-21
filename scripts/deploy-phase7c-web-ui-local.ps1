@@ -220,6 +220,12 @@ try {
     throw "Phase7C MT5 broker build failed with exit code $LASTEXITCODE. Runtime was not restarted."
   }
 
+  & $pnpm.Source --filter '@xauusd/api...' build
+  if ($LASTEXITCODE -ne 0) {
+    throw "Phase7C API dependency graph build failed with exit code $LASTEXITCODE. Runtime was not restarted."
+  }
+  Write-Host "PHASE7C_WEB_UI_DEPLOY_API_DEPENDENCY_BUILD=PASS"
+
   & $pnpm.Source --filter '@xauusd/web' build
   if ($LASTEXITCODE -ne 0) {
     throw "Phase7C web build failed with exit code $LASTEXITCODE. Runtime was not restarted."
