@@ -55,7 +55,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
-          EXPECTED_SOURCE_COMMIT: 77f13bbd8e20875ed924a22a865c306551dad582
+          EXPECTED_SOURCE_COMMIT: 429f657c882dfd411f72dff6ecf2e370cca9cbf6
           MONITOR_ISSUE_NUMBER: '28'
         run: |
           $notify = $false
