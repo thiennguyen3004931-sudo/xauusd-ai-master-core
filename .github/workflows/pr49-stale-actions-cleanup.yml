@@ -1,0 +1,74 @@
+name: PR49 Stale Actions Cleanup
+
+on:
+  push:
+    branches:
+      - feat/post-cutover-production-hardening-f142d628
+    paths:
+      - '.github/workflows/pr49-stale-actions-cleanup.yml'
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: pr49-stale-actions-cleanup
+  cancel-in-progress: true
+
+jobs:
+  cancel-stale-pr-runs:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Cancel stale PR #49 workflow runs
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_HEAD: ${{ github.sha }}
+          TARGET_BRANCH: feat/post-cutover-production-hardening-f142d628
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+            'User-Agent' = 'xauusd-pr49-queue-cleanup'
+          }
+
+          $repo = $env:GITHUB_REPOSITORY
+          $listUri = "https://api.github.com/repos/$repo/actions/runs?per_page=100"
+          $response = Invoke-RestMethod -Uri $listUri -Headers $headers -Method Get -TimeoutSec 30
+
+          $stale = @(
+            $response.workflow_runs | Where-Object {
+              $_.event -eq 'pull_request' -and
+              $_.head_branch -eq $env:TARGET_BRANCH -and
+              $_.head_sha -ne $env:CURRENT_HEAD -and
+              $_.status -ne 'completed'
+            }
+          )
+
+          Write-Host "PR49_CLEANUP_CURRENT_HEAD=$env:CURRENT_HEAD"
+          Write-Host "PR49_CLEANUP_STALE_COUNT=$($stale.Count)"
+
+          foreach ($run in $stale) {
+            $cancelUri = "https://api.github.com/repos/$repo/actions/runs/$($run.id)/cancel"
+            try {
+              Invoke-RestMethod -Uri $cancelUri -Headers $headers -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 30 | Out-Null
+              Write-Host "PR49_CLEANUP_CANCEL_REQUESTED=$($run.id)|$($run.name)|$($run.head_sha)"
+            } catch {
+              $statusCode = $null
+              if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode }
+              if ($statusCode -eq 409) {
+                Write-Host "PR49_CLEANUP_ALREADY_TERMINAL=$($run.id)"
+              } else {
+                throw
+              }
+            }
+          }
+
+          Write-Host "PR49_CLEANUP_PRODUCTION_MUTATION=NONE"
+          Write-Host "PR49_CLEANUP_MODE_MUTATION=NONE"
+          Write-Host "PR49_CLEANUP_ARM_MUTATION=NONE"
+          Write-Host "PR49_CLEANUP_ORDER_MUTATION=NONE"
+          Write-Host "PR49_CLEANUP_POSITION_MUTATION=NONE"
