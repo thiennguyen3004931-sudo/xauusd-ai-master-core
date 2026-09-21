@@ -29,8 +29,8 @@ permissions:
   issues: write
 
 concurrency:
-  group: auto-live-readonly-monitor
-  cancel-in-progress: false
+  group: auto-live-readonly-monitor-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   monitor:
