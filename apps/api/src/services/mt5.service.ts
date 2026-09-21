@@ -160,6 +160,7 @@ export async function getMt5Telemetry(
         quote: null,
         spec: null,
         positions: [],
+        pendingOrders: [],
         checkedAt,
       };
     }
