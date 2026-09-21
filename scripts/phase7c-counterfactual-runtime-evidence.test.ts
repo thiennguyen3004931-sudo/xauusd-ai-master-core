@@ -92,7 +92,7 @@ async function main() {
       };
     },
   });
-  
+
   assert.equal(exactProviderCalls, 1);
   const exactFastMove = exact.scenarios.filter((scenario) => scenario.family === "FAST_MOVE_GIVEBACK");
   assert.equal(exactFastMove.length, 4);
@@ -103,7 +103,7 @@ async function main() {
     true,
   );
   assert.equal(exact.summary.exactCount >= 4, true);
-  
+
   let unavailableProviderCalls = 0;
   const bounded = await buildPhase7CCounterfactualSnapshotFromRowsWithEvidence({
     rows: [row()],
@@ -119,17 +119,17 @@ async function main() {
       };
     },
   });
-  
+
   assert.equal(unavailableProviderCalls, 1);
   const boundedFastMove = bounded.scenarios.filter((scenario) => scenario.family === "FAST_MOVE_GIVEBACK");
   assert.equal(boundedFastMove.length, 4);
   assert.equal(boundedFastMove.every((scenario) => scenario.evidence.verdict === "BOUNDED"), true);
   assert.equal(bounded.summary.exactCount, 0);
-  
+
   console.log("P6C_RUNTIME_EVIDENCE_WIRING_TEST=PASS");
   console.log("P6C_P4_EXACT_PATH_RUNTIME_PROVIDER=PASS");
   console.log("P6C_FAIL_CLOSED_TO_BOUNDED=PASS");
-  
+
 }
 
 void main().catch((error) => {
