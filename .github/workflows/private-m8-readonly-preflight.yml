@@ -1,175 +1,79 @@
-name: Production ARM ONLY f142d628
+name: Private M8 Read-Only Preflight
 
 on:
-  push:
-    branches:
-      - ops/m8-approved-cutover-f142d628
-    paths:
-      - ".github/workflows/private-m8-readonly-preflight.yml"
+  workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: Exact approved private main commit SHA
+        required: true
+        type: string
+      expected_tree:
+        description: Exact approved private main tree SHA
+        required: true
+        type: string
+      runtime_project_root:
+        description: Current production project root on the self-hosted Windows runner
+        required: true
+        type: string
 
 permissions:
   contents: read
 
-env:
-  TARGET_COMMIT: f142d62838746ada79ad3aa90573e6fa885e82f9
-  TARGET_TREE: 4ad4c1c02cd11883617ca0f1fa8581527a3ec26b
-  PRODUCTION_ROOT: 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
-  API_BASE_URL: http://127.0.0.1:3711
-  APPROVED_BRANCH: ops/m8-approved-cutover-f142d628
-
 jobs:
-  arm-only:
-    name: production-arm-only-self-hosted
+  m8-readonly-preflight:
+    name: m8-readonly-preflight-self-hosted
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 15
+
     steps:
-      - name: Checkout exact target source
+      - name: Checkout private main candidate
         uses: actions/checkout@v4
         with:
-          ref: main
           fetch-depth: 0
+          ref: main
 
-      - name: Verify approval and target pins
+      - name: Verify exact approved candidate
         shell: powershell
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
         run: |
-          if ('${{ github.event_name }}' -ne 'push') { throw 'ARM_APPROVAL_EVENT_INVALID' }
-          if ('${{ github.ref }}' -ne "refs/heads/$env:APPROVED_BRANCH") { throw 'ARM_APPROVAL_BRANCH_INVALID' }
-          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
-          $tree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
-          if ($head -ne $env:TARGET_COMMIT) { throw "ARM_TARGET_HEAD_MISMATCH=$head" }
-          if ($tree -ne $env:TARGET_TREE) { throw "ARM_TARGET_TREE_MISMATCH=$tree" }
-          Write-Host "ARM_ONLY_TARGET_HEAD=$head"
-          Write-Host "ARM_ONLY_TARGET_TREE=$tree"
+          if ($env:EXPECTED_COMMIT -notmatch '^[0-9a-fA-F]{40}$') {
+            Write-Error "EXPECTED_COMMIT_INVALID"
+            exit 1
+          }
+          if ($env:EXPECTED_TREE -notmatch '^[0-9a-fA-F]{40}$') {
+            Write-Error "EXPECTED_TREE_INVALID"
+            exit 1
+          }
 
-      - name: Fresh DISARMED safety preflight
+          $actualHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $actualTree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $expectedHead = $env:EXPECTED_COMMIT.Trim().ToLowerInvariant()
+          $expectedTree = $env:EXPECTED_TREE.Trim().ToLowerInvariant()
+
+          Write-Host "CHECKED_OUT_HEAD=$actualHead"
+          Write-Host "EXPECTED_HEAD=$expectedHead"
+          Write-Host "CHECKED_OUT_TREE=$actualTree"
+          Write-Host "EXPECTED_TREE=$expectedTree"
+
+          if ($actualHead -ne $expectedHead) {
+            Write-Error "CHECKED_OUT_HEAD_MISMATCH"
+            exit 1
+          }
+          if ($actualTree -ne $expectedTree) {
+            Write-Error "CHECKED_OUT_TREE_MISMATCH"
+            exit 1
+          }
+
+      - name: Run canonical M8 read-only preflight
         shell: powershell
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_TREE: ${{ inputs.expected_tree }}
+          RUNTIME_PROJECT_ROOT: ${{ inputs.runtime_project_root }}
         run: |
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
-            -ExpectedCommit $env:TARGET_COMMIT `
-            -ExpectedTree $env:TARGET_TREE `
-            -RuntimeProjectRoot $env:PRODUCTION_ROOT
-
-      - name: Execute canonical ARM LIVE only
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $api = $env:API_BASE_URL.TrimEnd('/')
-          function Invoke-ApiGet([string]$Path) {
-            return Invoke-RestMethod -Uri "$api$Path" -Method Get -TimeoutSec 10
-          }
-          function Invoke-ApiPost([string]$Path, [object]$Body) {
-            $json = $Body | ConvertTo-Json -Depth 8 -Compress
-            return Invoke-RestMethod -Uri "$api$Path" -Method Post -ContentType 'application/json' -Body $json -TimeoutSec 30
-          }
-          function Invoke-Control([string]$Action) {
-            $pre = Invoke-ApiPost '/api/v1/phase7c-live-arm-control/preflight' @{ action = $Action }
-            Write-Host "ARM_ONLY_PREFLIGHT_ACTION=$Action"
-            Write-Host "ARM_ONLY_PREFLIGHT_APPROVED=$([bool]$pre.approved)"
-            Write-Host "ARM_ONLY_PREFLIGHT_BLOCKED_BY=$(@($pre.blockedBy) -join ',')"
-            if (-not [bool]$pre.approved -or [string]::IsNullOrWhiteSpace([string]$pre.preflightToken)) {
-              throw "$Action preflight rejected. blockedBy=$(@($pre.blockedBy) -join ',')"
-            }
-            $req = Invoke-ApiPost '/api/v1/phase7c-live-arm-control/execute' @{
-              action = $Action
-              preflightToken = [string]$pre.preflightToken
-              confirmation = $Action
-            }
-            $requestId = [string]$req.requestId
-            if ([string]::IsNullOrWhiteSpace($requestId)) { throw "$Action requestId missing" }
-            Write-Host "ARM_ONLY_REQUEST_ID=$requestId"
-            $deadline = (Get-Date).AddSeconds(120)
-            while ((Get-Date) -lt $deadline) {
-              Start-Sleep -Milliseconds 500
-              try { $status = Invoke-ApiGet "/api/v1/phase7c-live-arm-control/status?requestId=$requestId" } catch { continue }
-              if ([string]$status.status -eq 'PASS') {
-                Write-Host "ARM_ONLY_CONTROL_STATUS=PASS|ACTION=$Action|FINAL_ARM=$($status.finalArmStatus)"
-                return
-              }
-              if ([string]$status.status -eq 'FAIL') { throw "$Action failed. phase=$($status.phase) message=$($status.message)" }
-            }
-            throw "$Action timed out"
-          }
-
-          Invoke-Control 'ARM_LIVE'
-
-      - name: Post-ARM exact safety proof
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $api = $env:API_BASE_URL.TrimEnd('/')
-          function Invoke-ApiGet([string]$Path) { return Invoke-RestMethod -Uri "$api$Path" -Method Get -TimeoutSec 10 }
-          function Invoke-ApiPost([string]$Path, [object]$Body) {
-            $json = $Body | ConvertTo-Json -Depth 8 -Compress
-            return Invoke-RestMethod -Uri "$api$Path" -Method Post -ContentType 'application/json' -Body $json -TimeoutSec 30
-          }
-          function FailClosedDisarm([string]$Reason) {
-            Write-Host "ARM_ONLY_POSTCHECK_FAIL=$Reason"
-            try {
-              $pre = Invoke-ApiPost '/api/v1/phase7c-live-arm-control/preflight' @{ action = 'DISARM_LIVE' }
-              if ([bool]$pre.approved -and -not [string]::IsNullOrWhiteSpace([string]$pre.preflightToken)) {
-                $req = Invoke-ApiPost '/api/v1/phase7c-live-arm-control/execute' @{ action='DISARM_LIVE'; preflightToken=[string]$pre.preflightToken; confirmation='DISARM_LIVE' }
-                $requestId=[string]$req.requestId
-                $deadline=(Get-Date).AddSeconds(120)
-                while ((Get-Date) -lt $deadline) {
-                  Start-Sleep -Milliseconds 500
-                  try { $st=Invoke-ApiGet "/api/v1/phase7c-live-arm-control/status?requestId=$requestId" } catch { continue }
-                  if ([string]$st.status -eq 'PASS') { Write-Host 'ARM_ONLY_FAIL_CLOSED_DISARM=PASS'; break }
-                  if ([string]$st.status -eq 'FAIL') { break }
-                }
-              }
-            } catch { Write-Host "ARM_ONLY_FAIL_CLOSED_DISARM_ERROR=$($_.Exception.Message)" }
-            throw $Reason
-          }
-
-          try {
-            $mode = Invoke-ApiGet '/api/v1/phase7c/bot-mode'
-            $arm = Invoke-ApiGet '/api/v1/phase7c-live-arm-control/capability'
-            $life = Invoke-ApiGet '/api/v1/phase7c/lifecycle'
-            $runtime = Invoke-ApiGet '/api/v1/phase7c/runtime-source-attestation'
-
-            if ([string]$mode.state.mode -ne 'PAUSE') { throw "MODE_NOT_PAUSE=$($mode.state.mode)" }
-            if ([string]$arm.accountMode -ne 'LIVE') { throw "ACCOUNT_NOT_LIVE=$($arm.accountMode)" }
-            if ([string]$arm.liveArmStatus -ne 'ARMED' -or -not [bool]$arm.liveExecutionArmed) { throw "ARM_NOT_CONFIRMED=$($arm.liveArmStatus)" }
-            if ([int]$arm.openXauusdPositions -ne 0) { throw "POSITIONS_NOT_ZERO=$($arm.openXauusdPositions)" }
-            if (-not [bool]$life.running -or -not [bool]$life.ready) { throw 'LIFECYCLE_NOT_READY' }
-            if ([string]$runtime.overall -ne 'EXACT_MATCH') { throw "RUNTIME_SOURCE_NOT_EXACT=$($runtime.overall)" }
-            if ([string]$runtime.deployment.sourceCommit -ne $env:TARGET_COMMIT) { throw "SOURCE_COMMIT_MISMATCH=$($runtime.deployment.sourceCommit)" }
-            if ([string]$runtime.deployment.sourceTree -ne $env:TARGET_TREE) { throw "SOURCE_TREE_MISMATCH=$($runtime.deployment.sourceTree)" }
-
-            $accountPath = Join-Path $env:PRODUCTION_ROOT '.runtime\phase7c-account-mode.json'
-            $account = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
-            $envFile = [string]$account.envFile
-            if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $env:PRODUCTION_ROOT $envFile }
-            . (Join-Path $env:PRODUCTION_ROOT 'scripts\lib\phase7c-account-mode.ps1')
-            $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode 'LIVE' -RequireTrading
-            $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
-            $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
-            $ordersResponse = Invoke-WebRequest -Uri "$bridgeBase/v1/orders?symbol=XAUUSD" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 10
-            $ordersRaw = ([string]$ordersResponse.Content).Trim()
-            $pendingCount = if ([string]::IsNullOrWhiteSpace($ordersRaw) -or $ordersRaw -eq '[]') { 0 } else { @($ordersRaw | ConvertFrom-Json | Where-Object { $null -ne $_ }).Count }
-            if ($pendingCount -ne 0) { throw "PENDING_ORDERS_NOT_ZERO=$pendingCount" }
-
-            Push-Location $env:PRODUCTION_ROOT
-            try {
-              $head=(git rev-parse HEAD).Trim().ToLowerInvariant()
-              $tree=(git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
-              $dirty=@(git status --porcelain --untracked-files=normal)
-            } finally { Pop-Location }
-            if ($head -ne $env:TARGET_COMMIT) { throw "PRODUCTION_HEAD_CHANGED=$head" }
-            if ($tree -ne $env:TARGET_TREE) { throw "PRODUCTION_TREE_CHANGED=$tree" }
-            if ($dirty.Count -ne 0) { throw "PRODUCTION_WORKTREE_DIRTY=$($dirty.Count)" }
-
-            Write-Host "ARM_ONLY_STATUS=PASS"
-            Write-Host "ARM_ONLY_SOURCE=$head"
-            Write-Host "ARM_ONLY_TREE=$tree"
-            Write-Host 'ARM_ONLY_MODE=PAUSE'
-            Write-Host 'ARM_ONLY_ARM=ARMED'
-            Write-Host 'ARM_ONLY_POSITIONS=0'
-            Write-Host 'ARM_ONLY_PENDING_ORDERS=0'
-            Write-Host 'ARM_ONLY_RUNTIME_SOURCE=EXACT_MATCH'
-            Write-Host 'ARM_ONLY_AUTO_ENABLE=FALSE'
-            Write-Host 'ARM_ONLY_ORDER_MUTATION=NONE'
-            Write-Host 'ARM_ONLY_LIVE_TEST_ORDER=NONE'
-          } catch {
-            FailClosedDisarm $_.Exception.Message
-          }
+            -ExpectedCommit $env:EXPECTED_COMMIT `
+            -ExpectedTree $env:EXPECTED_TREE `
+            -RuntimeProjectRoot $env:RUNTIME_PROJECT_ROOT
