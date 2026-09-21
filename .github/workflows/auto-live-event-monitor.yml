@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/auto-live-event-monitor-77f13bbd
     paths:
       - 'scripts/ops/auto-live-event-monitor.ps1'
       - '.github/workflows/auto-live-event-monitor.yml'
@@ -55,7 +54,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
-          EXPECTED_SOURCE_COMMIT: 77f13bbd8e20875ed924a22a865c306551dad582
+          EXPECTED_SOURCE_COMMIT: f142d62838746ada79ad3aa90573e6fa885e82f9
           MONITOR_ISSUE_NUMBER: '28'
         run: |
           $notify = $false
