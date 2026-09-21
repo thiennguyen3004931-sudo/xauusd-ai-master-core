@@ -14,6 +14,10 @@ on:
       - "scripts/test-phase7c-intelligence-evidence-quality-baseline-source.ps1"
       - ".github/workflows/phase7c-intelligence-evidence-quality-baseline-readonly.yml"
 
+concurrency:
+  group: phase7c-intelligence-baseline-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
