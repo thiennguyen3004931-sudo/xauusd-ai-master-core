@@ -52,6 +52,8 @@ Assert-Literal $Workflow "inputs.notify }}' -eq 'true'" 'manual notify opt-in'
 Assert-Literal $Workflow 'EXPECTED_SOURCE_COMMIT: 429f657c882dfd411f72dff6ecf2e370cca9cbf6' 'pinned production source'
 Assert-Literal $Workflow "MONITOR_ISSUE_NUMBER: '28'" 'canonical event ledger issue'
 Assert-Literal $Workflow 'MONITOR_PRODUCTION_READ_ONLY=TRUE' 'read-only safety summary'
+Assert-Literal $Workflow 'cancel-in-progress: true' 'latest-wins concurrency'
+if ($Workflow.Contains('feat/auto-live-event-monitor-77f13bbd')) { throw 'Stale AUTO LIVE monitor branch trigger must be removed.' }
 Assert-Literal $Workflow 'MONITOR_PRODUCTION_HTTP_METHODS=GET_ONLY' 'GET-only safety summary'
 Assert-Literal $Workflow 'MONITOR_MODE_MUTATION=NONE' 'mode mutation forbidden'
 Assert-Literal $Workflow 'MONITOR_ARM_MUTATION=NONE' 'ARM mutation forbidden'
