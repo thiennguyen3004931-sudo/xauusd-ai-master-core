@@ -11,4 +11,6 @@ export interface Mt5BridgePosition {
   swap: number;
   commission: number;
   openedAt?: number;
+  magic?: number;
+  comment?: string;
 }
