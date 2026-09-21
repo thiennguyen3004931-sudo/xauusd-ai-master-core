@@ -78,6 +78,8 @@ type Position = {
   takeProfit: number;
   profit: number;
   openedAt: number;
+  magic?: number;
+  comment?: string;
 };
 
 type TradingDayBoundary = {
@@ -2097,6 +2099,18 @@ function bodySize(bar: Phase7Bar): number {
   return Math.abs(bar.close - bar.open);
 }
 
+function phase7CBrokerComment(clientOrderId: string): string {
+  const safeValue = Array.from(String(clientOrderId))
+    .map((character) =>
+      character.codePointAt(0)! <= 0x7f && /[A-Za-z0-9._-]/.test(character)
+        ? character
+        : "-",
+    )
+    .join("");
+  const comment = `xau:${safeValue}`.replace(/^-+|-+$/g, "");
+  return (comment || "xau").slice(0, 28);
+}
+
 function matchPendingTrendPosition(
   pending: PendingTrendEntry,
   position: Position,
@@ -2134,6 +2148,8 @@ function matchPendingTrendPosition(
     };
   }
 
+  let brokerProvenanceMatched = false;
+
   if (!pending.brokerTicket) {
     const brokerReferenceTimestamp =
       Number(pending.brokerReferenceTimestamp);
@@ -2165,33 +2181,65 @@ function matchPendingTrendPosition(
       };
     }
 
-    const actualEntry = Number(position.entry);
-    const referenceEntry = Number(pending.referenceEntry);
+    const positionMagic = Number(position.magic);
+    const positionComment =
+      typeof position.comment === "string"
+        ? position.comment.trim()
+        : "";
+    const expectedComment =
+      phase7CBrokerComment(pending.orderId);
+    const hasBrokerProvenance =
+      Number.isFinite(positionMagic) &&
+      positionMagic > 0 &&
+      positionComment.length > 0;
 
-    if (
-      !Number.isFinite(actualEntry) ||
-      !Number.isFinite(referenceEntry)
-    ) {
-      return {
-        matched: false,
-        reason: "PENDING_ENTRY_PRICE_INVALID",
-      };
+    if (hasBrokerProvenance) {
+      if (positionMagic !== magicNumber) {
+        return {
+          matched: false,
+          reason: "PENDING_MAGIC_MISMATCH",
+        };
+      }
+
+      if (positionComment !== expectedComment) {
+        return {
+          matched: false,
+          reason: "PENDING_COMMENT_MISMATCH",
+        };
+      }
+
+      brokerProvenanceMatched = true;
     }
 
-    const entryTolerance =
-      Math.max(
-        spec.point * (deviationPoints + 2),
-        1e-6,
-      );
+    if (!brokerProvenanceMatched) {
+      const actualEntry = Number(position.entry);
+      const referenceEntry = Number(pending.referenceEntry);
 
-    if (
-      Math.abs(position.entry - pending.referenceEntry) >
-      entryTolerance
-    ) {
-      return {
-        matched: false,
-        reason: "PENDING_ENTRY_PRICE_MISMATCH",
-      };
+      if (
+        !Number.isFinite(actualEntry) ||
+        !Number.isFinite(referenceEntry)
+      ) {
+        return {
+          matched: false,
+          reason: "PENDING_ENTRY_PRICE_INVALID",
+        };
+      }
+
+      const entryTolerance =
+        Math.max(
+          spec.point * (deviationPoints + 2),
+          1e-6,
+        );
+
+      if (
+        Math.abs(position.entry - pending.referenceEntry) >
+        entryTolerance
+      ) {
+        return {
+          matched: false,
+          reason: "PENDING_ENTRY_PRICE_MISMATCH",
+        };
+      }
     }
   }
 
@@ -2205,6 +2253,13 @@ function matchPendingTrendPosition(
     return {
       matched: false,
       reason: "PENDING_VOLUME_MISMATCH",
+    };
+  }
+
+  if (brokerProvenanceMatched) {
+    return {
+      matched: true,
+      reason: "PENDING_POSITION_MATCHED_BY_BROKER_PROVENANCE",
     };
   }
 

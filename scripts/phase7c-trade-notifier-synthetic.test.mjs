@@ -404,7 +404,8 @@ test("ENTRY_SUBMIT is pending truthfully and ARM_FILE_MISSING rejection says MT5
   assert.equal(notifications[0].route, "trade");
   assert.match(notifications[0].text, /🟡/);
   assert.match(notifications[0].text, /PENDING|ĐANG GỬI/i);
-  assert.match(notifications[0].text, /CHƯA VÀO MT5/i);
+  assert.match(notifications[0].text, /CHỜ MT5 XÁC NHẬN/i);
+  assert.doesNotMatch(notifications[0].text, /CHƯA VÀO MT5/i);
   assert.doesNotMatch(notifications[0].text, /FILLED/i);
 
   assert.equal(notifications[1].route, "trade");
