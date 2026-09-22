@@ -10,6 +10,10 @@ const controllerPath = path.join(
 );
 
 const source = fs.readFileSync(controllerPath, "utf8");
+const trendWrapperSource = fs.readFileSync(
+  path.join(here, "run-phase7c-trend-controller.mjs"),
+  "utf8",
+);
 
 /*
  * Regression:
@@ -465,6 +469,85 @@ assert.ok(
 assert.ok(
   ticketlessEntryIndex > ticketlessGuardIndex,
   "RED_TARGET_TICKETLESS_SCOPE: entry-price correlation must be inside ticketless fallback",
+);
+
+
+/*
+ * TREND_TRANSIENT_READ_TIMEOUT_CONTRACT
+ *
+ * Transient local MT5/control read stalls may be retried once because GET is
+ * read-only. Broker mutations must never inherit this retry policy.
+ */
+const bridgeRequestStart = source.indexOf(
+  "async function bridgeRequest<T>(",
+);
+const bridgeRequestEnd = source.indexOf(
+  "function requiredEnv(",
+  bridgeRequestStart,
+);
+assert.ok(
+  bridgeRequestStart >= 0 && bridgeRequestEnd > bridgeRequestStart,
+  "Unable to isolate Trend bridge request transport.",
+);
+const bridgeRequestBlock = source.slice(
+  bridgeRequestStart,
+  bridgeRequestEnd,
+);
+assert.match(
+  bridgeRequestBlock,
+  /const maxAttempts = normalizedMethod === "GET" \? 2 : 1;/,
+  "Trend transport must retry GET exactly once while mutations stay single-attempt.",
+);
+assert.match(
+  bridgeRequestBlock,
+  /PHASE7B_MT5_READ_RETRY=GET/,
+  "Trend transient MT5 GET retry must be observable.",
+);
+assert.match(
+  bridgeRequestBlock,
+  /MT5 bridge \$\{normalizedMethod\} \$\{endpoint\} \| \$\{transport\} \| attempts=\$\{attempt\}/,
+  "Trend transport errors must identify method, endpoint, reason and attempt count.",
+);
+assert.match(
+  source,
+  /async function post<T>\(endpoint: string, body: unknown\): Promise<T> \{\s*return bridgeRequest<T>\("POST", endpoint, body\);/,
+  "Trend POST mutations must continue through the single-attempt transport gate.",
+);
+assert.match(
+  source,
+  /async function patch<T>\(endpoint: string, body: unknown\): Promise<T> \{\s*return bridgeRequest<T>\("PATCH", endpoint, body\);/,
+  "Trend PATCH mutations must continue through the single-attempt transport gate.",
+);
+
+const controlRequestStart = trendWrapperSource.indexOf(
+  "async function controlRequest(pathname)",
+);
+const controlRequestEnd = trendWrapperSource.indexOf(
+  "function isNewOrderRequest(",
+  controlRequestStart,
+);
+assert.ok(
+  controlRequestStart >= 0 && controlRequestEnd > controlRequestStart,
+  "Unable to isolate Trend control read transport.",
+);
+const controlRequestBlock = trendWrapperSource.slice(
+  controlRequestStart,
+  controlRequestEnd,
+);
+assert.match(
+  controlRequestBlock,
+  /const maxAttempts = 2;/,
+  "Trend control GET must retry a transient timeout once.",
+);
+assert.match(
+  controlRequestBlock,
+  /PHASE7C_TREND_CONTROL_READ_RETRY=GET/,
+  "Trend control GET retry must be observable.",
+);
+assert.match(
+  controlRequestBlock,
+  /Phase7C control API GET \$\{pathname\} \| \$\{reason\} \| attempts=\$\{attempt\}/,
+  "Trend control timeout must include endpoint and attempt context.",
 );
 
 console.log("TREND_ENTRY_RECOVERY_CONTRACT=PASS");
