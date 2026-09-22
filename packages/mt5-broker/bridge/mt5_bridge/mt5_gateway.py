@@ -204,6 +204,10 @@ class Mt5Gateway:
                 "fetchedAtMs": int(fetched_at_ms),
             }
 
+    def _clear_closed_candle_cache(self) -> None:
+        with self._closed_candle_cache_lock:
+            self._closed_candle_cache.clear()
+
     def candles(self, canonical_symbol: str, timeframe: str = "M15", count: int = 320) -> list[dict[str, Any]]:
         """Return fully closed MT5 candles without repeatedly loading unchanged history.
 
@@ -774,6 +778,9 @@ class Mt5Gateway:
             self.last_error = f"initialize failed: {self._last_mt5_error_locked()}"
             return False
         self.last_error = None
+        # A fresh MT5 IPC generation must not inherit closed-bar snapshots
+        # from the previous terminal connection.
+        self._clear_closed_candle_cache()
         if reconnect:
             self.reconnect_count += 1
             self.last_reconnect_at = int(time.time() * 1000)
