@@ -1,0 +1,114 @@
+name: PR56 Pre-Cutover DISARM Only
+
+on:
+  push:
+    branches:
+      - ops/pr56-precutover-v2
+    paths:
+      - ".github/workflows/pr56-precutover-disarm-only.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr56-precutover-disarm-only
+  cancel-in-progress: false
+
+jobs:
+  disarm-only:
+    name: pr56-precutover-disarm-only-self-hosted
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout exact current main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Pre-DISARM production safety gate
+        shell: powershell
+        env:
+          MAIN_HEAD: 142e7755c136f677193ef075e1816a09664fe015
+          PROD_HEAD: 812c526f58309e7cd27dde23c3f87d04bded9a9d
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repoHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodHead = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodBranch = (git -C $env:PRODUCTION_ROOT branch --show-current).Trim()
+          $prodDirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+
+          $bot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $source = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation' -Method Get -TimeoutSec 10
+          $auto = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-auto-activation/status' -Method Get -TimeoutSec 10
+
+          Write-Host "PRE_DISARM_PRIVATE_MAIN=$repoHead"
+          Write-Host "PRE_DISARM_PRODUCTION_HEAD=$prodHead"
+          Write-Host "PRE_DISARM_PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "PRE_DISARM_DIRTY_COUNT=$($prodDirty.Count)"
+          Write-Host "PRE_DISARM_BOT_MODE=$($bot.state.mode)"
+          Write-Host "PRE_DISARM_RUNNING=$($life.running)"
+          Write-Host "PRE_DISARM_READY=$($life.ready)"
+          Write-Host "PRE_DISARM_ARM_STATUS=$($cap.liveArmStatus)"
+          Write-Host "PRE_DISARM_ARMED=$($cap.liveExecutionArmed)"
+          Write-Host "PRE_DISARM_SOURCE=$($source.overall)"
+          Write-Host "PRE_DISARM_SOURCE_COMMIT=$($source.deployment.sourceCommit)"
+          Write-Host "PRE_DISARM_POSITIONS=$($life.bridge.openXauusdPositions)"
+          Write-Host "PRE_DISARM_PENDING_ZERO=$($auto.checks.zeroXauusdPendingOrders)"
+
+          if ($repoHead -ne $env:MAIN_HEAD) { throw 'PRIVATE_MAIN_HEAD_MISMATCH' }
+          if ($prodHead -ne $env:PROD_HEAD) { throw 'PRODUCTION_HEAD_MISMATCH' }
+          if ($prodBranch -ne 'main') { throw 'PRODUCTION_BRANCH_MISMATCH' }
+          if ($prodDirty.Count -ne 0) { throw 'PRODUCTION_WORKTREE_DIRTY' }
+          if ([string]$bot.state.mode -ne 'PAUSE') { throw 'BOT_MODE_NOT_PAUSE' }
+          if ($life.running -ne $true -or $life.ready -ne $true) { throw 'LIFECYCLE_NOT_READY' }
+          if ([string]$cap.liveArmStatus -ne 'ARMED' -or $cap.liveExecutionArmed -ne $true) { throw 'LIVE_NOT_ARMED' }
+          if ([string]$source.overall -ne 'EXACT_MATCH' -or [string]$source.deployment.sourceCommit -ne $env:PROD_HEAD) { throw 'RUNTIME_SOURCE_NOT_EXACT' }
+          if ([int]$life.bridge.openXauusdPositions -ne 0) { throw 'XAUUSD_POSITION_COUNT_NOT_ZERO' }
+          if ($auto.checks.zeroXauusdPendingOrders -ne $true) { throw 'XAUUSD_PENDING_ORDER_GATE_NOT_ZERO' }
+
+      - name: DISARM LIVE only
+        shell: powershell
+        run: |
+          $root = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root\scripts\disarm-phase7c-live-local.ps1" -WorkDir "$root\.runtime" -ControlApiUrl 'http://127.0.0.1:3711'
+          if ($LASTEXITCODE -ne 0) { throw "DISARM_ONLY_FAILED exit=$LASTEXITCODE" }
+
+      - name: Post-DISARM fail-closed verification
+        shell: powershell
+        env:
+          PROD_HEAD: 812c526f58309e7cd27dde23c3f87d04bded9a9d
+        run: |
+          $bot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $source = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation' -Method Get -TimeoutSec 10
+          $auto = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-auto-activation/status' -Method Get -TimeoutSec 10
+
+          Write-Host "POST_DISARM_BOT_MODE=$($bot.state.mode)"
+          Write-Host "POST_DISARM_RUNNING=$($life.running)"
+          Write-Host "POST_DISARM_READY=$($life.ready)"
+          Write-Host "POST_DISARM_ARM_STATUS=$($cap.liveArmStatus)"
+          Write-Host "POST_DISARM_ARMED=$($cap.liveExecutionArmed)"
+          Write-Host "POST_DISARM_SOURCE=$($source.overall)"
+          Write-Host "POST_DISARM_SOURCE_COMMIT=$($source.deployment.sourceCommit)"
+          Write-Host "POST_DISARM_POSITIONS=$($life.bridge.openXauusdPositions)"
+          Write-Host "POST_DISARM_PENDING_ZERO=$($auto.checks.zeroXauusdPendingOrders)"
+
+          if ([string]$bot.state.mode -ne 'PAUSE') { throw 'POST_DISARM_MODE_NOT_PAUSE' }
+          if ($life.running -ne $true -or $life.ready -ne $true) { throw 'POST_DISARM_LIFECYCLE_NOT_READY' }
+          if ([string]$cap.liveArmStatus -ne 'DISARMED' -or $cap.liveExecutionArmed -ne $false) { throw 'POST_DISARM_NOT_DISARMED' }
+          if ([string]$source.overall -ne 'EXACT_MATCH' -or [string]$source.deployment.sourceCommit -ne $env:PROD_HEAD) { throw 'POST_DISARM_RUNTIME_SOURCE_NOT_EXACT' }
+          if ([int]$life.bridge.openXauusdPositions -ne 0) { throw 'POST_DISARM_POSITION_COUNT_NOT_ZERO' }
+          if ($auto.checks.zeroXauusdPendingOrders -ne $true) { throw 'POST_DISARM_PENDING_ORDER_GATE_NOT_ZERO' }
+
+          Write-Host 'DISARM_ONLY_ACCEPTANCE=PASS'
+          Write-Host 'MODE_MUTATION=NONE'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
