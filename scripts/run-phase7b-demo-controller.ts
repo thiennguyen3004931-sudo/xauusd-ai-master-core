@@ -2493,27 +2493,92 @@ async function patch<T>(endpoint: string, body: unknown): Promise<T> {
 }
 
 async function bridgeRequest<T>(method: string, endpoint: string, body?: unknown): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8_000);
-  try {
-    const response = await fetch(`${bridgeBase}${endpoint}`, {
-      method,
-      headers: {
-        "x-mt5-api-key": apiKey,
-        ...(body === undefined ? {} : { "content-type": "application/json" }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    const parsed = text ? JSON.parse(text) : null;
-    if (!response.ok) {
-      throw new Error(`MT5 bridge ${method} ${endpoint} failed ${response.status}: ${text}`);
+  const normalizedMethod = method.toUpperCase();
+  const timeoutMs = 8_000;
+  const maxAttempts = normalizedMethod === "GET" ? 2 : 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      let response: Response;
+      try {
+        response = await fetch(`${bridgeBase}${endpoint}`, {
+          method: normalizedMethod,
+          headers: {
+            "x-mt5-api-key": apiKey,
+            ...(body === undefined ? {} : { "content-type": "application/json" }),
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch (error) {
+        const errorObject = error instanceof Error ? error : null;
+        const aborted = timedOut || errorObject?.name === "AbortError";
+        const rawCauseCode =
+          errorObject?.cause &&
+          typeof errorObject.cause === "object" &&
+          "code" in errorObject.cause &&
+          typeof errorObject.cause.code === "string"
+            ? errorObject.cause.code.trim()
+            : "";
+        const causeCode = /^[A-Z0-9_:-]{1,64}$/.test(rawCauseCode)
+          ? rawCauseCode
+          : "";
+        const transport = aborted
+          ? `timeout=${timeoutMs}ms`
+          : `transport=${errorObject?.message === "fetch failed" ? "fetch failed" : errorObject?.name || "request failed"}${causeCode ? `|cause=${causeCode}` : ""}`;
+
+        if (normalizedMethod === "GET" && attempt < maxAttempts) {
+          console.warn(
+            `PHASE7B_MT5_READ_RETRY=GET|${endpoint}|attempt=${attempt}|reason=${transport}`,
+          );
+          await sleep(250);
+          continue;
+        }
+
+        throw new Error(
+          `MT5 bridge ${normalizedMethod} ${endpoint} | ${transport} | attempts=${attempt}`,
+          errorObject ? { cause: errorObject } : undefined,
+        );
+      }
+
+      let text: string;
+      try {
+        text = await response.text();
+      } catch (error) {
+        const errorObject = error instanceof Error ? error : null;
+        if (normalizedMethod === "GET" && attempt < maxAttempts) {
+          console.warn(
+            `PHASE7B_MT5_READ_RETRY=GET|${endpoint}|attempt=${attempt}|reason=response-read-failed`,
+          );
+          await sleep(250);
+          continue;
+        }
+        throw new Error(
+          `MT5 bridge ${normalizedMethod} ${endpoint} | response-read-failed | attempts=${attempt}`,
+          errorObject ? { cause: errorObject } : undefined,
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          `MT5 bridge ${normalizedMethod} ${endpoint} failed ${response.status}: ${text}`,
+        );
+      }
+
+      return (text ? JSON.parse(text) : null) as T;
+    } finally {
+      clearTimeout(timeout);
     }
-    return parsed as T;
-  } finally {
-    clearTimeout(timeout);
   }
+
+  throw new Error(`MT5 bridge ${normalizedMethod} ${endpoint} | exhausted safe read retry`);
 }
 
 function requiredEnv(name: string): string {
