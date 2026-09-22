@@ -501,7 +501,12 @@ assert.match(
 assert.match(
   bridgeRequestBlock,
   /PHASE7B_MT5_READ_RETRY=GET/,
-  "Trend transient MT5 GET retry must be observable.",
+  "Trend transient MT5 GET retry must be observable for non-timeout transport failures.",
+);
+assert.match(
+  bridgeRequestBlock,
+  /normalizedMethod === "GET" && !aborted && attempt < maxAttempts/,
+  "Timed-out MT5 reads must not be retried immediately because the original server-side call may still hold the gateway lock.",
 );
 assert.match(
   bridgeRequestBlock,
