@@ -265,6 +265,15 @@ class GatewayTests(unittest.TestCase):
 
             with patch("mt5_bridge.mt5_gateway.time.time", return_value=1_700_000_000.0):
                 first = gateway.candles("XAUUSD", "M15", 320)
+
+                class LockMustNotBeTouched:
+                    def acquire(self, *_, **__):
+                        raise AssertionError("fresh candle cache hit touched the MT5 gateway lock")
+
+                    def release(self):
+                        raise AssertionError("fresh candle cache hit touched the MT5 gateway lock")
+
+                gateway._lock = LockMustNotBeTouched()
                 second = gateway.candles("XAUUSD", "M15", 320)
                 smaller = gateway.candles("XAUUSD", "M15", 100)
 
