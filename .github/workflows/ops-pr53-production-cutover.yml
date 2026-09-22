@@ -1,0 +1,77 @@
+name: OPS PR53 Production Cutover
+
+on:
+  push:
+    branches:
+      - ops/cutover-pr53-812c526f
+    paths:
+      - ".github/workflows/ops-pr53-production-cutover.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-pr53-production-cutover
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    name: pr53-production-cutover-self-hosted
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact merged target
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Verify exact merged target
+        shell: powershell
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          Write-Host "CUTOVER_TARGET_HEAD=$head"
+          Write-Host "CUTOVER_TARGET_TREE=$tree"
+          if ($head -ne '812c526f58309e7cd27dde23c3f87d04bded9a9d') { throw "CUTOVER_TARGET_HEAD_MISMATCH" }
+          if ($tree -ne '1af2b45636acff2469903f34984ec0ffec4f7794') { throw "CUTOVER_TARGET_TREE_MISMATCH" }
+
+      - name: M8 read-only preflight
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+            -ExpectedCommit 812c526f58309e7cd27dde23c3f87d04bded9a9d `
+            -ExpectedTree 1af2b45636acff2469903f34984ec0ffec4f7794 `
+            -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+
+      - name: Guarded production source transition
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\rollout-phase7c-production-source-transition-local.ps1 `
+            -ProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master' `
+            -ExpectedCurrentCommit 429f657c882dfd411f72dff6ecf2e370cca9cbf6 `
+            -TargetCommit 812c526f58309e7cd27dde23c3f87d04bded9a9d `
+            -ExpectedRemoteMainCommit 812c526f58309e7cd27dde23c3f87d04bded9a9d `
+            -ExpectedHelperBlobSha1 d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f `
+            -ExpectedInitialArm DISARMED `
+            -ExpectedInitialRuntimeState HEALTHY `
+            -TimeoutSeconds 180
+
+      - name: P5 post-cutover read-only acceptance
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-phase7c-p5-production-acceptance-local.ps1 `
+            -ProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master' `
+            -ExpectedCommit 812c526f58309e7cd27dde23c3f87d04bded9a9d `
+            -ApiBaseUrl 'http://127.0.0.1:3711'
+
+      - name: Final safety boundary
+        shell: powershell
+        run: |
+          Write-Host "PR53_PRODUCTION_CUTOVER_TARGET=812c526f58309e7cd27dde23c3f87d04bded9a9d"
+          Write-Host "PR53_FINAL_EXPECTED_MODE=PAUSE"
+          Write-Host "PR53_FINAL_EXPECTED_ARM=DISARMED"
+          Write-Host "PR53_ORDER_MUTATION=NONE"
+          Write-Host "PR53_POSITION_MUTATION=NONE"
+          Write-Host "PR53_LIVE_TEST_ORDER=NONE"
