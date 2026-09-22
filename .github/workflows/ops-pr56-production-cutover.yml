@@ -54,7 +54,7 @@ jobs:
             -TargetCommit 142e7755c136f677193ef075e1816a09664fe015 `
             -ExpectedRemoteMainCommit 142e7755c136f677193ef075e1816a09664fe015 `
             -ExpectedHelperBlobSha1 d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f `
-            -ExpectedInitialArm ARMED `
+            -ExpectedInitialArm DISARMED `
             -ExpectedInitialRuntimeState HEALTHY `
             -TimeoutSeconds 180
 
@@ -71,7 +71,7 @@ jobs:
         run: |
           Write-Host "PR56_PRODUCTION_CUTOVER_TARGET=142e7755c136f677193ef075e1816a09664fe015"
           Write-Host "PR56_FINAL_EXPECTED_MODE=PAUSE"
-          Write-Host "PR56_FINAL_EXPECTED_ARM=ARMED"
+          Write-Host "PR56_FINAL_EXPECTED_ARM=DISARMED"
           Write-Host "PR56_ORDER_MUTATION=NONE"
           Write-Host "PR56_POSITION_MUTATION=NONE"
           Write-Host "PR56_LIVE_TEST_ORDER=NONE"
