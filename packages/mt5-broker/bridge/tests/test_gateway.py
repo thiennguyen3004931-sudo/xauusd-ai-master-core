@@ -283,6 +283,39 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(fake.copy_rates_calls, 1)
             ledger.close()
 
+    def test_expired_candle_cache_returns_recent_snapshot_when_mt5_lock_is_busy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = CandleFakeMt5()
+            ledger_path = Path(directory) / "ledger.sqlite3"
+            ledger = IdempotencyLedger(ledger_path)
+            gateway = Mt5Gateway(settings(ledger_path), ledger, fake)
+            self.assertTrue(gateway.start())
+
+            with patch("mt5_bridge.mt5_gateway.time.time", return_value=1_700_000_000.0):
+                first = gateway.candles("XAUUSD", "M15", 320)
+
+            class BusyLock:
+                def acquire(self, *_, **kwargs):
+                    self.blocking = kwargs.get("blocking")
+                    return False
+
+                def release(self):
+                    raise AssertionError("busy lock must not be released when acquire returned false")
+
+            busy_lock = BusyLock()
+            gateway._lock = busy_lock
+
+            # The cached M15 bar expires about 101 seconds after the first
+            # request in this fixture, but it is still well inside the
+            # one-timeframe stale-on-busy safety window.
+            with patch("mt5_bridge.mt5_gateway.time.time", return_value=1_700_000_102.0):
+                stale = gateway.candles("XAUUSD", "M15", 320)
+
+            self.assertEqual(stale, first)
+            self.assertFalse(busy_lock.blocking)
+            self.assertEqual(fake.copy_rates_calls, 1)
+            ledger.close()
+
     def test_symbol_spec_exposes_broker_risk_values(self):
         with tempfile.TemporaryDirectory() as directory:
             fake = FakeMt5()
