@@ -278,10 +278,23 @@ class Mt5Gateway:
             candle_duration_ms,
             allow_stale=True,
         )
-        fetch_count = max(
-            safe_count,
-            self._closed_candle_cached_count(cache_key),
+        cached_count = self._closed_candle_cached_count(cache_key)
+        fetch_count = max(safe_count, cached_count)
+        cached_refresh_base = (
+            self._read_closed_candle_cache(
+                cache_key,
+                cached_count,
+                now_ms,
+                candle_duration_ms,
+                allow_stale=True,
+            )
+            if cached_count > 0
+            else None
         )
+        # A recent cache can be advanced with a small tail read. Because the
+        # stale reuse window is at most one timeframe, eight bars is safely
+        # more than the number of newly closed bars that can be missing.
+        mt5_fetch_count = min(fetch_count, 8) if cached_refresh_base is not None else fetch_count
 
         # Do not let an expired candle refresh wait behind a critical MT5
         # operation if a recent closed-bar snapshot is already available.
@@ -322,7 +335,7 @@ class Mt5Gateway:
                 broker_symbol,
                 mt5_timeframe,
                 1,
-                fetch_count,
+                mt5_fetch_count,
             )
         finally:
             self._lock.release()
@@ -335,7 +348,7 @@ class Mt5Gateway:
             )
 
         point = float(getattr(info, "point", 0.0) or 0.0)
-        output: list[dict[str, Any]] = []
+        refreshed_output: list[dict[str, Any]] = []
 
         for row in rows:
             try:
@@ -344,7 +357,7 @@ class Mt5Gateway:
                 spread_points = 0.0
 
             open_time = int(row["time"]) * 1000
-            output.append(
+            refreshed_output.append(
                 {
                     "symbol": canonical_symbol,
                     "brokerSymbol": broker_symbol,
@@ -359,6 +372,20 @@ class Mt5Gateway:
                     "spread": max(0.0, spread_points * point),
                 }
             )
+
+        if cached_refresh_base is not None:
+            merged_by_open_time = {
+                int(row["openTime"]): dict(row)
+                for row in cached_refresh_base
+            }
+            for row in refreshed_output:
+                merged_by_open_time[int(row["openTime"])] = dict(row)
+            output = sorted(
+                merged_by_open_time.values(),
+                key=lambda row: int(row["openTime"]),
+            )[-fetch_count:]
+        else:
+            output = refreshed_output[-fetch_count:]
 
         fetched_at_ms = int(time.time() * 1000)
         refresh_after_ms = fetched_at_ms + min(5_000, candle_duration_ms)
