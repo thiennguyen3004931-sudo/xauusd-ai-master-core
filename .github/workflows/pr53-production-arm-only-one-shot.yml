@@ -1,0 +1,116 @@
+name: PR53 Production ARM Only One-Shot
+
+on:
+  push:
+    branches:
+      - ops/arm-only-pr53-812c526f
+
+permissions:
+  contents: read
+
+jobs:
+  arm-only:
+    name: pr53-production-arm-only-self-hosted
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout workflow source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pre-ARM production safety gate
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = '812c526f58309e7cd27dde23c3f87d04bded9a9d'
+
+          $head = (git -C $root rev-parse HEAD).Trim().ToLowerInvariant()
+          $branch = (git -C $root branch --show-current).Trim()
+          $dirty = @(git -C $root status --porcelain --untracked-files=normal)
+          Write-Host "PRE_ARM_PRODUCTION_HEAD=$head"
+          Write-Host "PRE_ARM_PRODUCTION_BRANCH=$branch"
+          Write-Host "PRE_ARM_WORKTREE_CHANGE_COUNT=$($dirty.Count)"
+          if ($head -ne $expected) { throw "PRE_ARM_SOURCE_HEAD_MISMATCH expected=$expected actual=$head" }
+          if ($branch -ne 'main') { throw "PRE_ARM_PRODUCTION_BRANCH_MISMATCH actual=$branch" }
+          if ($dirty.Count -ne 0) { throw 'PRE_ARM_PRODUCTION_WORKTREE_DIRTY' }
+
+          $source = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation' -Method Get -TimeoutSec 10
+          if ([string]$source.overall -ne 'EXACT_MATCH') { throw "PRE_ARM_RUNTIME_SOURCE_NOT_EXACT actual=$($source.overall)" }
+          if ([string]$source.deployment.sourceCommit -ne $expected) { throw "PRE_ARM_RUNTIME_SOURCE_COMMIT_MISMATCH actual=$($source.deployment.sourceCommit)" }
+          Write-Host "PRE_ARM_RUNTIME_SOURCE=EXACT_MATCH"
+          Write-Host "PRE_ARM_RUNTIME_SOURCE_COMMIT=$($source.deployment.sourceCommit)"
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root\scripts\verify-phase7c-live-arm-local.ps1" -WorkDir "$root\.runtime" -ControlApiUrl 'http://127.0.0.1:3711'
+          if ($LASTEXITCODE -ne 0) { throw "PRE_ARM_LIVE_VERIFIER_FAILED exit=$LASTEXITCODE" }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root\scripts\ops\auto-live-event-monitor.ps1" -ProductionRoot $root -ExpectedSourceCommit $expected -IssueNumber 28
+          if ($LASTEXITCODE -ne 0) { throw "PRE_ARM_READONLY_MONITOR_FAILED exit=$LASTEXITCODE" }
+
+      - name: ARM LIVE only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root\scripts\arm-phase7c-live-local.ps1" -WorkDir "$root\.runtime" -ControlApiUrl 'http://127.0.0.1:3711'
+          if ($LASTEXITCODE -ne 0) { throw "ARM_ONLY_FAILED exit=$LASTEXITCODE" }
+
+      - name: Post-ARM fail-closed verification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = '812c526f58309e7cd27dde23c3f87d04bded9a9d'
+          . "$root\scripts\lib\phase7c-account-mode.ps1"
+
+          $accountState = Get-Content -LiteralPath "$root\.runtime\phase7c-account-mode.json" -Raw | ConvertFrom-Json
+          if ([string]$accountState.accountMode -ne 'LIVE') { throw "POST_ARM_ACCOUNT_MODE_MISMATCH actual=$($accountState.accountMode)" }
+          $envFile = [string]$accountState.envFile
+          if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $root $envFile }
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode 'LIVE' -RequireTrading
+          $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+
+          $health = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers $headers -Method Get -TimeoutSec 10
+          $positionsRaw = (Invoke-WebRequest -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 10).Content
+          $ordersRaw = (Invoke-WebRequest -Uri "$bridgeBase/v1/orders?symbol=XAUUSD" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 10).Content
+          $positions = if ([string]::IsNullOrWhiteSpace(([string]$positionsRaw).Trim()) -or ([string]$positionsRaw).Trim() -eq '[]') { @() } else { @($positionsRaw | ConvertFrom-Json) }
+          $orders = if ([string]::IsNullOrWhiteSpace(([string]$ordersRaw).Trim()) -or ([string]$ordersRaw).Trim() -eq '[]') { @() } else { @($ordersRaw | ConvertFrom-Json) }
+
+          $bot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $source = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation' -Method Get -TimeoutSec 10
+
+          Write-Host "POST_ARM_ACCOUNT_MODE=$($accountState.accountMode)"
+          Write-Host "POST_ARM_BOT_MODE=$($bot.state.mode)"
+          Write-Host "POST_ARM_LIFECYCLE_RUNNING=$($life.running)"
+          Write-Host "POST_ARM_LIFECYCLE_READY=$($life.ready)"
+          Write-Host "POST_ARM_TELEGRAM_READY=$($life.telegramReady)"
+          Write-Host "POST_ARM_MT5_STATUS=$($health.status)"
+          Write-Host "POST_ARM_MT5_CONNECTED=$($health.connected)"
+          Write-Host "POST_ARM_CONFIGURED_ACCOUNT=$($health.configuredAccountMode)"
+          Write-Host "POST_ARM_BROKER_ACCOUNT=$($health.accountMode)"
+          Write-Host "POST_ARM_STATUS=$($health.liveArmStatus)"
+          Write-Host "POST_ARM_LIVE_EXECUTION_ARMED=$($health.liveExecutionArmed)"
+          Write-Host "POST_ARM_POSITIONS=$($positions.Count)"
+          Write-Host "POST_ARM_PENDING_ORDERS=$($orders.Count)"
+          Write-Host "POST_ARM_RUNTIME_SOURCE=$($source.overall)"
+          Write-Host "POST_ARM_RUNTIME_SOURCE_COMMIT=$($source.deployment.sourceCommit)"
+
+          if ([string]$bot.state.mode -ne 'PAUSE') { throw "POST_ARM_BOT_MODE_NOT_PAUSE actual=$($bot.state.mode)" }
+          if (-not [bool]$life.running -or -not [bool]$life.ready -or -not [bool]$life.telegramReady) { throw 'POST_ARM_LIFECYCLE_NOT_READY' }
+          if (-not [bool]$health.connected -or [string]$health.status -ne 'ok') { throw 'POST_ARM_MT5_NOT_HEALTHY' }
+          if ([string]$health.configuredAccountMode -ne 'LIVE' -or [string]$health.accountMode -ne 'real') { throw 'POST_ARM_MT5_ACCOUNT_MISMATCH' }
+          if ([string]$health.liveArmStatus -ne 'ARMED' -or -not [bool]$health.liveExecutionArmed) { throw "POST_ARM_CONFIRMATION_FAILED status=$($health.liveArmStatus) armed=$($health.liveExecutionArmed)" }
+          if ($positions.Count -ne 0) { throw "POST_ARM_POSITION_COUNT_NOT_ZERO actual=$($positions.Count)" }
+          if ($orders.Count -ne 0) { throw "POST_ARM_PENDING_ORDER_COUNT_NOT_ZERO actual=$($orders.Count)" }
+          if ([string]$source.overall -ne 'EXACT_MATCH' -or [string]$source.deployment.sourceCommit -ne $expected) { throw 'POST_ARM_RUNTIME_SOURCE_NOT_EXACT' }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root\scripts\get-phase7c-live-arm-local.ps1" -WorkDir "$root\.runtime"
+          if ($LASTEXITCODE -ne 0) { throw "POST_ARM_GET_STATUS_FAILED exit=$LASTEXITCODE" }
+
+          Write-Host 'ARM_ONLY_ACCEPTANCE=PASS'
+          Write-Host 'AUTO_MUTATION=NONE'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
