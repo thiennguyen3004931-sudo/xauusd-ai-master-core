@@ -31,7 +31,7 @@ function Reject-Regex {
 Require-Literal "Phase7C Intelligence Production Acceptance Read-Only"
 Require-Literal "runs-on: [self-hosted, Windows, X64, xauusd-core-ci]"
 Require-Literal "contents: read"
-Require-Literal "EXPECTED_PRODUCTION_COMMIT: 429f657c882dfd411f72dff6ecf2e370cca9cbf6"
+Require-Literal "EXPECTED_PRODUCTION_COMMIT: 812c526f58309e7cd27dde23c3f87d04bded9a9d"
 Require-Literal "PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
 Require-Literal "API_BASE_URL: http://127.0.0.1:3711"
 Require-Literal "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
