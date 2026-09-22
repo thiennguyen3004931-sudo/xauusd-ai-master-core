@@ -2534,7 +2534,11 @@ async function bridgeRequest<T>(method: string, endpoint: string, body?: unknown
           ? `timeout=${timeoutMs}ms`
           : `transport=${errorObject?.message === "fetch failed" ? "fetch failed" : errorObject?.name || "request failed"}${causeCode ? `|cause=${causeCode}` : ""}`;
 
-        if (normalizedMethod === "GET" && attempt < maxAttempts) {
+        // Do not immediately retry a timed-out bridge request. Abort only
+        // cancels the client wait; the synchronous MT5 call can still be
+        // running server-side and holding the shared gateway lock. Retrying
+        // that timeout would queue duplicate reads behind the same stuck call.
+        if (normalizedMethod === "GET" && !aborted && attempt < maxAttempts) {
           console.warn(
             `PHASE7B_MT5_READ_RETRY=GET|${endpoint}|attempt=${attempt}|reason=${transport}`,
           );
