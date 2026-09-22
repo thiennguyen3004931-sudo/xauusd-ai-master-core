@@ -47,6 +47,34 @@ test("canonical Linux gate covers build plus trading-critical contracts", () => 
   );
 });
 
+test("canonical Linux multi-command blocks fail fast on every native command", () => {
+  assert.equal(fs.existsSync(workflowPath), true);
+  const source = fs.readFileSync(workflowPath, "utf8");
+  for (const stepName of [
+    "Build and test broker risk strategy foundations",
+    "Canonical strategy and recovery contracts",
+    "Structural and execution safety regressions",
+    "Broker-native Fixed TP regressions",
+    "Build API and Web dependency graphs",
+    "Parse canonical trading controllers",
+  ]) {
+    const start = source.indexOf(`- name: ${stepName}`);
+    assert.ok(start >= 0, `missing canonical step: ${stepName}`);
+    const next = source.indexOf("\n      - name:", start + 1);
+    const block = source.slice(start, next >= 0 ? next : source.length);
+    assert.match(block, /shell:\s*pwsh/, `${stepName} must run under PowerShell 7`);
+    const commandLines = block
+      .split(/\r?\n/)
+      .filter((line) => /^\s+(?:pnpm|node)\s/.test(line));
+    const guards = block.match(/if \(\$LASTEXITCODE -ne 0\) \{ exit \$LASTEXITCODE \}/g) ?? [];
+    assert.equal(
+      guards.length,
+      commandLines.length,
+      `${stepName} must fail immediately after every native command`,
+    );
+  }
+});
+
 test("canonical Windows gate covers cross-shell lifecycle and LIVE source safety", () => {
   assert.equal(fs.existsSync(workflowPath), true, "RED_TARGET: canonical PR gate workflow must exist.");
   const source = fs.readFileSync(workflowPath, "utf8");
