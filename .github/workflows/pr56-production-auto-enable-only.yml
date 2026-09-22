@@ -1,0 +1,168 @@
+name: PR56 Production AUTO Enable Only
+
+on:
+  push:
+    branches:
+      - ops/pr56-auto-enable-142e7755
+    paths:
+      - ".github/workflows/pr56-production-auto-enable-only.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr56-production-auto-enable-only
+  cancel-in-progress: false
+
+jobs:
+  auto-enable-only:
+    name: pr56-production-auto-enable-only-self-hosted
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout exact current main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Verify repository and production provenance
+        shell: powershell
+        env:
+          MAIN_HEAD: 142e7755c136f677193ef075e1816a09664fe015
+          MAIN_TREE: 7e75c35290f33e363363a9e2cab0502accbf6e53
+          PROD_HEAD: 142e7755c136f677193ef075e1816a09664fe015
+          PROD_TREE: 7e75c35290f33e363363a9e2cab0502accbf6e53
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $repoHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $repoTree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $prodHead = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodTree = (git -C $env:PRODUCTION_ROOT rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $prodBranch = (git -C $env:PRODUCTION_ROOT branch --show-current).Trim()
+          $prodDirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+
+          Write-Host "PRIVATE_MAIN_HEAD=$repoHead"
+          Write-Host "PRIVATE_MAIN_TREE=$repoTree"
+          Write-Host "PRODUCTION_HEAD=$prodHead"
+          Write-Host "PRODUCTION_TREE=$prodTree"
+          Write-Host "PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "PRODUCTION_DIRTY_COUNT=$($prodDirty.Count)"
+
+          if ($repoHead -ne $env:MAIN_HEAD) { throw "PRIVATE_MAIN_HEAD_MISMATCH" }
+          if ($repoTree -ne $env:MAIN_TREE) { throw "PRIVATE_MAIN_TREE_MISMATCH" }
+          if ($prodHead -ne $env:PROD_HEAD) { throw "PRODUCTION_HEAD_MISMATCH" }
+          if ($prodTree -ne $env:PROD_TREE) { throw "PRODUCTION_TREE_MISMATCH" }
+          if ($prodBranch -ne 'main') { throw "PRODUCTION_BRANCH_MISMATCH" }
+          if ($prodDirty.Count -ne 0) { throw "PRODUCTION_WORKTREE_DIRTY" }
+
+      - name: Fresh guarded AUTO readiness gate
+        shell: powershell
+        env:
+          PROD_HEAD: 142e7755c136f677193ef075e1816a09664fe015
+        run: |
+          $auto = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-auto-activation/status' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $bot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+
+          Write-Host "PRE_AUTO_APPROVED=$($auto.approved)"
+          Write-Host "PRE_AUTO_BLOCKED_BY=$([string]::Join(',', @($auto.blockedBy)))"
+          Write-Host "PRE_AUTO_ACCOUNT_MODE=$($auto.accountMode)"
+          Write-Host "PRE_AUTO_BROKER_ACCOUNT_MODE=$($auto.brokerAccountMode)"
+          Write-Host "PRE_AUTO_BOT_MODE=$($auto.botMode)"
+          Write-Host "PRE_AUTO_ARM_STATUS=$($auto.liveArmStatus)"
+          Write-Host "PRE_AUTO_RUNTIME_SOURCE_OVERALL=$($auto.runtimeSourceOverall)"
+          Write-Host "PRE_AUTO_RUNTIME_SOURCE_COMMIT=$($auto.runtimeSourceCommit)"
+          foreach ($p in $auto.checks.PSObject.Properties) {
+            Write-Host "PRE_AUTO_CHECK_$($p.Name.ToUpperInvariant())=$($p.Value)"
+          }
+          Write-Host "PRE_AUTO_CAPABILITY_ARMED=$($cap.liveExecutionArmed)"
+          Write-Host "PRE_AUTO_CAPABILITY_STATUS=$($cap.liveArmStatus)"
+          Write-Host "PRE_AUTO_BOT_MODE_DIRECT=$($bot.state.mode)"
+          Write-Host "PRE_AUTO_RUNNING=$($life.running)"
+          Write-Host "PRE_AUTO_READY=$($life.ready)"
+          Write-Host "PRE_AUTO_POSITIONS=$($life.bridge.openXauusdPositions)"
+
+          if ($auto.approved -ne $true) { throw "AUTO_ACTIVATION_NOT_APPROVED" }
+          if (@($auto.blockedBy).Count -ne 0) { throw "AUTO_BLOCKED_BY_NONEMPTY" }
+          if ([string]$auto.accountMode -ne 'LIVE') { throw "AUTO_ACCOUNT_NOT_LIVE" }
+          if ([string]$auto.brokerAccountMode -ne 'real') { throw "AUTO_BROKER_NOT_REAL" }
+          if ([string]$auto.botMode -ne 'PAUSE') { throw "AUTO_PRECONDITION_MODE_NOT_PAUSE" }
+          if ([string]$auto.liveArmStatus -ne 'ARMED') { throw "AUTO_ARM_STATUS_NOT_ARMED" }
+          if ($auto.checks.zeroXauusdPositions -ne $true) { throw "AUTO_POSITION_GATE_NOT_FLAT" }
+          if ($auto.checks.zeroXauusdPendingOrders -ne $true) { throw "AUTO_PENDING_ORDER_GATE_NOT_ZERO" }
+          if ($auto.checks.runtimeSourceExact -ne $true) { throw "AUTO_RUNTIME_SOURCE_GATE_NOT_EXACT" }
+          if ([string]$auto.runtimeSourceOverall -ne 'EXACT_MATCH') { throw "AUTO_RUNTIME_SOURCE_OVERALL_NOT_EXACT" }
+          if ([string]$auto.runtimeSourceCommit -ne $env:PROD_HEAD) { throw "AUTO_RUNTIME_SOURCE_COMMIT_MISMATCH" }
+          if ($cap.liveExecutionArmed -ne $true -or [string]$cap.liveArmStatus -ne 'ARMED') { throw "AUTO_LIVE_ARM_NOT_SATISFIED" }
+          if ([string]$bot.state.mode -ne 'PAUSE') { throw "BOT_MODE_CHANGED_BEFORE_AUTO" }
+          if ($life.running -ne $true -or $life.ready -ne $true) { throw "RUNTIME_NOT_READY_BEFORE_AUTO" }
+          if ([int]$life.bridge.openXauusdPositions -ne 0) { throw "XAUUSD_NOT_FLAT_BEFORE_AUTO" }
+
+      - name: Execute guarded AUTO_ENABLE_ONLY
+        shell: powershell
+        run: |
+          $result = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-auto-activation/enable' -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 10
+          Write-Host "AUTO_ENABLE_APPROVED=$($result.approved)"
+          Write-Host "AUTO_ENABLE_RESULT_MODE=$($result.state.mode)"
+          Write-Host "AUTO_ENABLE_UPDATED_BY=$($result.state.updatedBy)"
+          Write-Host "AUTO_ENABLE_BLOCKED_BY=$([string]::Join(',', @($result.blockedBy)))"
+          if ($result.approved -ne $true) { throw "AUTO_ENABLE_RESPONSE_NOT_APPROVED" }
+          if ([string]$result.state.mode -ne 'AUTO') { throw "AUTO_ENABLE_MODE_NOT_AUTO" }
+          if ([string]$result.state.updatedBy -ne 'web-control-center') { throw "AUTO_ENABLE_PROVENANCE_INVALID" }
+
+      - name: Post-AUTO runtime safety proof
+        shell: powershell
+        env:
+          PROD_HEAD: 142e7755c136f677193ef075e1816a09664fe015
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          Start-Sleep -Seconds 2
+          $account = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/account-mode' -Method Get -TimeoutSec 10
+          $bot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $auto = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-auto-activation/status' -Method Get -TimeoutSec 10
+
+          Write-Host "POST_AUTO_ACCOUNT_MODE=$($account.state.accountMode)"
+          Write-Host "POST_AUTO_BOT_MODE=$($bot.state.mode)"
+          Write-Host "POST_AUTO_UPDATED_BY=$($bot.state.updatedBy)"
+          Write-Host "POST_AUTO_RUNNING=$($life.running)"
+          Write-Host "POST_AUTO_READY=$($life.ready)"
+          Write-Host "POST_AUTO_TELEGRAM_READY=$($life.telegramReady)"
+          Write-Host "POST_AUTO_POSITIONS=$($life.bridge.openXauusdPositions)"
+          Write-Host "POST_AUTO_ARM_STATUS=$($cap.liveArmStatus)"
+          Write-Host "POST_AUTO_ARMED=$($cap.liveExecutionArmed)"
+          Write-Host "POST_AUTO_RUNTIME_SOURCE_OVERALL=$($auto.runtimeSourceOverall)"
+          Write-Host "POST_AUTO_RUNTIME_SOURCE_COMMIT=$($auto.runtimeSourceCommit)"
+          Write-Host "POST_AUTO_ZERO_PENDING_ORDERS=$($auto.checks.zeroXauusdPendingOrders)"
+
+          if ([string]$account.state.accountMode -ne 'LIVE') { throw "POST_AUTO_ACCOUNT_NOT_LIVE" }
+          if ([string]$bot.state.mode -ne 'AUTO') { throw "POST_AUTO_MODE_NOT_AUTO" }
+          if ([string]$bot.state.updatedBy -ne 'web-control-center') { throw "POST_AUTO_PROVENANCE_INVALID" }
+          if ($life.running -ne $true -or $life.ready -ne $true) { throw "POST_AUTO_RUNTIME_NOT_READY" }
+          if ([string]$cap.liveArmStatus -ne 'ARMED' -or $cap.liveExecutionArmed -ne $true) { throw "POST_AUTO_ARM_NOT_PRESERVED" }
+          if ($auto.checks.zeroXauusdPendingOrders -ne $true) { throw "POST_AUTO_PENDING_ORDER_GATE_NOT_ZERO" }
+          if ($auto.checks.runtimeSourceExact -ne $true -or [string]$auto.runtimeSourceOverall -ne 'EXACT_MATCH') { throw "POST_AUTO_RUNTIME_SOURCE_NOT_EXACT" }
+          if ([string]$auto.runtimeSourceCommit -ne $env:PROD_HEAD) { throw "POST_AUTO_RUNTIME_SOURCE_COMMIT_MISMATCH" }
+
+          $prodHead = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodDirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+          Write-Host "POST_AUTO_PRODUCTION_HEAD=$prodHead"
+          Write-Host "POST_AUTO_PRODUCTION_DIRTY_COUNT=$($prodDirty.Count)"
+          if ($prodHead -ne $env:PROD_HEAD) { throw "POST_AUTO_SOURCE_HEAD_CHANGED" }
+          if ($prodDirty.Count -ne 0) { throw "POST_AUTO_PRODUCTION_WORKTREE_DIRTY" }
+
+      - name: Authorized mutation boundary
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "AUTHORIZED_MUTATION=AUTO_ENABLE_ONLY"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ACCOUNT_SWITCH=NONE"
+          Write-Host "MANUAL_ORDER_MUTATION=NONE"
+          Write-Host "MANUAL_POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
