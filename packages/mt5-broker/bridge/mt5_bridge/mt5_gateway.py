@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from .broker_time import denormalize_timestamp_ms
+from .broker_time import broker_time_offset_ms, denormalize_timestamp_ms
 from .config import Settings
 from .errors import BridgeError
 from .ledger import IdempotencyLedger
@@ -21,6 +21,11 @@ class Mt5Gateway:
         self.ledger = ledger
         self.mt5 = module
         self._lock = threading.RLock()
+        # Closed-candle snapshots are immutable between bar closes. Keep this
+        # cache outside the MT5 gateway lock so repeated M5/M15 reads do not
+        # serialize health/positions/quote calls behind copy_rates_from_pos.
+        self._closed_candle_cache_lock = threading.Lock()
+        self._closed_candle_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.last_error: str | None = None
         self.reconnect_count = 0
         self.last_reconnect_at: int | None = None
@@ -147,8 +152,68 @@ class Mt5Gateway:
             "source": "MT5_D1_CURRENT_BAR",
         }
 
+    def _read_closed_candle_cache(
+        self,
+        key: tuple[str, str, str],
+        count: int,
+        now_ms: int,
+        duration_ms: int,
+        allow_stale: bool = False,
+    ) -> list[dict[str, Any]] | None:
+        with self._closed_candle_cache_lock:
+            cached = self._closed_candle_cache.get(key)
+            if cached is None:
+                return None
+            rows = cached.get("rows")
+            if not isinstance(rows, list) or len(rows) < count:
+                return None
+
+            refresh_after_ms = int(cached.get("refreshAfterMs", 0) or 0)
+            fetched_at_ms = int(cached.get("fetchedAtMs", 0) or 0)
+            if allow_stale:
+                # Stale-on-busy is deliberately bounded to one timeframe.
+                # This keeps the controller fail-closed if market data is old
+                # for longer than a single closed-bar interval.
+                if fetched_at_ms <= 0 or now_ms - fetched_at_ms > duration_ms:
+                    return None
+            elif refresh_after_ms <= now_ms:
+                return None
+
+            return [dict(row) for row in rows[-count:]]
+
+    def _closed_candle_cached_count(
+        self,
+        key: tuple[str, str, str],
+    ) -> int:
+        with self._closed_candle_cache_lock:
+            cached = self._closed_candle_cache.get(key)
+            rows = cached.get("rows") if cached is not None else None
+            return len(rows) if isinstance(rows, list) else 0
+
+    def _store_closed_candle_cache(
+        self,
+        key: tuple[str, str, str],
+        rows: list[dict[str, Any]],
+        refresh_after_ms: int,
+        fetched_at_ms: int,
+    ) -> None:
+        with self._closed_candle_cache_lock:
+            self._closed_candle_cache[key] = {
+                "rows": [dict(row) for row in rows],
+                "refreshAfterMs": int(refresh_after_ms),
+                "fetchedAtMs": int(fetched_at_ms),
+            }
+
     def candles(self, canonical_symbol: str, timeframe: str = "M15", count: int = 320) -> list[dict[str, Any]]:
-        'Return fully closed MT5 candles without enabling trading.'
+        """Return fully closed MT5 candles without repeatedly loading unchanged history.
+
+        The endpoint excludes the still-forming bar (start_pos=1), so the
+        returned series is immutable until the next timeframe close. Cache
+        hits bypass the shared MT5 lock. When a refresh is due but another MT5
+        operation currently owns the lock, a recent cached series (at most one
+        timeframe old) is returned instead of queueing another heavyweight
+        copy_rates_from_pos call behind position-management traffic.
+        """
         broker_symbol = self._ensure_symbol(canonical_symbol)
         timeframe_key = str(timeframe).strip().upper()
 
@@ -191,7 +256,50 @@ class Mt5Gateway:
                 "CANDLE_COUNT_INVALID",
             )
 
-        with self._lock:
+        candle_duration_ms = duration_ms[timeframe_key]
+        cache_key = (canonical_symbol, broker_symbol, timeframe_key)
+        now_ms = int(time.time() * 1000)
+
+        fresh = self._read_closed_candle_cache(
+            cache_key,
+            safe_count,
+            now_ms,
+            candle_duration_ms,
+        )
+        if fresh is not None:
+            return fresh
+
+        stale = self._read_closed_candle_cache(
+            cache_key,
+            safe_count,
+            now_ms,
+            candle_duration_ms,
+            allow_stale=True,
+        )
+        fetch_count = max(
+            safe_count,
+            self._closed_candle_cached_count(cache_key),
+        )
+
+        # Do not let an expired candle refresh wait behind a critical MT5
+        # operation if a recent closed-bar snapshot is already available.
+        acquired = self._lock.acquire(blocking=stale is None)
+        if not acquired:
+            return stale if stale is not None else []
+
+        try:
+            # Another request may have refreshed the cache before this thread
+            # acquired the MT5 lock.
+            now_ms = int(time.time() * 1000)
+            fresh = self._read_closed_candle_cache(
+                cache_key,
+                safe_count,
+                now_ms,
+                candle_duration_ms,
+            )
+            if fresh is not None:
+                return fresh
+
             info = self._read_with_reconnect_locked("symbol_info", broker_symbol)
             if info is None:
                 raise BridgeError(
@@ -206,8 +314,10 @@ class Mt5Gateway:
                 broker_symbol,
                 mt5_timeframe,
                 1,
-                safe_count,
+                fetch_count,
             )
+        finally:
+            self._lock.release()
 
         if rows is None:
             raise BridgeError(
@@ -232,7 +342,7 @@ class Mt5Gateway:
                     "brokerSymbol": broker_symbol,
                     "timeframe": timeframe_key,
                     "openTime": open_time,
-                    "closeTime": open_time + duration_ms[timeframe_key],
+                    "closeTime": open_time + candle_duration_ms,
                     "open": float(row["open"]),
                     "high": float(row["high"]),
                     "low": float(row["low"]),
@@ -242,7 +352,23 @@ class Mt5Gateway:
                 }
             )
 
-        return output
+        fetched_at_ms = int(time.time() * 1000)
+        refresh_after_ms = fetched_at_ms + min(5_000, candle_duration_ms)
+        if output:
+            latest_close_utc_ms = int(output[-1]["closeTime"]) - broker_time_offset_ms()
+            next_close_utc_ms = latest_close_utc_ms + candle_duration_ms
+            if next_close_utc_ms > fetched_at_ms:
+                # Add a small grace so MT5 has time to publish the just-closed
+                # candle before the next heavyweight history refresh.
+                refresh_after_ms = next_close_utc_ms + 1_000
+
+        self._store_closed_candle_cache(
+            cache_key,
+            output,
+            refresh_after_ms,
+            fetched_at_ms,
+        )
+        return [dict(row) for row in output[-safe_count:]]
 
     def symbol_spec(self, canonical_symbol: str) -> dict[str, Any]:
         broker_symbol = self._ensure_symbol(canonical_symbol)
