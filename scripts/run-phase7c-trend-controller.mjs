@@ -512,21 +512,57 @@ async function fetchOpenPositionsUnderLock(request) {
 }
 
 async function controlRequest(pathname) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5_000);
-  try {
-    const response = await nativeFetch(`${controlApiBase}${pathname}`, {
-      headers: { accept: "application/json" },
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`Phase7C control API ${response.status}: ${text}`);
+  const timeoutMs = 5_000;
+  const maxAttempts = 2;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      let response;
+      try {
+        response = await nativeFetch(`${controlApiBase}${pathname}`, {
+          headers: { accept: "application/json" },
+          signal: controller.signal,
+          cache: "no-store",
+        });
+      } catch (error) {
+        const errorObject = error instanceof Error ? error : null;
+        const aborted = timedOut || errorObject?.name === "AbortError";
+        const reason = aborted
+          ? `timeout=${timeoutMs}ms`
+          : `transport=${errorObject?.message === "fetch failed" ? "fetch failed" : errorObject?.name || "request failed"}`;
+
+        if (attempt < maxAttempts) {
+          console.warn(
+            `PHASE7C_TREND_CONTROL_READ_RETRY=GET|${pathname}|attempt=${attempt}|reason=${reason}`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          continue;
+        }
+
+        throw new Error(
+          `Phase7C control API GET ${pathname} | ${reason} | attempts=${attempt}`,
+          errorObject ? { cause: errorObject } : undefined,
+        );
+      }
+
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(`Phase7C control API GET ${pathname} failed ${response.status}: ${text}`);
+      }
+      return text ? JSON.parse(text) : {};
+    } finally {
+      clearTimeout(timeout);
     }
-    return text ? JSON.parse(text) : {};
-  } finally {
-    clearTimeout(timeout);
   }
+
+  throw new Error(`Phase7C control API GET ${pathname} | exhausted safe read retry`);
 }
 
 function isNewOrderRequest(request) {
