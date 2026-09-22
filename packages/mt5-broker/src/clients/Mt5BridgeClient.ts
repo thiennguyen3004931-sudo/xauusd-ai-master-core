@@ -5,6 +5,7 @@ import type {
   Mt5BridgeHealth,
   Mt5BridgeOrderRequest,
   Mt5BridgeOrderResponse,
+  Mt5BridgePendingOrder,
   Mt5BridgePosition,
   Mt5BridgeQuote,
   Mt5BridgeSymbolSpec,
@@ -54,5 +55,10 @@ export class Mt5BridgeClient implements IMt5BridgeClient {
   openPositions(symbol?: string): Promise<Mt5BridgePosition[]> {
     const query = symbol ? `?symbol=${encodeURIComponent(symbol)}` : "";
     return this.transport.request({ method: "GET", path: `v1/positions${query}` });
+  }
+
+  pendingOrders(symbol?: string): Promise<Mt5BridgePendingOrder[]> {
+    const query = symbol ? `?symbol=${encodeURIComponent(symbol)}` : "";
+    return this.transport.request({ method: "GET", path: `v1/orders${query}` });
   }
 }

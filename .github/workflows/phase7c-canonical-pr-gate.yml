@@ -42,47 +42,81 @@ jobs:
       - name: Repository workflow pruning contract
         run: node --test scripts/test-repository-workflow-pruning-contract.mjs
       - name: Build and test broker risk strategy foundations
+        shell: pwsh
         run: |
           pnpm --filter @xauusd/mt5-broker... build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm --filter @xauusd/risk-engine... build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm --filter @xauusd/risk-engine typecheck
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm --filter @xauusd/risk-engine test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm --filter @xauusd/strategy-engine... build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm --filter @xauusd/strategy-engine typecheck
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm --filter @xauusd/strategy-engine test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Canonical strategy and recovery contracts
+        shell: pwsh
         run: |
           node scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/test-phase7c-trend-entry-recovery-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/test-phase7c-sideway-recovery-management-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/test-phase7c-canonical-daily-recovery-executors-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Structural and execution safety regressions
+        shell: pwsh
         run: |
           node --test scripts/test-phase7c-structural-sl-monotonicity.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test scripts/phase7c-fast-move-profit-lock.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test scripts/phase7c-fast-move-canonical-source-contract.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test scripts/phase7c-sideway-logic.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test scripts/phase7c-sideway-execution-guards.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test scripts/phase7c-execution-lock.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prebuild API for compiled Fixed TP contracts
         run: pnpm --filter @xauusd/api... build
       - name: Broker-native Fixed TP regressions
+        shell: pwsh
         run: |
           node --test scripts/phase7c-fixed-tp.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test scripts/phase7c-fixed-tp-runtime-wiring.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test scripts/phase7c-fixed-tp-trend-snapshot.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test scripts/phase7c-fixed-tp-trend-exit.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test scripts/phase7c-fixed-tp-sideway-snapshot.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test scripts/phase7c-fixed-tp-sideway-exit.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build API and Web dependency graphs
+        shell: pwsh
         run: |
           pnpm --filter @xauusd/api... build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm --filter @xauusd/web... build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Parse canonical trading controllers
+        shell: pwsh
         run: |
           node --check scripts/run-phase7c-trend-controller.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check scripts/run-phase7c-sideway-controller.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check scripts/run-phase7c-sideway-locked.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Diff hygiene
         run: git diff --check
 

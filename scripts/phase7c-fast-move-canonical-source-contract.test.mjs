@@ -60,6 +60,20 @@ const sidewayRuntimeSource = transformPhase7CSidewayM5PreStructureProfitLockSour
   transformPhase7CSidewayM5TrailingSource(sidewayRawSource),
 );
 
+const trendCrlfRuntimeSource = transformPhase7CTrendM5PreStructureProfitLockSource(
+  transformPhase7CTrendM5TrailingSource(trendRawSource.replace(/\r?\n/g, "\r\n")),
+);
+const sidewayCrlfRuntimeSource = transformPhase7CSidewayM5PreStructureProfitLockSource(
+  transformPhase7CSidewayM5TrailingSource(sidewayRawSource.replace(/\r?\n/g, "\r\n")),
+);
+for (const [strategy, source] of [
+  ["TREND_CRLF", trendCrlfRuntimeSource],
+  ["SIDEWAY_CRLF", sidewayCrlfRuntimeSource],
+]) {
+  assert.match(source, /FAST_MOVE_HANDOFF_M5_STRUCTURE/, `${strategy} transform must be CRLF-safe.`);
+  assert.match(source, /fastMoveHandedOffToM5/, `${strategy} durable handoff state must survive CRLF input.`);
+}
+
 for (const [strategy, source] of [
   ["TREND", trendRuntimeSource],
   ["SIDEWAY", sidewayRuntimeSource],

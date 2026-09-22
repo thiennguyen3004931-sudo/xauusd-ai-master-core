@@ -73,7 +73,12 @@ Assert-LiteralOrder '[void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)
 
 Assert-Literal "--filter '@xauusd/mt5-broker' build" 'mt5 broker build before web build'
 Assert-Contains '(?ms)&\s+\$pnpm\.Source\s+--filter\s+''@xauusd/mt5-broker''\s+build\s*if\s*\(\$LASTEXITCODE\s+-ne\s+0\)\s*\{' 'mt5 broker build fail-fast guard'
+Assert-Literal "--filter '@xauusd/api...' build" 'API dependency graph prebuild before dashboard restart'
+Assert-Contains '(?ms)&\s+\$pnpm\.Source\s+--filter\s+''@xauusd/api\.\.\.''\s+build\s*if\s*\(\$LASTEXITCODE\s+-ne\s+0\)\s*\{' 'API dependency graph prebuild fail-fast guard'
+Assert-Literal 'PHASE7C_WEB_UI_DEPLOY_API_DEPENDENCY_BUILD=PASS' 'API dependency graph prebuild pass marker'
 Assert-LiteralOrder "--filter '@xauusd/mt5-broker' build" "--filter '@xauusd/web' build" 'mt5 broker build precedes web build'
+Assert-LiteralOrder "--filter '@xauusd/mt5-broker' build" "--filter '@xauusd/api...' build" 'mt5 broker build precedes API dependency graph prebuild'
+Assert-LiteralOrder "--filter '@xauusd/api...' build" "--filter '@xauusd/web' build" 'API dependency graph prebuild precedes web build'
 Assert-Literal "--filter '@xauusd/web' build" 'web build before restart'
 Assert-Literal 'deploy-phase7c-mt5-dashboard-local.ps1' 'reuse verified dashboard restart helper'
 Assert-Literal '-SkipPanelInstall' 'web-only restart path'

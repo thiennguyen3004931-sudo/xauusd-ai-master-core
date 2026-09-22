@@ -8,6 +8,8 @@ $files = @{
   armService = Join-Path $ProjectRoot "apps\api\src\services\phase7c-live-arm-control.service.ts"
   armRoute = Join-Path $ProjectRoot "apps\api\src\routes\phase7c-live-arm-control.route.ts"
   autoService = Join-Path $ProjectRoot "apps\api\src\services\phase7c-auto-activation.service.ts"
+  mt5Telemetry = Join-Path $ProjectRoot "apps\api\src\services\mt5.service.ts"
+  mt5Client = Join-Path $ProjectRoot "packages\mt5-broker\src\clients\Mt5BridgeClient.ts"
   autoRoute = Join-Path $ProjectRoot "apps\api\src\routes\phase7c-auto-activation.route.ts"
   app = Join-Path $ProjectRoot "apps\api\src\app.ts"
   webControl = Join-Path $ProjectRoot "apps\web\src\phase7c-execution-control.ts"
@@ -28,6 +30,8 @@ $runner = Get-Content -LiteralPath $files.runner -Raw
 $armService = Get-Content -LiteralPath $files.armService -Raw
 $armRoute = Get-Content -LiteralPath $files.armRoute -Raw
 $autoService = Get-Content -LiteralPath $files.autoService -Raw
+$mt5Telemetry = Get-Content -LiteralPath $files.mt5Telemetry -Raw
+$mt5Client = Get-Content -LiteralPath $files.mt5Client -Raw
 $autoRoute = Get-Content -LiteralPath $files.autoRoute -Raw
 $app = Get-Content -LiteralPath $files.app -Raw
 $webControl = Get-Content -LiteralPath $files.webControl -Raw
@@ -92,6 +96,14 @@ Assert-Literal $autoService 'evaluatePhase7CAutoActivation' 'server-side AUTO sa
 Assert-Literal $autoService 'accountMode.accountMode === "LIVE"' 'LIVE-only ARM branch'
 Assert-Literal $autoService 'liveExecutionArmed' 'LIVE ARM check'
 Assert-Literal $autoService 'telemetry.positions.length === 0' 'AUTO flat-position guard'
+Assert-Literal $autoService 'telemetry.pendingOrders.length === 0' 'AUTO zero pending-order guard'
+Assert-Literal $autoService 'getPhase7CRuntimeSourceAttestationSnapshot' 'AUTO reads canonical runtime-source attestation'
+Assert-Literal $autoService 'runtimeSourceExact' 'AUTO exposes exact runtime-source gate'
+Assert-Contains $autoService 'runtimeSourceExact:\s*runtimeSource\.overall\s*===\s*"EXACT_MATCH"' 'AUTO requires runtime source EXACT_MATCH'
+Assert-Literal $mt5Client 'pendingOrders(symbol?: string)' 'broker client exposes read-only pending orders'
+Assert-Literal $mt5Client 'method: "GET", path: `v1/orders${query}`' 'pending orders use broker GET endpoint'
+Assert-Literal $mt5Telemetry 'pendingOrders: Mt5BridgePendingOrder[]' 'telemetry exposes pending orders'
+Assert-Literal $mt5Telemetry 'client.pendingOrders(symbol)' 'telemetry fetches pending orders'
 Assert-Literal $autoService 'lifecycle.ready' 'runtime READY guard'
 Assert-Literal $autoService 'phase7CBotModeService.set("AUTO", "web-control-center")' 'canonical Web AUTO mutation'
 Assert-Literal $autoRoute 'AUTO activation is restricted to localhost.' 'localhost AUTO API guard'

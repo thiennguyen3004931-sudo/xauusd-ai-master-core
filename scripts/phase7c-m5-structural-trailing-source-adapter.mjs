@@ -1,3 +1,7 @@
+function normalizeNewlines(source) {
+  return String(source).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 function replaceRequired(source, search, replacement, label) {
   if (!source.includes(search)) {
     throw new Error(`Phase7C M5 structural trailing adapter could not find ${label}.`);
@@ -26,7 +30,7 @@ function prependImport(source) {
 }
 
 export function transformPhase7CTrendM5TrailingSource(input) {
-  let source = prependImport(String(input));
+  let source = prependImport(normalizeNewlines(input));
 
   source = replaceRequired(
     source,
@@ -194,7 +198,7 @@ export function transformPhase7CTrendM5TrailingSource(input) {
 }
 
 export function transformPhase7CSidewayM5TrailingSource(input) {
-  let source = prependImport(String(input));
+  let source = prependImport(normalizeNewlines(input));
 
   source = replaceOneOfRequired(
     source,

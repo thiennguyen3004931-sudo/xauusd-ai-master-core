@@ -4,6 +4,7 @@ export * from "./Mt5BridgeError";
 export * from "./Mt5BridgeHealth";
 export * from "./Mt5BridgeOrderRequest";
 export * from "./Mt5BridgeOrderResponse";
+export * from "./Mt5BridgePendingOrder";
 export * from "./Mt5BridgePosition";
 export * from "./Mt5BridgeQuote";
 export * from "./Mt5BridgeSymbolSpec";
