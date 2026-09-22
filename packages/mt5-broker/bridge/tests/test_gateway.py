@@ -107,9 +107,11 @@ class CandleFakeMt5(FakeMt5):
     def __init__(self):
         super().__init__()
         self.copy_rates_calls = 0
+        self.copy_rates_requested_counts = []
 
     def copy_rates_from_pos(self, _symbol, timeframe, _start_pos, count):
         self.copy_rates_calls += 1
+        self.copy_rates_requested_counts.append(count)
         duration_seconds = {
             self.TIMEFRAME_M1: 60,
             self.TIMEFRAME_M5: 5 * 60,
@@ -281,6 +283,28 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(second, first)
             self.assertEqual(smaller, first[-100:])
             self.assertEqual(fake.copy_rates_calls, 1)
+            ledger.close()
+
+    def test_closed_candle_refresh_uses_small_incremental_tail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = CandleFakeMt5()
+            ledger_path = Path(directory) / "ledger.sqlite3"
+            ledger = IdempotencyLedger(ledger_path)
+            gateway = Mt5Gateway(settings(ledger_path), ledger, fake)
+            self.assertTrue(gateway.start())
+
+            with patch("mt5_bridge.mt5_gateway.time.time", return_value=1_700_000_000.0):
+                first = gateway.candles("XAUUSD", "M15", 320)
+
+            # Move just past the next M15 close. The existing cache is recent
+            # enough to advance incrementally instead of reloading 320 bars.
+            with patch("mt5_bridge.mt5_gateway.time.time", return_value=1_700_000_102.0):
+                refreshed = gateway.candles("XAUUSD", "M15", 320)
+
+            self.assertEqual(len(first), 320)
+            self.assertEqual(len(refreshed), 320)
+            self.assertEqual(fake.copy_rates_calls, 2)
+            self.assertEqual(fake.copy_rates_requested_counts, [320, 8])
             ledger.close()
 
     def test_expired_candle_cache_returns_recent_snapshot_when_mt5_lock_is_busy(self):
