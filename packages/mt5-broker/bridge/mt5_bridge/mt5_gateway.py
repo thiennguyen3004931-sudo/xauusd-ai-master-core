@@ -214,7 +214,9 @@ class Mt5Gateway:
         timeframe old) is returned instead of queueing another heavyweight
         copy_rates_from_pos call behind position-management traffic.
         """
-        broker_symbol = self._ensure_symbol(canonical_symbol)
+        # Resolve the configured broker symbol without touching MT5. A fresh
+        # cache hit must remain independent of the shared gateway lock.
+        broker_symbol = self.settings.broker_symbol(canonical_symbol)
         timeframe_key = str(timeframe).strip().upper()
 
         timeframe_map = {
@@ -306,6 +308,12 @@ class Mt5Gateway:
                     f"No symbol specification for {broker_symbol}",
                     404,
                     "SYMBOL_NOT_FOUND",
+                )
+            if not bool(getattr(info, "visible", False)) and not self.mt5.symbol_select(broker_symbol, True):
+                raise BridgeError(
+                    f"Could not select {broker_symbol} in MarketWatch",
+                    503,
+                    "SYMBOL_SELECT_FAILED",
                 )
 
             # start_pos=1 intentionally excludes the still-forming current candle.
