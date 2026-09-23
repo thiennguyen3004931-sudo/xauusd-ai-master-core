@@ -1,0 +1,166 @@
+name: Ticket 305118489 BE Forensic Read-Only
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  forensic-readonly:
+    name: ticket-305118489-be-forensic-readonly
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Inspect ticket 305118489 without production mutation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProductionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $RuntimeRoot = Join-Path $ProductionRoot '.runtime'
+          $Ticket = '305118489'
+          $ObservedEntry = 4284.17
+          $BeDistance = 6.0
+          $BeAskThreshold = $ObservedEntry - $BeDistance
+
+          Write-Host 'FORENSIC_MODE=READ_ONLY'
+          Write-Host 'PRODUCTION_MUTATION=NONE'
+          Write-Host 'MODE_MUTATION=NONE'
+          Write-Host 'ARM_MUTATION=NONE'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host "TICKET=$Ticket"
+          Write-Host "OBSERVED_ENTRY=$ObservedEntry"
+          Write-Host "SELL_BE_ASK_THRESHOLD=$BeAskThreshold"
+
+          $journalFiles = @(Get-ChildItem -LiteralPath $RuntimeRoot -Recurse -File -Filter 'phase7b-demo-events.jsonl' -ErrorAction SilentlyContinue)
+          Write-Host "JOURNAL_FILE_COUNT=$($journalFiles.Count)"
+          $journalRows = New-Object System.Collections.Generic.List[object]
+          foreach ($file in $journalFiles) {
+            foreach ($line in Get-Content -LiteralPath $file.FullName -ErrorAction SilentlyContinue) {
+              if ([string]::IsNullOrWhiteSpace($line)) { continue }
+              try { $row = $line | ConvertFrom-Json } catch { continue }
+              if ([string]$row.ticket -ne $Ticket) { continue }
+              $journalRows.Add([pscustomobject]@{
+                path = $file.FullName
+                timestamp = [long]($row.timestamp ?? 0)
+                event = [string]($row.event ?? '')
+                favorable = $row.favorable
+                entry = $row.entry
+                stopLoss = $row.stopLoss
+                reason = $row.reason
+                message = $row.message
+                responseSuccess = $row.response.success
+                responseRetcode = $row.response.retcode
+                responseMessage = $row.response.message
+              })
+            }
+          }
+          Write-Host "TICKET_JOURNAL_ROW_COUNT=$($journalRows.Count)"
+          foreach ($row in @($journalRows | Sort-Object timestamp)) {
+            $iso = if ($row.timestamp -gt 0) { [DateTimeOffset]::FromUnixTimeMilliseconds($row.timestamp).UtcDateTime.ToString('o') } else { '' }
+            Write-Host ("TICKET_EVENT|ts={0}|utc={1}|event={2}|favorable={3}|entry={4}|stopLoss={5}|reason={6}|message={7}|responseSuccess={8}|retcode={9}|responseMessage={10}|path={11}" -f $row.timestamp,$iso,$row.event,$row.favorable,$row.entry,$row.stopLoss,$row.reason,$row.message,$row.responseSuccess,$row.responseRetcode,$row.responseMessage,$row.path)
+          }
+
+          $beEvents = @($journalRows | Where-Object { $_.event -match '^PLUS6_' })
+          Write-Host "BE_EVENT_COUNT=$($beEvents.Count)"
+          Write-Host "BE_SUCCESS_COUNT=$(@($beEvents | Where-Object { $_.event -in @('PLUS6_SL_TO_ENTRY','PLUS6_SL_ALREADY_AT_OR_TIGHTER') }).Count)"
+          Write-Host "BE_REJECT_COUNT=$(@($beEvents | Where-Object { $_.event -eq 'PLUS6_SL_REJECTED' }).Count)"
+
+          $sampleFiles = @(Get-ChildItem -LiteralPath $RuntimeRoot -Recurse -File -Filter 'trend-exit-side-samples.jsonl' -ErrorAction SilentlyContinue)
+          Write-Host "EXIT_SIDE_SAMPLE_FILE_COUNT=$($sampleFiles.Count)"
+          $samples = New-Object System.Collections.Generic.List[object]
+          foreach ($file in $sampleFiles) {
+            foreach ($line in Get-Content -LiteralPath $file.FullName -ErrorAction SilentlyContinue) {
+              if ([string]::IsNullOrWhiteSpace($line)) { continue }
+              try { $row = $line | ConvertFrom-Json } catch { continue }
+              if ([string]$row.ticket -ne $Ticket) { continue }
+              $samples.Add([pscustomobject]@{
+                path = $file.FullName
+                timestamp = [long]($row.timestamp ?? 0)
+                bid = [double]($row.bid ?? 0)
+                ask = [double]($row.ask ?? 0)
+                exitSidePrice = [double]($row.exitSidePrice ?? 0)
+              })
+            }
+          }
+
+          $orderedSamples = @($samples | Sort-Object timestamp)
+          Write-Host "MANAGEMENT_SAMPLE_COUNT=$($orderedSamples.Count)"
+          if ($orderedSamples.Count -gt 0) {
+            $first = $orderedSamples[0]
+            $last = $orderedSamples[-1]
+            $minAsk = ($orderedSamples | Measure-Object -Property ask -Minimum).Minimum
+            $minExit = ($orderedSamples | Measure-Object -Property exitSidePrice -Minimum).Minimum
+            $maxFavorableObserved = $ObservedEntry - [double]$minExit
+            Write-Host "SAMPLE_FIRST_TS=$($first.timestamp)"
+            Write-Host "SAMPLE_LAST_TS=$($last.timestamp)"
+            Write-Host "SAMPLE_MIN_ASK=$minAsk"
+            Write-Host "SAMPLE_MIN_EXIT_SIDE=$minExit"
+            Write-Host "SAMPLE_MAX_FAVORABLE=$maxFavorableObserved"
+            Write-Host "SAMPLE_BE_THRESHOLD_REACHED=$([bool]([double]$minExit -le $BeAskThreshold + 1e-9))"
+
+            $near = @($orderedSamples | Sort-Object { [math]::Abs([double]$_.exitSidePrice - $BeAskThreshold) } | Select-Object -First 12)
+            foreach ($s in $near) {
+              $iso = [DateTimeOffset]::FromUnixTimeMilliseconds($s.timestamp).UtcDateTime.ToString('o')
+              Write-Host ("SAMPLE_NEAR_BE|ts={0}|utc={1}|bid={2}|ask={3}|exitSide={4}|path={5}" -f $s.timestamp,$iso,$s.bid,$s.ask,$s.exitSidePrice,$s.path)
+            }
+
+            $accountPath = Join-Path $ProductionRoot '.runtime\phase7c-account-mode.json'
+            $lib = Join-Path $ProductionRoot 'scripts\lib\phase7c-account-mode.ps1'
+            . $lib
+            $accountState = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+            $envFile = [string]$accountState.envFile
+            if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProductionRoot $envFile }
+            $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+            $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+            $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+
+            $fromMs = [long]$first.timestamp - 5000
+            $toMs = [long]$last.timestamp + 5000
+            try {
+              $tickUri = "$bridgeBase/v1/history/ticks/XAUUSD?fromMs=$fromMs&toMs=$toMs"
+              $tickResponse = Invoke-RestMethod -Uri $tickUri -Headers $headers -Method Get -TimeoutSec 30
+              $ticks = @($tickResponse)
+              Write-Host "BROKER_TICK_COUNT=$($ticks.Count)"
+              if ($ticks.Count -gt 0) {
+                $minBrokerAsk = ($ticks | Measure-Object -Property ask -Minimum).Minimum
+                $minBrokerBid = ($ticks | Measure-Object -Property bid -Minimum).Minimum
+                Write-Host "BROKER_MIN_BID=$minBrokerBid"
+                Write-Host "BROKER_MIN_ASK=$minBrokerAsk"
+                Write-Host "BROKER_BE_ASK_THRESHOLD_REACHED=$([bool]([double]$minBrokerAsk -le $BeAskThreshold + 1e-9))"
+                Write-Host "BROKER_MAX_FAVORABLE_ASK=$($ObservedEntry - [double]$minBrokerAsk)"
+              }
+            } catch {
+              Write-Host "BROKER_TICK_QUERY=UNAVAILABLE"
+              Write-Host "BROKER_TICK_QUERY_ERROR=$($_.Exception.Message)"
+            }
+          }
+
+          $managementThresholdSeen = $false
+          if ($orderedSamples.Count -gt 0) {
+            $managementThresholdSeen = [bool]((($orderedSamples | Measure-Object -Property exitSidePrice -Minimum).Minimum) -le $BeAskThreshold + 1e-9)
+          }
+          $beSucceeded = @($beEvents | Where-Object { $_.event -in @('PLUS6_SL_TO_ENTRY','PLUS6_SL_ALREADY_AT_OR_TIGHTER') }).Count -gt 0
+          $beRejected = @($beEvents | Where-Object { $_.event -eq 'PLUS6_SL_REJECTED' }).Count -gt 0
+
+          if ($managementThresholdSeen -and -not $beSucceeded -and -not $beRejected) {
+            Write-Host 'FORENSIC_VERDICT=BE_TRIGGER_OBSERVED_BUT_NO_BE_EVENT'
+          } elseif ($managementThresholdSeen -and $beRejected) {
+            Write-Host 'FORENSIC_VERDICT=BE_TRIGGER_OBSERVED_BROKER_REJECTED'
+          } elseif ($managementThresholdSeen -and $beSucceeded) {
+            Write-Host 'FORENSIC_VERDICT=BE_TRIGGER_AND_BE_APPLY_EVIDENCE_PRESENT'
+          } else {
+            Write-Host 'FORENSIC_VERDICT=MANAGEMENT_SAMPLE_DID_NOT_REACH_SELL_ASK_PLUS6'
+          }
+
+          Write-Host 'FORENSIC_COMPLETE=TRUE'
