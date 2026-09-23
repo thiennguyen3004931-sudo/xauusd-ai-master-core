@@ -1,0 +1,47 @@
+name: PR67 Monitor Contract Exact-Head Validation
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/pr67-monitor-contract-validation.yml"
+
+concurrency:
+  group: pr67-monitor-contract-validation
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: pr67-monitor-contract
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact PR67 head
+        uses: actions/checkout@v4
+        with:
+          ref: 8cef6f17a79ccc97a5f8d2acb931ba05e625144f
+          fetch-depth: 0
+
+      - name: Verify exact head
+        shell: powershell
+        run: |
+          $head=(git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "PR67_VALIDATION_HEAD=$head"
+          if($head -ne "8cef6f17a79ccc97a5f8d2acb931ba05e625144f"){ throw "Exact PR67 head mismatch." }
+
+      - name: Monitor source contract
+        shell: powershell
+        run: |
+          .\scripts\test-auto-live-event-monitor-source.ps1
+          if($LASTEXITCODE -ne 0){ exit $LASTEXITCODE }
+
+      - name: Diff hygiene
+        shell: powershell
+        run: |
+          git diff --check 0d4c91833e3cb05556002b4793525f2f578399ee...HEAD
+          if($LASTEXITCODE -ne 0){ exit $LASTEXITCODE }
+          Write-Host "PR67_DIFF_HYGIENE=PASS"
