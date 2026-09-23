@@ -79,6 +79,36 @@ def settings(ledger_path: Path, *, live: bool = False) -> Settings:
     )
 
 
+class CandleMt5(CountingRealMt5):
+    TIMEFRAME_M1 = 1
+    TIMEFRAME_M5 = 5
+    TIMEFRAME_M15 = 15
+    TIMEFRAME_M30 = 30
+    TIMEFRAME_H1 = 60
+    TIMEFRAME_H4 = 240
+    TIMEFRAME_D1 = 1440
+
+    def symbol_info(self, symbol):
+        return SimpleNamespace(symbol=symbol, visible=True, point=0.01)
+
+    def symbol_select(self, _symbol, _select):
+        return True
+
+    def copy_rates_from_pos(self, _symbol, _timeframe, _start_pos, count):
+        return [
+            {
+                "time": 1_700_000_000 + index * 900,
+                "open": 2400.0,
+                "high": 2401.0,
+                "low": 2399.0,
+                "close": 2400.5,
+                "tick_volume": 100,
+                "spread": 10,
+            }
+            for index in range(count)
+        ]
+
+
 class HealthLockContentionTests(unittest.TestCase):
     def test_guarded_live_health_probes_terminal_and_account_only_once(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -105,6 +135,45 @@ class HealthLockContentionTests(unittest.TestCase):
                 1,
                 "LIVE /health must not repeat account_info after the base health probe.",
             )
+            gateway.stop()
+
+
+    def test_candles_fail_fast_instead_of_waiting_for_busy_gateway_without_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ledger_path = root / "ledger.sqlite3"
+            gateway = Mt5Gateway(
+                settings(ledger_path, live=False),
+                IdempotencyLedger(ledger_path),
+                CandleMt5(),
+            )
+            self.assertTrue(gateway.start())
+
+            gateway._lock.acquire()
+            result = []
+            error = []
+
+            def call_candles():
+                try:
+                    result.extend(gateway.candles("XAUUSD", "M15", 320))
+                except Exception as exc:
+                    error.append(exc)
+
+            worker = threading.Thread(target=call_candles, daemon=True)
+            try:
+                worker.start()
+                worker.join(timeout=1.25)
+                self.assertFalse(
+                    worker.is_alive(),
+                    "RED_TARGET: an uncached candle refresh must fail fast before the HTTP client timeout when the MT5 gateway lock is busy.",
+                )
+            finally:
+                gateway._lock.release()
+                worker.join(timeout=1.0)
+
+            self.assertEqual(result, [])
+            self.assertEqual(len(error), 1)
+            self.assertEqual(getattr(error[0], "code", None), "CANDLES_GATEWAY_BUSY")
             gateway.stop()
 
     def test_health_uses_recent_snapshot_instead_of_waiting_behind_busy_gateway_lock(self):
