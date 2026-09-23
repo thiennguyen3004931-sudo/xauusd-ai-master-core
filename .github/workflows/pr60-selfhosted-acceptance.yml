@@ -1,0 +1,91 @@
+name: PR60 Self-Hosted Acceptance
+
+on:
+  push:
+    branches:
+      - ops/pr60-selfhosted-acceptance
+    paths:
+      - ".github/workflows/pr60-selfhosted-acceptance.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr60-selfhosted-acceptance
+  cancel-in-progress: true
+
+jobs:
+  pr60-acceptance:
+    name: pr60-position-protection-acceptance-self-hosted
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact PR60 head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: 4e4e3f3f708507f383222f1ee261dd24f23f141d
+          clean: true
+
+      - name: Verify exact candidate provenance
+        shell: powershell
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "PR60_ACCEPTANCE_HEAD=$head"
+          if ($head -ne '4e4e3f3f708507f383222f1ee261dd24f23f141d') {
+            throw "PR60_ACCEPTANCE_HEAD_MISMATCH"
+          }
+
+      - name: Python runtime
+        shell: powershell
+        run: |
+          python --version
+          if ($LASTEXITCODE -ne 0) { throw "PYTHON_NOT_AVAILABLE" }
+          python -m pip --version
+          if ($LASTEXITCODE -ne 0) { throw "PIP_NOT_AVAILABLE" }
+
+      - name: Install bridge test dependency
+        shell: powershell
+        working-directory: packages/mt5-broker/bridge
+        run: |
+          python -m pip install "pydantic>=2.12,<3"
+          if ($LASTEXITCODE -ne 0) { throw "PYDANTIC_INSTALL_FAILED" }
+
+      - name: Compile MT5 bridge
+        shell: powershell
+        working-directory: packages/mt5-broker/bridge
+        run: |
+          python -m compileall -q mt5_bridge tests
+          if ($LASTEXITCODE -ne 0) { throw "MT5_BRIDGE_COMPILE_FAILED" }
+
+      - name: Run MT5 bridge unit suite
+        shell: powershell
+        working-directory: packages/mt5-broker/bridge
+        run: |
+          $env:PYTHONPATH = (Get-Location).Path
+          python -m unittest discover -s tests -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "MT5_BRIDGE_TESTS_FAILED" }
+
+      - name: Run Trend Fixed TP lifecycle contract
+        shell: powershell
+        run: |
+          node scripts/phase7c-fixed-tp-trend-exit.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "TREND_FIXED_TP_LIFECYCLE_FAILED" }
+
+      - name: Run Sideway Fixed TP lifecycle contract
+        shell: powershell
+        run: |
+          node scripts/phase7c-fixed-tp-sideway-exit.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "SIDEWAY_FIXED_TP_LIFECYCLE_FAILED" }
+
+      - name: Acceptance summary
+        shell: powershell
+        run: |
+          Write-Host "PR60_SELFHOSTED_ACCEPTANCE=PASS"
+          Write-Host "PR60_CANDIDATE=4e4e3f3f708507f383222f1ee261dd24f23f141d"
+          Write-Host "PRODUCTION_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "AUTO_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
