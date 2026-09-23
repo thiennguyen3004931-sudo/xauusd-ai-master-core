@@ -1,0 +1,152 @@
+name: Incident 305091979 Read-Only Witness
+
+on:
+  push:
+    branches:
+      - ops/incident-305091979-readonly-witness
+    paths:
+      - ".github/workflows/incident-305091979-readonly-witness.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incident-305091979-readonly-witness
+  cancel-in-progress: true
+
+jobs:
+  witness:
+    name: incident-305091979-readonly-witness-self-hosted
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+
+      - name: Capture LIVE runtime state and incident evidence
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+          INCIDENT_TICKET: "305091979"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Read-BridgeArray {
+            param([string]$Uri, [hashtable]$Headers)
+            $response = Invoke-WebRequest -UseBasicParsing -Uri $Uri -Headers $Headers -Method Get -TimeoutSec 10
+            if ([string]::IsNullOrWhiteSpace($response.Content)) { return }
+            $parsed = $response.Content | ConvertFrom-Json
+            foreach ($item in @($parsed)) { if ($null -ne $item) { Write-Output $item } }
+          }
+
+          $prodHead = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodDirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+          $accountPath = Join-Path $env:PRODUCTION_ROOT '.runtime\phase7c-account-mode.json'
+          $lib = Join-Path $env:PRODUCTION_ROOT 'scripts\lib\phase7c-account-mode.ps1'
+          . $lib
+          $accountState = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+          $envFile = [string]$accountState.envFile
+          if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $env:PRODUCTION_ROOT $envFile }
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+          $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $bridgeHeaders = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+
+          $bot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $auto = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-auto-activation/status' -Method Get -TimeoutSec 10
+          $regime = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/live-regime?symbol=XAUUSD&count=320' -Method Get -TimeoutSec 12
+          $decision = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/decision-monitor?symbol=XAUUSD' -Method Get -TimeoutSec 12
+          $positions = @(Read-BridgeArray -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $bridgeHeaders)
+          $orders = @(Read-BridgeArray -Uri "$bridgeBase/v1/orders?symbol=XAUUSD" -Headers $bridgeHeaders)
+          $bridgeHealth = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers $bridgeHeaders -Method Get -TimeoutSec 10
+
+          Write-Host "INCIDENT_PRODUCTION_HEAD=$prodHead"
+          Write-Host "INCIDENT_PRODUCTION_DIRTY_COUNT=$($prodDirty.Count)"
+          Write-Host "INCIDENT_BOT_MODE=$($bot.state.mode)"
+          Write-Host "INCIDENT_BOT_MODE_UPDATED_BY=$($bot.state.updatedBy)"
+          Write-Host "INCIDENT_BOT_MODE_UPDATED_AT=$($bot.state.updatedAt)"
+          Write-Host "INCIDENT_LIFECYCLE_RUNNING=$($life.running)"
+          Write-Host "INCIDENT_LIFECYCLE_READY=$($life.ready)"
+          Write-Host "INCIDENT_ARM_STATUS=$($cap.liveArmStatus)"
+          Write-Host "INCIDENT_ARMED=$($cap.liveExecutionArmed)"
+          Write-Host "INCIDENT_AUTO_APPROVED=$($auto.approved)"
+          Write-Host "INCIDENT_RUNTIME_SOURCE=$($auto.runtimeSourceOverall)"
+          Write-Host "INCIDENT_RUNTIME_SOURCE_COMMIT=$($auto.runtimeSourceCommit)"
+          Write-Host "INCIDENT_REGIME=$($regime.regime)"
+          Write-Host "INCIDENT_RECOMMENDED_MODE=$($regime.recommendedMode)"
+          Write-Host "INCIDENT_EFFECTIVE_STRATEGY=$($decision.mode.effectiveStrategy)"
+          Write-Host "INCIDENT_BRIDGE_HEALTH=$($bridgeHealth.status)"
+          Write-Host "INCIDENT_POSITION_COUNT=$($positions.Count)"
+          Write-Host "INCIDENT_PENDING_ORDER_COUNT=$($orders.Count)"
+
+          foreach ($p in $positions) {
+            Write-Host ("INCIDENT_POSITION=" + (($p | ConvertTo-Json -Depth 8 -Compress)))
+          }
+          foreach ($o in $orders) {
+            Write-Host ("INCIDENT_ORDER=" + (($o | ConvertTo-Json -Depth 8 -Compress)))
+          }
+
+          Write-Host "=== DECISION_POSITION ==="
+          if ($null -ne $decision.position) { Write-Host ($decision.position | ConvertTo-Json -Depth 12 -Compress) }
+          Write-Host "=== RECENT_DECISIONS ==="
+          foreach ($r in @($decision.recentDecisions | Select-Object -First 12)) {
+            Write-Host ($r | ConvertTo-Json -Depth 12 -Compress)
+          }
+
+          Write-Host "=== EXECUTOR_PROCESSES ==="
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.CommandLine -match 'phase7c|phase7b-demo-controller|trend-controller|sideway-controller' } |
+            Select-Object ProcessId, ParentProcessId, CreationDate, CommandLine |
+            ForEach-Object { Write-Host ($_ | ConvertTo-Json -Compress) }
+
+          Write-Host "=== PID_AND_RUNTIME_FILES ==="
+          $runtimeRoots = @(
+            (Join-Path $env:PRODUCTION_ROOT '.runtime\phase7c-executors'),
+            (Join-Path $env:PRODUCTION_ROOT '.runtime\phase7b-live-forward'),
+            (Join-Path $env:PRODUCTION_ROOT '.runtime')
+          )
+          foreach ($root in $runtimeRoots) {
+            if (Test-Path $root) {
+              Get-ChildItem -LiteralPath $root -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match 'pid|runtime|state|status' } |
+                Select-Object FullName, LastWriteTime, Length |
+                ForEach-Object { Write-Host ($_ | ConvertTo-Json -Compress) }
+            }
+          }
+
+          Write-Host "=== INCIDENT_LOG_MATCHES ==="
+          $patterns = @(
+            $env:INCIDENT_TICKET,
+            'PHASE7C_TREND_ENTRY_ALLOWED',
+            'PHASE7C_TREND_ENTRY_BLOCKED',
+            'ENTRY_SUBMIT',
+            'ENTRY_PENDING_DURABLE',
+            'ENTRY_FILLED',
+            'PENDING_ENTRY_RECOVERED',
+            'FIXED_TP_BROKER',
+            'ENTRY_MODE_BLOCK',
+            'PAUSE_MODE_BLOCKS_NEW_ENTRY',
+            'PHASE7C_MODE_CHANGED'
+          )
+          $files = Get-ChildItem -LiteralPath (Join-Path $env:PRODUCTION_ROOT '.runtime') -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Length -le 50MB -and $_.Extension -in @('.log','.json','.jsonl','.txt') }
+          foreach ($file in $files) {
+            try {
+              $matches = Select-String -LiteralPath $file.FullName -Pattern $patterns -SimpleMatch -ErrorAction Stop
+              foreach ($m in @($matches | Select-Object -Last 80)) {
+                Write-Host ("INCIDENT_LOG=" + $file.FullName + "|" + $m.LineNumber + "|" + $m.Line)
+              }
+            } catch {}
+          }
+
+          Write-Host "INCIDENT_READ_ONLY_WITNESS=PASS"
+          Write-Host "PRODUCTION_HTTP_METHODS=GET_ONLY"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
