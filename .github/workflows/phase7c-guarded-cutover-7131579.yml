@@ -1,0 +1,177 @@
+name: Phase7C Guarded Cutover 7131579
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/phase7c-guarded-cutover-7131579.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase7c-guarded-cutover-7131579
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    name: guarded-cutover-7131579
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 20
+
+    steps:
+      - name: Guarded production cutover
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Root = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $ControlApi = "http://127.0.0.1:3711"
+          $OldCommit = "505fc1ff6d2cf58039b001352bdee2cdad44637a"
+          $AcceptedHead = "ebc4a5eee66cb803f232fd9dd5434f5dceb58686"
+          $TargetCommit = "7131579ef0c3371b64d7fd2ede4e74374431b81c"
+
+          Write-Host "CUTOVER_SCOPE=PR64_WEB_API_BUILD_PRIME"
+          Write-Host "CUTOVER_TARGET=$TargetCommit"
+          Write-Host "CUTOVER_AUTO_ENABLE=NONE"
+          Write-Host "CUTOVER_ARM_TARGET=DISARMED"
+          Write-Host "CUTOVER_MODE_TARGET=PAUSE"
+          Write-Host "CUTOVER_ORDER_MUTATION=NONE"
+          Write-Host "CUTOVER_POSITION_MUTATION=NONE"
+          Write-Host "CUTOVER_LIVE_TEST_ORDER=NONE"
+          Write-Host "CUTOVER_BRIDGE_RESTART=NONE"
+
+          function Read-BridgeContext {
+            $accountPath = Join-Path $Root ".runtime\phase7c-account-mode.json"
+            $lib = Join-Path $Root "scripts\lib\phase7c-account-mode.ps1"
+            . $lib
+            $account = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+            if (([string]$account.accountMode).Trim().ToUpperInvariant() -ne "LIVE") {
+              throw "Selected account must remain LIVE."
+            }
+            $envFile = [string]$account.envFile
+            if (-not [IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $Root $envFile }
+            $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+            [pscustomobject]@{
+              Base = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+              Headers = @{"x-mt5-api-key"=$envInfo.apiKey}
+            }
+          }
+
+          function Read-Count([string]$Base,[hashtable]$Headers,[string]$Path) {
+            $response = Invoke-WebRequest -Uri "$Base$Path" -Headers $Headers -Method Get -UseBasicParsing -TimeoutSec 8
+            $raw = ([string]$response.Content).Trim()
+            if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq "[]") { return 0 }
+            @($raw | ConvertFrom-Json | Where-Object { $null -ne $_ }).Count
+          }
+
+          function Assert-Safe([string]$Stage,[object]$Ctx) {
+            $mode = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+            $cap = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+            $health = Invoke-RestMethod -Uri "$($Ctx.Base)/health" -Headers $Ctx.Headers -Method Get -TimeoutSec 8
+            $positions = Read-Count $Ctx.Base $Ctx.Headers "/v1/positions?symbol=XAUUSD"
+            $orders = Read-Count $Ctx.Base $Ctx.Headers "/v1/orders?symbol=XAUUSD"
+
+            Write-Host "$($Stage)_MODE=$($mode.state.mode)"
+            Write-Host "$($Stage)_ARM=$($cap.liveArmStatus)"
+            Write-Host "$($Stage)_LIVE_EXECUTION_ARMED=$($cap.liveExecutionArmed)"
+            Write-Host "$($Stage)_BRIDGE_STATUS=$($health.status)"
+            Write-Host "$($Stage)_BRIDGE_CONNECTED=$($health.connected)"
+            Write-Host "$($Stage)_BRIDGE_CONFIGURED_MODE=$($health.configuredAccountMode)"
+            Write-Host "$($Stage)_BROKER_MODE=$($health.accountMode)"
+            Write-Host "$($Stage)_POSITIONS=$positions"
+            Write-Host "$($Stage)_PENDING_ORDERS=$orders"
+
+            if (([string]$mode.state.mode).Trim().ToUpperInvariant() -ne "PAUSE") { throw "$Stage requires PAUSE." }
+            if (([string]$cap.liveArmStatus).Trim().ToUpperInvariant() -ne "DISARMED" -or [bool]$cap.liveExecutionArmed) { throw "$Stage requires DISARMED." }
+            if (-not [bool]$health.connected -or [string]$health.status -ne "ok") { throw "$Stage bridge is not healthy." }
+            if ([string]$health.configuredAccountMode -ne "LIVE" -or [string]$health.accountMode -ne "real") { throw "$Stage bridge is not LIVE/real." }
+            if ($positions -ne 0 -or $orders -ne 0) { throw "$Stage requires flat XAUUSD broker." }
+            return [string]$health.bridgeSessionId
+          }
+
+          $branch = (& git -C $Root branch --show-current).Trim()
+          $head = (& git -C $Root rev-parse HEAD).Trim().ToLowerInvariant()
+          $dirty = @(& git -C $Root status --porcelain)
+          Write-Host "PRECUTOVER_BRANCH=$branch"
+          Write-Host "PRECUTOVER_HEAD=$head"
+          Write-Host "PRECUTOVER_DIRTY_COUNT=$($dirty.Count)"
+          if ($branch -ne "main") { throw "Production branch must be main." }
+          if ($head -notin @($OldCommit,$TargetCommit)) { throw "Unexpected production head $head." }
+          if ($dirty.Count -ne 0) { throw "Production worktree must be clean." }
+
+          $ctx = Read-BridgeContext
+          $bridgeSession = Assert-Safe "PRECUTOVER" $ctx
+          Write-Host "PRECUTOVER_SAFETY=PASS"
+          Write-Host "PRECUTOVER_BRIDGE_SESSION=$bridgeSession"
+
+          Push-Location $Root
+          try {
+            & git fetch origin main
+            if ($LASTEXITCODE -ne 0) { throw "git fetch origin main failed." }
+
+            $remoteLine = [string](& git ls-remote --heads origin refs/heads/main)
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remoteLine)) { throw "Could not resolve origin/main." }
+            $remote = ($remoteLine -split "\s+")[0].Trim().ToLowerInvariant()
+            Write-Host "REMOTE_MAIN=$remote"
+            if ($remote -ne $TargetCommit) { throw "origin/main moved; refusing fixed-target cutover." }
+
+            & git diff --quiet $AcceptedHead $TargetCommit --
+            if ($LASTEXITCODE -ne 0) { throw "Merge commit tree differs from accepted PR head." }
+            Write-Host "MERGE_TREE_EQUALS_ACCEPTED_HEAD=PASS"
+
+            & git merge-base --is-ancestor $head $TargetCommit
+            if ($LASTEXITCODE -ne 0) { throw "Current production head is not an ancestor of target." }
+
+            if ($head -ne $TargetCommit) {
+              & git merge --ff-only $TargetCommit
+              if ($LASTEXITCODE -ne 0) { throw "Fast-forward to target failed." }
+            }
+          } finally {
+            Pop-Location
+          }
+
+          $afterHead = (& git -C $Root rev-parse HEAD).Trim().ToLowerInvariant()
+          $afterDirty = @(& git -C $Root status --porcelain)
+          Write-Host "SOURCE_CUTOVER_HEAD=$afterHead"
+          Write-Host "SOURCE_CUTOVER_DIRTY_COUNT=$($afterDirty.Count)"
+          if ($afterHead -ne $TargetCommit -or $afterDirty.Count -ne 0) { throw "Source cutover verification failed." }
+          Write-Host "SOURCE_FAST_FORWARD=PASS"
+
+          # PR64 does not modify bridge source. Preserve bridge session and let the
+          # canonical guarded recovery exercise the corrected Web/API deploy path.
+          $guarded = Join-Path $Root "scripts\recover-phase7c-runtime-ready-stable-deploy-guarded-local.ps1"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $guarded -ExpectedCommit $TargetCommit -TimeoutSeconds 120
+          if ($LASTEXITCODE -ne 0) { throw "Canonical guarded runtime recovery failed with exit code $LASTEXITCODE." }
+          Write-Host "RUNTIME_GUARDED_RECOVERY=PASS"
+
+          $ctx = Read-BridgeContext
+          $finalSession = Assert-Safe "FINAL" $ctx
+          if ($finalSession -ne $bridgeSession) { throw "Bridge session changed even though PR64 has no bridge source delta." }
+          Write-Host "BRIDGE_SESSION_PRESERVED=PASS"
+
+          $att = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/runtime-source-attestation/" -Method Get -TimeoutSec 10
+          $attCommit = ([string]$att.deployment.sourceCommit).Trim().ToLowerInvariant()
+          Write-Host "FINAL_SOURCE_ATTESTATION_OVERALL=$($att.overall)"
+          Write-Host "FINAL_SOURCE_ATTESTATION_COMMIT=$attCommit"
+          if ([string]$att.overall -ne "EXACT_MATCH" -or $attCommit -ne $TargetCommit) {
+            throw "Runtime source attestation is not exact target."
+          }
+
+          $ui = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c-ui/mt5?symbol=XAUUSD" -Method Get -TimeoutSec 10
+          Write-Host "FINAL_UI_ACCOUNT_MODE=$($ui.account.accountMode)"
+          Write-Host "FINAL_UI_MT5_STATUS=$($ui.mt5.status)"
+
+          $finalHead = (& git -C $Root rev-parse HEAD).Trim().ToLowerInvariant()
+          $finalDirty = @(& git -C $Root status --porcelain)
+          Write-Host "FINAL_PRODUCTION_HEAD=$finalHead"
+          Write-Host "FINAL_PRODUCTION_DIRTY_COUNT=$($finalDirty.Count)"
+          if ($finalHead -ne $TargetCommit -or $finalDirty.Count -ne 0) { throw "Final production source verification failed." }
+
+          Write-Host "CUTOVER_STATUS=PASS"
+          Write-Host "CUTOVER_FINAL_SOURCE=$TargetCommit"
+          Write-Host "CUTOVER_FINAL_MODE=PAUSE"
+          Write-Host "CUTOVER_FINAL_ARM=DISARMED"
+          Write-Host "CUTOVER_FINAL_POSITIONS=0"
+          Write-Host "CUTOVER_FINAL_PENDING_ORDERS=0"
+          Write-Host "CUTOVER_NEXT_ACTION=READ_ONLY_OBSERVABILITY"
