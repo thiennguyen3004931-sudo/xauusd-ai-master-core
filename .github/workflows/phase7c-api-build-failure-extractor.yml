@@ -1,0 +1,78 @@
+name: Phase7C API Build Failure Extractor
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/phase7c-api-build-failure-extractor.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    name: api-build-failure-extractor
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Checkout extractor source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Extract production API failure read-only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          $Root="F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $Runtime=Join-Path $Root ".runtime"
+          $out=Join-Path $Runtime "phase7b-web\api.out.log"
+          $err=Join-Path $Runtime "phase7b-web\api.err.log"
+
+          Write-Host "EXTRACT_READ_ONLY=TRUE"
+          Write-Host "PRODUCTION_HEAD=$((& git -C $Root rev-parse HEAD).Trim())"
+          Write-Host "ARM_FILE_PRESENT=$(Test-Path -LiteralPath (Join-Path $Runtime 'phase7c-live-arm.json'))"
+
+          foreach($name in @("supervisor","trend","sideway","telegram-mode","regime-notifier")){
+            $p=Join-Path $Runtime "phase7c-executors\$name.pid"
+            if(Test-Path -LiteralPath $p){
+              $raw=(Get-Content -LiteralPath $p -Raw).Trim()
+              $pidNum=0
+              $valid=[int]::TryParse($raw,[ref]$pidNum)
+              $alive=$valid -and $null -ne (Get-Process -Id $pidNum -ErrorAction SilentlyContinue)
+              Write-Host "EXECUTOR_PID=$name|PID=$raw|ALIVE=$alive"
+            } else {
+              Write-Host "EXECUTOR_PID=$name|MISSING"
+            }
+          }
+
+          foreach($path in @($out,$err)){
+            if(-not (Test-Path -LiteralPath $path)){ Write-Host "LOG_MISSING=$path"; continue }
+            Write-Host "LOG_SIZE=$path|$((Get-Item -LiteralPath $path).Length)"
+            Write-Host "----- MATCHES_BEGIN $path -----"
+            $patterns=@(
+              "error TS","TS[0-9]{4}","ERR_PNPM","ELIFECYCLE","failed","Cannot find","does not exist",
+              "not assignable","Expected .* arguments","Property .* does not exist","SyntaxError","ReferenceError",
+              "TypeError","ERR_MODULE","MODULE_NOT_FOUND","Build failed","exited \(1\)"
+            )
+            foreach($pattern in $patterns){
+              Select-String -LiteralPath $path -Pattern $pattern -Context 5,10 -ErrorAction SilentlyContinue |
+                Select-Object -Last 20 |
+                ForEach-Object {
+                  Write-Host "PATTERN=$pattern|LINE=$($_.LineNumber)"
+                  foreach($pre in @($_.Context.PreContext)){ Write-Host $pre }
+                  Write-Host $_.Line
+                  foreach($post in @($_.Context.PostContext)){ Write-Host $post }
+                }
+            }
+            Write-Host "----- MATCHES_END $path -----"
+            Write-Host "----- TAIL300_BEGIN $path -----"
+            Get-Content -LiteralPath $path -Tail 300 -ErrorAction SilentlyContinue |
+              ForEach-Object {
+                ([string]$_) -replace '(?i)(api[_-]?key|password|token)(=|\s+)("[^"]*"|\S+)','$1$2REDACTED'
+              } | Write-Host
+            Write-Host "----- TAIL300_END $path -----"
+          }
+
+          Write-Host "EXTRACT_STATUS=COMPLETE"
