@@ -220,7 +220,11 @@ try {
     throw "Phase7C MT5 broker build failed with exit code $LASTEXITCODE. Runtime was not restarted."
   }
 
-  & $pnpm.Source --filter '@xauusd/api...' build
+  # Prime the exact root Turbo build command used again by the API runtime.
+  # This keeps the runtime's mandatory build-before-start contract while ensuring
+  # the subsequent task start consumes a warm Turbo cache instead of spending the
+  # dashboard readiness window on a duplicate cold dependency-graph build.
+  & $pnpm.Source build '--filter=@xauusd/api...'
   if ($LASTEXITCODE -ne 0) {
     throw "Phase7C API dependency graph build failed with exit code $LASTEXITCODE. Runtime was not restarted."
   }
