@@ -3,7 +3,7 @@ param(
   [string]$BridgeEnv = "",
   [int]$ApiPort = 3711,
   [int]$WebPort = 5717,
-  [int]$StartupTimeoutSeconds = 90
+  [int]$StartupTimeoutSeconds = 240
 )
 
 $ErrorActionPreference = "Stop"
