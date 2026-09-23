@@ -1,0 +1,66 @@
+name: One-Time Production Cutover a02fd82e
+
+on:
+  push:
+    branches:
+      - ops/cutover-a02fd82e-20260924
+    paths:
+      - .github/workflows/one-time-cutover-a02fd82e.yml
+
+concurrency:
+  group: production-cutover-a02fd82e
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    name: guarded-production-cutover-a02fd82e
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout exact approved target as separate candidate
+        uses: actions/checkout@v4
+        with:
+          ref: a02fd82e87561891b0830da324da7f69f70b3754
+          fetch-depth: 0
+          path: candidate
+
+      - name: Candidate exact source guard
+        shell: powershell
+        run: |
+          $expected = 'a02fd82e87561891b0830da324da7f69f70b3754'
+          git -C candidate checkout -B main $expected
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $head = (git -C candidate rev-parse HEAD).Trim().ToLowerInvariant()
+          $branch = (git -C candidate branch --show-current).Trim()
+          $dirty = @(git -C candidate status --porcelain)
+          Write-Host "CUTOVER_CANDIDATE_HEAD=$head"
+          Write-Host "CUTOVER_CANDIDATE_BRANCH=$branch"
+          if ($head -ne $expected -or $branch -ne 'main' -or $dirty.Count -ne 0) { throw 'Candidate exact-source guard failed.' }
+          $treeish = $expected + ':scripts/rollout-phase7c-production-source-transition-local.ps1'
+          $blob = (git -C candidate rev-parse $treeish).Trim().ToLowerInvariant()
+          Write-Host "CUTOVER_HELPER_BLOB=$blob"
+          if ($blob -ne 'd8fb26409df5ddecdf5353ab0fdf42cbd8d3500f') { throw 'Pinned rollout helper blob mismatch.' }
+
+      - name: Read-only M8 preflight
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\candidate\scripts\security\preflight-private-cutover.ps1 -ExpectedCommit a02fd82e87561891b0830da324da7f69f70b3754 -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Guarded production source transition
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\candidate\scripts\rollout-phase7c-production-source-transition-local.ps1 -ProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master' -ExpectedCurrentCommit 5ec6ccd374ea929ddaee1ed669e786109a0d71b8 -TargetCommit a02fd82e87561891b0830da324da7f69f70b3754 -ExpectedRemoteMainCommit a02fd82e87561891b0830da324da7f69f70b3754 -ExpectedHelperBlobSha1 d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f -ExpectedInitialArm DISARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Post-cutover exact-source and safety proof
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\candidate\scripts\security\preflight-private-cutover.ps1 -ExpectedCommit a02fd82e87561891b0830da324da7f69f70b3754 -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host 'CUTOVER_POST_STATE=PAUSE_DISARMED_FLAT'
+          Write-Host 'CUTOVER_LIVE_TEST_ORDER=NONE'
