@@ -1,0 +1,198 @@
+name: Phase7C Guarded Source Cutover 505fc1ff
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/phase7c-guarded-source-cutover-505fc1ff.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    name: guarded-source-cutover
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout cutover control source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Fast-forward and guarded runtime cutover
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProductionRoot = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $OldCommit = "4aeff4e62c5acecb85c8c344184f962fd7121928"
+          $TargetCommit = "505fc1ff6d2cf58039b001352bdee2cdad44637a"
+          $BridgeTask = "XAUUSD-Phase7C-Bridge"
+          $ControlApi = "http://127.0.0.1:3711"
+
+          Write-Host "CUTOVER_TARGET=$TargetCommit"
+          Write-Host "CUTOVER_STRATEGY=FAST_FORWARD_ONLY"
+          Write-Host "CUTOVER_FINAL_MODE_TARGET=PAUSE"
+          Write-Host "CUTOVER_FINAL_ARM_TARGET=DISARMED"
+          Write-Host "CUTOVER_AUTO_ENABLE=NONE"
+          Write-Host "CUTOVER_ORDER_MUTATION=NONE"
+          Write-Host "CUTOVER_POSITION_MUTATION=NONE"
+          Write-Host "CUTOVER_LIVE_TEST_ORDER=NONE"
+
+          function Read-Count([string]$Base,[hashtable]$Headers,[string]$Path) {
+            $response = Invoke-WebRequest -Uri "$Base$Path" -Headers $Headers -Method Get -UseBasicParsing -TimeoutSec 8
+            $raw = ([string]$response.Content).Trim()
+            if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq "[]") { return 0 }
+            return @($raw | ConvertFrom-Json | Where-Object { $null -ne $_ }).Count
+          }
+
+          function Get-Context {
+            $accountPath = Join-Path $ProductionRoot ".runtime\phase7c-account-mode.json"
+            $lib = Join-Path $ProductionRoot "scripts\lib\phase7c-account-mode.ps1"
+            . $lib
+            $account = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+            if (([string]$account.accountMode).Trim().ToUpperInvariant() -ne "LIVE") { throw "Selected account is not LIVE." }
+            $envFile = [string]$account.envFile
+            if (-not [IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProductionRoot $envFile }
+            $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+            return [pscustomobject]@{
+              Base = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+              Headers = @{"x-mt5-api-key"=$envInfo.apiKey}
+            }
+          }
+
+          function Assert-SafeState([string]$Stage,[object]$Ctx) {
+            $mode = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+            $cap = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+            $health = Invoke-RestMethod -Uri "$($Ctx.Base)/health" -Headers $Ctx.Headers -Method Get -TimeoutSec 8
+            $positions = Read-Count $Ctx.Base $Ctx.Headers "/v1/positions?symbol=XAUUSD"
+            $orders = Read-Count $Ctx.Base $Ctx.Headers "/v1/orders?symbol=XAUUSD"
+            Write-Host "$($Stage)_MODE=$($mode.state.mode)"
+            Write-Host "$($Stage)_ARM=$($cap.liveArmStatus)"
+            Write-Host "$($Stage)_LIVE_EXECUTION_ARMED=$($cap.liveExecutionArmed)"
+            Write-Host "$($Stage)_BRIDGE_STATUS=$($health.status)"
+            Write-Host "$($Stage)_BRIDGE_CONNECTED=$($health.connected)"
+            Write-Host "$($Stage)_BRIDGE_CONFIGURED_MODE=$($health.configuredAccountMode)"
+            Write-Host "$($Stage)_BROKER_MODE=$($health.accountMode)"
+            Write-Host "$($Stage)_POSITIONS=$positions"
+            Write-Host "$($Stage)_PENDING_ORDERS=$orders"
+            if (([string]$mode.state.mode).Trim().ToUpperInvariant() -ne "PAUSE") { throw "$Stage requires PAUSE." }
+            if (([string]$cap.liveArmStatus).Trim().ToUpperInvariant() -ne "DISARMED" -or [bool]$cap.liveExecutionArmed) { throw "$Stage requires DISARMED." }
+            if (-not [bool]$health.connected -or [string]$health.status -ne "ok" -or [string]$health.configuredAccountMode -ne "LIVE" -or [string]$health.accountMode -ne "real") { throw "$Stage requires healthy LIVE/real bridge." }
+            if ($positions -ne 0 -or $orders -ne 0) { throw "$Stage requires flat XAUUSD broker." }
+            return $health
+          }
+
+          $branch = (& git -C $ProductionRoot branch --show-current).Trim()
+          $head = (& git -C $ProductionRoot rev-parse HEAD).Trim().ToLowerInvariant()
+          $dirty = @(& git -C $ProductionRoot status --porcelain)
+          Write-Host "PRECUTOVER_BRANCH=$branch"
+          Write-Host "PRECUTOVER_HEAD=$head"
+          Write-Host "PRECUTOVER_DIRTY_COUNT=$($dirty.Count)"
+          if ($branch -ne "main") { throw "Production branch must be main." }
+          if ($head -notin @($OldCommit,$TargetCommit)) { throw "Unexpected production head: $head" }
+          if ($dirty.Count -ne 0) { throw "Production worktree must be clean." }
+
+          $ctx = Get-Context
+          $preHealth = Assert-SafeState "PRECUTOVER" $ctx
+          Write-Host "PRECUTOVER_SAFETY=PASS"
+
+          Push-Location $ProductionRoot
+          try {
+            & git fetch origin main
+            if ($LASTEXITCODE -ne 0) { throw "git fetch origin main failed." }
+
+            $remoteLine = [string](& git ls-remote --heads origin refs/heads/main)
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remoteLine)) { throw "Could not resolve origin/main." }
+            $remote = ($remoteLine -split "\s+")[0].Trim().ToLowerInvariant()
+            Write-Host "REMOTE_MAIN=$remote"
+            if ($remote -ne $TargetCommit) { throw "origin/main moved; refusing cutover. expected=$TargetCommit actual=$remote" }
+
+            & git merge-base --is-ancestor $head $TargetCommit
+            if ($LASTEXITCODE -ne 0) { throw "Current production head is not an ancestor of target." }
+
+            if ($head -ne $TargetCommit) {
+              & git merge --ff-only $TargetCommit
+              if ($LASTEXITCODE -ne 0) { throw "Fast-forward merge to target failed." }
+            }
+          } finally {
+            Pop-Location
+          }
+
+          $afterHead = (& git -C $ProductionRoot rev-parse HEAD).Trim().ToLowerInvariant()
+          $afterDirty = @(& git -C $ProductionRoot status --porcelain)
+          Write-Host "SOURCE_CUTOVER_HEAD=$afterHead"
+          Write-Host "SOURCE_CUTOVER_DIRTY_COUNT=$($afterDirty.Count)"
+          if ($afterHead -ne $TargetCommit -or $afterDirty.Count -ne 0) { throw "Source fast-forward verification failed." }
+          Write-Host "SOURCE_FAST_FORWARD=PASS"
+
+          $task = Get-ScheduledTask -TaskName $BridgeTask -ErrorAction Stop
+          $actions = @($task.Actions)
+          if ($actions.Count -ne 1 -or "$([string]$actions[0].Execute) $([string]$actions[0].Arguments)" -notmatch '(?i)run-phase7c-account-bridge-task-runner-local\.ps1') {
+            throw "Bridge task ownership is not canonical."
+          }
+          Stop-ScheduledTask -TaskName $BridgeTask -ErrorAction Stop
+          $deadline=(Get-Date).AddSeconds(20)
+          do {
+            Start-Sleep -Milliseconds 500
+            $taskState=(Get-ScheduledTask -TaskName $BridgeTask -ErrorAction Stop).State
+            if ($taskState -ne "Running") { break }
+          } while ((Get-Date) -lt $deadline)
+          if ($taskState -eq "Running") { throw "Bridge task failed to stop for source reload." }
+          Start-ScheduledTask -TaskName $BridgeTask -ErrorAction Stop
+          Write-Host "BRIDGE_SOURCE_RELOAD_REQUEST=PASS"
+
+          $ctx = Get-Context
+          $newHealth=$null
+          for($i=1;$i -le 30;$i++){
+            Start-Sleep -Seconds 2
+            try {
+              $candidate=Invoke-RestMethod -Uri "$($ctx.Base)/health" -Headers $ctx.Headers -Method Get -TimeoutSec 5
+              if([bool]$candidate.connected -and [string]$candidate.status -eq "ok"){ $newHealth=$candidate; break }
+            } catch {}
+          }
+          if($null -eq $newHealth){ throw "New-source bridge did not become healthy within 60 seconds." }
+          if($null -eq $newHealth.PSObject.Properties['healthSource'] -or $null -eq $newHealth.PSObject.Properties['gatewayBusy']){
+            throw "PR62 health telemetry fields are missing; new bridge source is not proven loaded."
+          }
+          Write-Host "BRIDGE_PR62_RUNTIME_PROOF=PASS"
+          Write-Host "BRIDGE_NEW_SESSION=$($newHealth.bridgeSessionId)"
+          Write-Host "BRIDGE_HEALTH_SOURCE=$($newHealth.healthSource)"
+          Write-Host "BRIDGE_GATEWAY_BUSY=$($newHealth.gatewayBusy)"
+
+          $postBridgeHealth = Assert-SafeState "POST_BRIDGE_RELOAD" $ctx
+          $bridgeSession = [string]$postBridgeHealth.bridgeSessionId
+          Write-Host "POST_BRIDGE_RELOAD_SAFETY=PASS"
+
+          $guarded = Join-Path $ProductionRoot "scripts\recover-phase7c-runtime-ready-stable-deploy-guarded-local.ps1"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $guarded -ExpectedCommit $TargetCommit -TimeoutSeconds 120
+          if ($LASTEXITCODE -ne 0) { throw "Canonical guarded runtime recovery failed with exit code $LASTEXITCODE." }
+          Write-Host "RUNTIME_GUARDED_RECOVERY=PASS"
+
+          $ctx = Get-Context
+          $finalHealth = Assert-SafeState "FINAL" $ctx
+          if ([string]$finalHealth.bridgeSessionId -ne $bridgeSession) { throw "Bridge session changed during guarded runtime recovery." }
+          if($null -eq $finalHealth.PSObject.Properties['healthSource'] -or $null -eq $finalHealth.PSObject.Properties['gatewayBusy']){
+            throw "Final PR62 bridge runtime proof missing."
+          }
+
+          $att = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/runtime-source-attestation/" -Method Get -TimeoutSec 10
+          $attCommit = ([string]$att.deployment.sourceCommit).Trim().ToLowerInvariant()
+          Write-Host "FINAL_SOURCE_ATTESTATION_OVERALL=$($att.overall)"
+          Write-Host "FINAL_SOURCE_ATTESTATION_COMMIT=$attCommit"
+          if ([string]$att.overall -ne "EXACT_MATCH" -or $attCommit -ne $TargetCommit) { throw "Final runtime source attestation is not exact target." }
+
+          $finalHead = (& git -C $ProductionRoot rev-parse HEAD).Trim().ToLowerInvariant()
+          $finalDirty = @(& git -C $ProductionRoot status --porcelain)
+          Write-Host "FINAL_PRODUCTION_HEAD=$finalHead"
+          Write-Host "FINAL_PRODUCTION_DIRTY_COUNT=$($finalDirty.Count)"
+          if ($finalHead -ne $TargetCommit -or $finalDirty.Count -ne 0) { throw "Final production source/worktree verification failed." }
+
+          Write-Host "CUTOVER_STATUS=PASS"
+          Write-Host "CUTOVER_FINAL_MODE=PAUSE"
+          Write-Host "CUTOVER_FINAL_ARM=DISARMED"
+          Write-Host "CUTOVER_FINAL_POSITIONS=0"
+          Write-Host "CUTOVER_FINAL_PENDING_ORDERS=0"
+          Write-Host "CUTOVER_FINAL_SOURCE=$TargetCommit"
+          Write-Host "CUTOVER_NEXT_ACTION=VERIFY_OBSERVABILITY_ONLY"
