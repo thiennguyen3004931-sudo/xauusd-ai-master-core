@@ -35,10 +35,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install MT5 bridge test dependencies
+      - name: Install isolated model dependency
         shell: pwsh
         run: |
-          python -m pip install --disable-pip-version-check -r packages/mt5-broker/bridge/requirements.txt
+          python -m pip install --disable-pip-version-check "pydantic>=2,<3"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: MT5 health and candle lock-contention regression
