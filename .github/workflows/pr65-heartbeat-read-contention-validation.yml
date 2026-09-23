@@ -1,0 +1,54 @@
+name: PR65 Heartbeat Read Contention Exact-Head Validation
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/pr65-heartbeat-read-contention-validation.yml"
+
+concurrency:
+  group: pr65-heartbeat-read-contention-validation
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: pr65-heartbeat-read-contention
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR65 head
+        uses: actions/checkout@v4
+        with:
+          ref: 457daaec1055674758bc15a110fc99659a81769d
+          fetch-depth: 0
+
+      - name: Verify exact head
+        shell: powershell
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "PR65_VALIDATION_HEAD=$head"
+          if ($head -ne "457daaec1055674758bc15a110fc99659a81769d") { throw "Exact PR65 head mismatch." }
+
+      - name: Web UI safe deploy behavior contract
+        shell: powershell
+        run: |
+          .\scripts\test-phase7c-web-ui-safe-deploy-source.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: PowerShell parse deploy source
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          [void][scriptblock]::Create((Get-Content scripts\deploy-phase7c-web-ui-local.ps1 -Raw))
+          Write-Host "PR65_POWERSHELL_PARSE=PASS"
+
+      - name: Diff hygiene
+        shell: powershell
+        run: |
+          git diff --check 7131579ef0c3371b64d7fd2ede4e74374431b81c...HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "PR65_DIFF_HYGIENE=PASS"
