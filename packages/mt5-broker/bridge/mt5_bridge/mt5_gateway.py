@@ -17,6 +17,7 @@ class Mt5Gateway:
     _RECONNECT_BACKOFF_SECONDS = 2.0
     _HEALTH_LOCK_WAIT_SECONDS = 0.25
     _HEALTH_CACHE_MAX_AGE_SECONDS = 5.0
+    _CANDLE_LOCK_WAIT_SECONDS = 0.5
 
     def __init__(self, settings: Settings, ledger: IdempotencyLedger, module: Any | None = None) -> None:
         self.settings = settings
@@ -373,11 +374,22 @@ class Mt5Gateway:
         # more than the number of newly closed bars that can be missing.
         mt5_fetch_count = min(fetch_count, 8) if cached_refresh_base is not None else fetch_count
 
-        # Do not let an expired candle refresh wait behind a critical MT5
-        # operation if a recent closed-bar snapshot is already available.
-        acquired = self._lock.acquire(blocking=stale is None)
-        if not acquired:
-            return stale if stale is not None else []
+        # Do not let a candle refresh sit behind a critical MT5 operation
+        # until the HTTP client timeout. A recent closed-bar snapshot is served
+        # immediately; without one, wait only a short bounded interval and
+        # return an explicit transient 503 that callers may retry safely.
+        if stale is not None:
+            acquired = self._lock.acquire(blocking=False)
+            if not acquired:
+                return stale
+        else:
+            acquired = self._lock.acquire(timeout=self._CANDLE_LOCK_WAIT_SECONDS)
+            if not acquired:
+                raise BridgeError(
+                    "MT5 gateway is busy; closed-candle refresh was not started.",
+                    503,
+                    "CANDLES_GATEWAY_BUSY",
+                )
 
         try:
             # Another request may have refreshed the cache before this thread
