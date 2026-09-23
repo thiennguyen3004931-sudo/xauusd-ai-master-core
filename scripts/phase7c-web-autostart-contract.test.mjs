@@ -10,9 +10,14 @@ const activation = readFileSync(
   new URL("./activate-phase7c-local.ps1", import.meta.url),
   "utf8",
 );
+const dashboardDeploy = readFileSync(
+  new URL("./deploy-phase7c-mt5-dashboard-local.ps1", import.meta.url),
+  "utf8",
+);
 
-test("Web/API autostart allows slow Windows startup and persists child logs", () => {
-  assert.match(autostart, /\[int\]\$StartupTimeoutSeconds = 90/);
+test("Web/API cold start keeps enough headroom for a cold dependency build", () => {
+  assert.match(autostart, /\[int\]\$StartupTimeoutSeconds = 240/);
+  assert.match(dashboardDeploy, /\[int\]\$StartupTimeoutSeconds = 240/);
   assert.match(autostart, /phase7b-web/);
   assert.match(autostart, /api\.err\.log/);
   assert.match(autostart, /web\.err\.log/);
