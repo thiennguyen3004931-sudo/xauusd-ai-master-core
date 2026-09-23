@@ -1,0 +1,85 @@
+name: PR58 Self-Hosted Bridge Acceptance
+
+on:
+  push:
+    branches:
+      - ops/pr58-selfhosted-bridge-acceptance
+    paths:
+      - ".github/workflows/pr58-selfhosted-bridge-acceptance.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr58-selfhosted-bridge-acceptance
+  cancel-in-progress: true
+
+jobs:
+  pr58-bridge-acceptance:
+    name: pr58-bridge-acceptance-self-hosted
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact PR58 head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: b0ac5884fbc5a547b87bb58403028a3f16fc762c
+          clean: true
+
+      - name: Verify exact candidate provenance
+        shell: powershell
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "PR58_ACCEPTANCE_HEAD=$head"
+          if ($head -ne 'b0ac5884fbc5a547b87bb58403028a3f16fc762c') {
+            throw "PR58_ACCEPTANCE_HEAD_MISMATCH"
+          }
+
+      - name: Python runtime
+        shell: powershell
+        run: |
+          python --version
+          if ($LASTEXITCODE -ne 0) { throw "PYTHON_NOT_AVAILABLE" }
+          python -m pip --version
+          if ($LASTEXITCODE -ne 0) { throw "PIP_NOT_AVAILABLE" }
+
+      - name: Install bridge test dependency
+        shell: powershell
+        working-directory: packages/mt5-broker/bridge
+        run: |
+          python -m pip install "pydantic>=2.12,<3"
+          if ($LASTEXITCODE -ne 0) { throw "PYDANTIC_INSTALL_FAILED" }
+
+      - name: Compile MT5 bridge
+        shell: powershell
+        working-directory: packages/mt5-broker/bridge
+        run: |
+          python -m compileall -q mt5_bridge tests
+          if ($LASTEXITCODE -ne 0) { throw "MT5_BRIDGE_COMPILE_FAILED" }
+
+      - name: Run full MT5 bridge unit suite
+        shell: powershell
+        working-directory: packages/mt5-broker/bridge
+        run: |
+          $env:PYTHONPATH = (Get-Location).Path
+          python -m unittest discover -s tests -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "MT5_BRIDGE_TESTS_FAILED" }
+
+      - name: Run PR58 Trend timeout contract
+        shell: powershell
+        run: |
+          node scripts/test-phase7c-trend-entry-recovery-contract.mjs
+          if ($LASTEXITCODE -ne 0) { throw "TREND_TIMEOUT_CONTRACT_FAILED" }
+
+      - name: Acceptance summary
+        shell: powershell
+        run: |
+          Write-Host "PR58_SELFHOSTED_BRIDGE_ACCEPTANCE=PASS"
+          Write-Host "PR58_CANDIDATE=b0ac5884fbc5a547b87bb58403028a3f16fc762c"
+          Write-Host "PRODUCTION_MUTATION=NONE"
+          Write-Host "ARM_MUTATION=NONE"
+          Write-Host "AUTO_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
