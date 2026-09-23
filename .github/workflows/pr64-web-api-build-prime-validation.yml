@@ -19,7 +19,7 @@ jobs:
       - name: Checkout exact PR64 head
         uses: actions/checkout@v4
         with:
-          ref: c0c014699d479be5cb28c778447363b6579d3f65
+          ref: a1e21ab0a7ca112b5c05dbc8ac532b537ae384bf
           fetch-depth: 1
 
       - name: Verify exact head
@@ -27,7 +27,7 @@ jobs:
         run: |
           $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
           Write-Host "PR64_VALIDATION_HEAD=$head"
-          if ($head -ne "c0c014699d479be5cb28c778447363b6579d3f65") { throw "Exact PR64 head mismatch." }
+          if ($head -ne "a1e21ab0a7ca112b5c05dbc8ac532b537ae384bf") { throw "Exact PR64 head mismatch." }
 
       - name: Web UI safe deploy source contract - Windows PowerShell 5.1
         shell: powershell
