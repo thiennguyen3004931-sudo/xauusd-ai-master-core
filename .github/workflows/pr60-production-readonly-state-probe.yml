@@ -1,0 +1,59 @@
+name: PR60 Production Read-Only State Probe
+
+on:
+  push:
+    branches:
+      - ops/pr60-selfhosted-acceptance
+    paths:
+      - ".github/workflows/pr60-production-readonly-state-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  readonly-state:
+    name: pr60-production-readonly-state-self-hosted
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Read-only production state
+        shell: powershell
+        env:
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $mainHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodHead = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodTree = (git -C $env:PRODUCTION_ROOT rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $prodDirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+
+          $bot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $src = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation' -Method Get -TimeoutSec 10
+          $auto = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-auto-activation/status' -Method Get -TimeoutSec 10
+
+          Write-Host "PR60_STATE_MAIN_HEAD=$mainHead"
+          Write-Host "PR60_STATE_PRODUCTION_HEAD=$prodHead"
+          Write-Host "PR60_STATE_PRODUCTION_TREE=$prodTree"
+          Write-Host "PR60_STATE_PRODUCTION_DIRTY_COUNT=$($prodDirty.Count)"
+          Write-Host "PR60_STATE_BOT_MODE=$($bot.state.mode)"
+          Write-Host "PR60_STATE_RUNNING=$($life.running)"
+          Write-Host "PR60_STATE_READY=$($life.ready)"
+          Write-Host "PR60_STATE_TELEGRAM_READY=$($life.telegramReady)"
+          Write-Host "PR60_STATE_POSITIONS=$($life.bridge.openXauusdPositions)"
+          Write-Host "PR60_STATE_ARM_STATUS=$($cap.liveArmStatus)"
+          Write-Host "PR60_STATE_ARMED=$($cap.liveExecutionArmed)"
+          Write-Host "PR60_STATE_SOURCE=$($src.overall)"
+          Write-Host "PR60_STATE_SOURCE_COMMIT=$($src.deployment.sourceCommit)"
+          Write-Host "PR60_STATE_PENDING_ZERO=$($auto.checks.zeroXauusdPendingOrders)"
+          Write-Host "PRODUCTION_HTTP_METHODS=GET_ONLY"
+          Write-Host "PRODUCTION_MUTATION=NONE"
