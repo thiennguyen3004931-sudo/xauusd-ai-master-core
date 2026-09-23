@@ -73,7 +73,7 @@ foreach ($literal in @(
     "Phase7C Intelligence Evidence Quality Baseline Read-Only",
     "runs-on: [self-hosted, Windows, X64, xauusd-core-ci]",
     "contents: read",
-    "EXPECTED_PRODUCTION_COMMIT: 142e7755c136f677193ef075e1816a09664fe015",
+    "EXPECTED_PRODUCTION_COMMIT: 4aeff4e62c5acecb85c8c344184f962fd7121928",
     "PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master",
     "API_BASE_URL: http://127.0.0.1:3711",
     "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
