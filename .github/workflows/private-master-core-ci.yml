@@ -43,6 +43,37 @@ jobs:
             exit 1
           }
 
+      - name: Approved one-time production cutover a02fd82e
+        if: github.event_name == 'pull_request' && github.head_ref == 'ops/cutover-a02fd82e-20260924'
+        shell: powershell
+        run: |
+          $target = 'a02fd82e87561891b0830da324da7f69f70b3754'
+          $candidate = Join-Path $env:RUNNER_TEMP 'xauusd-cutover-a02fd82e'
+          if (Test-Path -LiteralPath $candidate) { Remove-Item -LiteralPath $candidate -Recurse -Force }
+          git worktree add --detach $candidate $target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $candidate checkout -B main $target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $candidateHead = (git -C $candidate rev-parse HEAD).Trim().ToLowerInvariant()
+          $candidateBranch = (git -C $candidate branch --show-current).Trim()
+          $candidateDirty = @(git -C $candidate status --porcelain)
+          if ($candidateHead -ne $target -or $candidateBranch -ne 'main' -or $candidateDirty.Count -ne 0) {
+            throw 'CUTOVER_CANDIDATE_GUARD_FAIL'
+          }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $target -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master' -ExpectedCurrentCommit 5ec6ccd374ea929ddaee1ed669e786109a0d71b8 -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f -ExpectedInitialArm DISARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $target -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host 'APPROVED_PRODUCTION_CUTOVER_A02FD82E=PASS'
+          Write-Host 'APPROVED_PRODUCTION_FINAL_MODE=PAUSE'
+          Write-Host 'APPROVED_PRODUCTION_FINAL_ARM=DISARMED'
+          Write-Host 'APPROVED_PRODUCTION_LIVE_TEST_ORDER=NONE'
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
