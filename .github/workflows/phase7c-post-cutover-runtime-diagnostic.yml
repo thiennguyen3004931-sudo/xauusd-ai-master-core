@@ -1,0 +1,174 @@
+name: Phase7C Post-Cutover Runtime Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/phase7c-post-cutover-runtime-diagnostic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: post-cutover-runtime-diagnostic
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 8
+    steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Inspect production runtime read-only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          $Root = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $Runtime = Join-Path $Root ".runtime"
+          $ControlApi = "http://127.0.0.1:3711"
+
+          Write-Host "DIAG_READ_ONLY=TRUE"
+          Write-Host "DIAG_MODE_MUTATION=NONE"
+          Write-Host "DIAG_ARM_MUTATION=NONE"
+          Write-Host "DIAG_TASK_MUTATION=NONE"
+          Write-Host "DIAG_ORDER_MUTATION=NONE"
+          Write-Host "DIAG_POSITION_MUTATION=NONE"
+
+          try {
+            $branch = (& git -C $Root branch --show-current).Trim()
+            $head = (& git -C $Root rev-parse HEAD).Trim()
+            $dirty = @(& git -C $Root status --porcelain)
+            Write-Host "PRODUCTION_BRANCH=$branch"
+            Write-Host "PRODUCTION_HEAD=$head"
+            Write-Host "PRODUCTION_DIRTY_COUNT=$($dirty.Count)"
+          } catch {
+            Write-Host "PRODUCTION_GIT_ERROR=$($_.Exception.Message)"
+          }
+
+          foreach ($taskName in @("XAUUSD-Phase7B-Web","XAUUSD-Phase7C-Executors","XAUUSD-Phase7C-Bridge")) {
+            try {
+              $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+              $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
+              Write-Host "TASK=$taskName|STATE=$($task.State)|LAST_RESULT=$($info.LastTaskResult)|LAST_RUN=$($info.LastRunTime.ToString('o'))"
+              $actions = @($task.Actions)
+              if ($actions.Count -eq 1) {
+                $a = $actions[0]
+                Write-Host "TASK_ACTION=$taskName|EXECUTE=$([string]$a.Execute)|WORKDIR=$([string]$a.WorkingDirectory)"
+                $args = ([string]$a.Arguments) -replace '(?i)(api[_-]?key|password|token)(=|\s+)("[^"]*"|\S+)','$1$2REDACTED'
+                Write-Host "TASK_ARGS=$taskName|$args"
+              } else {
+                Write-Host "TASK_ACTION_COUNT=$taskName|$($actions.Count)"
+              }
+            } catch {
+              Write-Host "TASK_ERROR=$taskName|$($_.Exception.Message)"
+            }
+          }
+
+          foreach ($port in @(3711,5717,8765)) {
+            $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+            if ($listeners.Count -eq 0) {
+              Write-Host "PORT_$port=NO_LISTENER"
+            } else {
+              foreach ($ln in $listeners) {
+                $pidValue=[int]$ln.OwningProcess
+                $proc=Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" -ErrorAction SilentlyContinue
+                $cmd=([string]$proc.CommandLine) -replace '(?i)(api[_-]?key|password|token)(=|\s+)("[^"]*"|\S+)','$1$2REDACTED'
+                Write-Host "PORT_$port=LISTEN|PID=$pidValue|NAME=$([string]$proc.Name)|CMD=$cmd"
+              }
+            }
+          }
+
+          function Safe-Tail([string]$Path,[int]$Count=50) {
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              Write-Host "LOG_MISSING=$Path"
+              return
+            }
+            Write-Host "----- LOG_BEGIN $Path -----"
+            Get-Content -LiteralPath $Path -Tail $Count -ErrorAction SilentlyContinue |
+              ForEach-Object {
+                ([string]$_) -replace '(?i)(api[_-]?key|password|token)(=|\s+)("[^"]*"|\S+)','$1$2REDACTED'
+              } | Write-Host
+            Write-Host "----- LOG_END $Path -----"
+          }
+
+          $webDir = Join-Path $Runtime "phase7b-web"
+          Safe-Tail (Join-Path $webDir "api.err.log") 80
+          Safe-Tail (Join-Path $webDir "api.out.log") 80
+          Safe-Tail (Join-Path $webDir "web.err.log") 50
+          Safe-Tail (Join-Path $webDir "web.out.log") 50
+
+          foreach ($uri in @(
+            "$ControlApi/api/v1/phase7c/bot-mode",
+            "$ControlApi/api/v1/phase7c/lifecycle",
+            "$ControlApi/api/v1/phase7c-live-arm-control/capability",
+            "$ControlApi/api/v1/phase7c/runtime-source-attestation/",
+            "$ControlApi/api/v1/phase7c-ui/mt5?symbol=XAUUSD"
+          )) {
+            try {
+              $r = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 6
+              $content=[string]$r.Content
+              if ($content.Length -gt 6000) { $content=$content.Substring(0,6000) }
+              Write-Host "HTTP_PROBE=PASS|URI=$uri|STATUS=$($r.StatusCode)"
+              Write-Host "HTTP_BODY_BEGIN=$uri"
+              Write-Host $content
+              Write-Host "HTTP_BODY_END=$uri"
+            } catch {
+              Write-Host "HTTP_PROBE=FAIL|URI=$uri|ERROR=$($_.Exception.Message)"
+            }
+          }
+
+          try {
+            $accountPath = Join-Path $Runtime "phase7c-account-mode.json"
+            $lib = Join-Path $Root "scripts\lib\phase7c-account-mode.ps1"
+            . $lib
+            $account = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+            $envFile=[string]$account.envFile
+            if(-not [IO.Path]::IsPathRooted($envFile)){ $envFile=Join-Path $Root $envFile }
+            $envInfo=Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+            $base="http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+            $headers=@{"x-mt5-api-key"=$envInfo.apiKey}
+            try {
+              $h=Invoke-RestMethod -Uri "$base/health" -Headers $headers -Method Get -TimeoutSec 6
+              Write-Host "BRIDGE_HEALTH=PASS|STATUS=$($h.status)|CONNECTED=$($h.connected)|CONFIGURED=$($h.configuredAccountMode)|BROKER=$($h.accountMode)|SESSION=$($h.bridgeSessionId)|HEALTH_SOURCE=$($h.healthSource)|GATEWAY_BUSY=$($h.gatewayBusy)"
+            } catch {
+              Write-Host "BRIDGE_HEALTH=FAIL|ERROR=$($_.Exception.Message)"
+            }
+
+            foreach($path in @("/v1/positions?symbol=XAUUSD","/v1/orders?symbol=XAUUSD")){
+              try {
+                $resp=Invoke-WebRequest -Uri "$base$path" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 6
+                $raw=([string]$resp.Content).Trim()
+                $count=if([string]::IsNullOrWhiteSpace($raw)-or $raw -eq "[]"){0}else{@($raw|ConvertFrom-Json|Where-Object{$null-ne$_}).Count}
+                Write-Host "BRIDGE_ARRAY=PASS|PATH=$path|COUNT=$count"
+              } catch {
+                Write-Host "BRIDGE_ARRAY=FAIL|PATH=$path|ERROR=$($_.Exception.Message)"
+              }
+            }
+          } catch {
+            Write-Host "BRIDGE_CONTEXT_ERROR=$($_.Exception.Message)"
+          }
+
+          foreach($p in @(
+            (Join-Path $Runtime "phase7c-source-attestation\deployment.json"),
+            (Join-Path $Runtime "phase7c-source-attestation\components\web.json"),
+            (Join-Path $Runtime "phase7c-source-attestation\components\api.json"),
+            (Join-Path $Runtime "phase7c-source-attestation\components\lifecycle-broker.json")
+          )){
+            if(Test-Path -LiteralPath $p -PathType Leaf){
+              try {
+                $raw=Get-Content -LiteralPath $p -Raw
+                if($raw.Length -gt 5000){$raw=$raw.Substring(0,5000)}
+                Write-Host "ATTEST_FILE_BEGIN=$p"
+                Write-Host $raw
+                Write-Host "ATTEST_FILE_END=$p"
+              } catch {
+                Write-Host "ATTEST_FILE_ERROR=$p|$($_.Exception.Message)"
+              }
+            } else {
+              Write-Host "ATTEST_FILE_MISSING=$p"
+            }
+          }
+
+          Write-Host "DIAG_STATUS=COMPLETE"
