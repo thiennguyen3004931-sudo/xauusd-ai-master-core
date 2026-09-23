@@ -1,0 +1,35 @@
+name: Core Runner Read-Only Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/core-runner-readonly-diagnostic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    name: core-runner-readonly
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 3
+    steps:
+      - name: Inspect runner host without mutation
+        shell: powershell
+        run: |
+          Write-Host "RUNNER_DIAG_READ_ONLY=TRUE"
+          Write-Host "RUNNER_NAME=$env:RUNNER_NAME"
+          Write-Host "COMPUTERNAME=$env:COMPUTERNAME"
+          Write-Host "CURRENT_DIRECTORY=$pwd"
+          foreach ($root in @("C:\actions-runner","C:\actions-runner-page\actions-runner")) {
+            Write-Host "RUNNER_ROOT=$root|EXISTS=$(Test-Path -LiteralPath $root)"
+          }
+          $listeners = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match 'Runner\.(Listener|Worker)\.exe' })
+          foreach ($p in $listeners) {
+            $cmd = [string]$p.CommandLine
+            Write-Host "RUNNER_PROCESS=PID=$($p.ProcessId)|NAME=$($p.Name)|CMD=$cmd"
+          }
+          Write-Host "RUNNER_DIAG_STATUS=PASS"
