@@ -107,10 +107,27 @@ test("Sideway sends Fixed TP to MT5 on initial non-Recovery order and preserves 
     "Sideway native TP2 management metadata must remain unchanged.");
 });
 
-test("Sideway verifies actual fill and reconciles broker Fixed TP from actual entry", () => {
-  const fillFlow = block("state.managed = buildManagedState(opened, state.pendingEntry, brokerClockOffsetMs);", "state.pendingEntry = null;");
-  assert.match(fillFlow, /await\s+reconcileFixedTpBrokerTakeProfit\s*\(/,
-    "RED_TARGET: Sideway must reconcile broker TP after actual fill when Fixed TP is enabled.");
+test("Sideway verifies actual fill, commits ownership, then reconciles broker Fixed TP", () => {
+  const fillFlow = block(
+    "state.managed = buildManagedState(opened, state.pendingEntry, brokerClockOffsetMs);",
+    "function readStrategyEntryConfigSnapshot()",
+  );
+  const managedIndex = fillFlow.indexOf("state.managed = buildManagedState(opened, state.pendingEntry, brokerClockOffsetMs);");
+  const pendingClearIndex = fillFlow.indexOf("state.pendingEntry = null;", managedIndex);
+  const saveIndex = fillFlow.indexOf("saveState();", pendingClearIndex);
+  const filledIndex = fillFlow.indexOf('journal("ENTRY_FILLED"', saveIndex);
+  const reconcileIndex = fillFlow.indexOf("await reconcileFixedTpBrokerTakeProfit({", filledIndex);
+
+  assert.ok(managedIndex >= 0,
+    "RED_TARGET: Sideway actual fill must create managed ownership.");
+  assert.ok(pendingClearIndex > managedIndex,
+    "RED_TARGET: Sideway must clear pending only after managed ownership exists.");
+  assert.ok(saveIndex > pendingClearIndex,
+    "RED_TARGET: Sideway managed ownership must be durable before additive Fixed TP reconcile.");
+  assert.ok(filledIndex > saveIndex,
+    "RED_TARGET: Sideway ENTRY_FILLED must follow durable managed ownership.");
+  assert.ok(reconcileIndex > filledIndex,
+    "RED_TARGET: Sideway must reconcile broker TP from actual fill only after ownership is durable.");
   assert.match(sidewaySource, /async function reconcileFixedTpBrokerTakeProfit\([\s\S]*?takeProfit\s*:\s*targetPrice[\s\S]*?\/v1\/positions\/\$\{encodeURIComponent\(ticket\)\}/,
     "RED_TARGET: Sideway Fixed TP reconcile must PATCH the managed MT5 position with actual-entry-derived targetPrice.");
 });
