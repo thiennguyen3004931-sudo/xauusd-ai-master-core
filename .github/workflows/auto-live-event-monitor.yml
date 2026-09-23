@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'scripts/ops/auto-live-event-monitor.ps1'
+      - 'scripts/test-auto-live-event-monitor-source.ps1'
       - '.github/workflows/auto-live-event-monitor.yml'
   pull_request:
     branches:
