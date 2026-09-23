@@ -1,0 +1,60 @@
+name: PR68 Hosted Windows Observability Validation
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/pr68-hosted-windows-observability-validation.yml"
+
+concurrency:
+  group: pr68-hosted-windows-observability-validation
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: pr68-hosted-windows-observability
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR68 head
+        uses: actions/checkout@v4
+        with:
+          ref: 5d312f0ca69d89539c0e60ad6c40e292bcb2db94
+          fetch-depth: 0
+
+      - name: Verify exact head
+        shell: powershell
+        run: |
+          $head=(git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "PR68_HOSTED_VALIDATION_HEAD=$head"
+          if($head -ne "5d312f0ca69d89539c0e60ad6c40e292bcb2db94"){ throw "Exact PR68 head mismatch." }
+
+      - name: AUTO LIVE monitor source contract
+        shell: powershell
+        run: |
+          .\scripts\test-auto-live-event-monitor-source.ps1
+          if($LASTEXITCODE -ne 0){ exit $LASTEXITCODE }
+
+      - name: Intelligence evidence quality source contract
+        shell: powershell
+        run: |
+          .\scripts\test-phase7c-intelligence-evidence-quality-baseline-source.ps1
+          if($LASTEXITCODE -ne 0){ exit $LASTEXITCODE }
+
+      - name: Intelligence production acceptance source contract
+        shell: powershell
+        run: |
+          .\scripts\test-phase7c-intelligence-production-acceptance-workflow-source.ps1
+          if($LASTEXITCODE -ne 0){ exit $LASTEXITCODE }
+
+      - name: Monitor parse and diff hygiene
+        shell: powershell
+        run: |
+          [void][scriptblock]::Create((Get-Content scripts\ops\auto-live-event-monitor.ps1 -Raw))
+          git diff --check 453d797ca801fd385faa6e15ca47be3d1d876b35...HEAD
+          if($LASTEXITCODE -ne 0){ exit $LASTEXITCODE }
+          Write-Host "PR68_HOSTED_VALIDATION=PASS"
