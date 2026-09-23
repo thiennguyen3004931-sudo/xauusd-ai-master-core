@@ -776,7 +776,10 @@ class Mt5Gateway:
                     "action": self.mt5.TRADE_ACTION_SLTP,
                     "symbol": position.symbol,
                     "position": int(position.ticket),
-                    "sl": float(request.stopLoss),
+                    # PATCH semantics are partial. Preserve the broker's live
+                    # protection value for any field the caller omitted so a
+                    # TP-only reconcile cannot roll back a newer BE/FastMove/M5 SL.
+                    "sl": float(request.stopLoss if request.stopLoss is not None else position.sl),
                     "tp": float(request.takeProfit if request.takeProfit is not None else position.tp),
                     "magic": self.settings.magic_number,
                     "comment": self._comment(request.commandId),
