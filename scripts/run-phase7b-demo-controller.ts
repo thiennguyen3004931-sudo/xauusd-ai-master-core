@@ -1698,7 +1698,7 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
   const managed = state.managed!;
   const exitPrice = managed.side === "BUY" ? quote.bid : quote.ask;
   const favorable = managed.side === "BUY" ? exitPrice - position.entry : position.entry - exitPrice;
-  recordManagementExitSideSample({ managed, quote, exitSidePrice });
+  recordManagementExitSideSample({ managed, quote, exitSidePrice: exitPrice });
   const latestM15 = m15.at(-1);
   const holdM15CloseTime = Number(latestM15?.closeTime ?? 0);
 
