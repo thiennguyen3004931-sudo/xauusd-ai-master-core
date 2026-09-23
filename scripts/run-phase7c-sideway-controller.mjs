@@ -239,6 +239,14 @@ async function cycle() {
     const recovery = matchPendingEntryPosition(pending, positions, spec, Date.now(), brokerClockOffsetMs);
     if (recovery.matched && recovery.position) {
       state.managed = buildManagedState(recovery.position, pending, brokerClockOffsetMs);
+      state.pendingEntry = null;
+      saveState();
+      journal("PENDING_ENTRY_RECOVERED", {
+        orderId: pending.orderId,
+        ticket: state.managed.ticket,
+        side: state.managed.side,
+        volume: state.managed.initialVolume,
+      });
       if (state.managed.dailyMode !== "RECOVERY_TP") {
         await reconcileFixedTpBrokerTakeProfit({
           ticket: state.managed.ticket,
@@ -248,14 +256,6 @@ async function cycle() {
           strategy: "SIDEWAY",
         });
       }
-      state.pendingEntry = null;
-      saveState();
-      journal("PENDING_ENTRY_RECOVERED", {
-        orderId: pending.orderId,
-        ticket: state.managed.ticket,
-        side: state.managed.side,
-        volume: state.managed.initialVolume,
-      });
       await managePosition(recovery.position, quote, spec, brokerClockOffsetMs);
       return;
     }
@@ -764,6 +764,9 @@ async function cycle() {
   }
 
   state.managed = buildManagedState(opened, state.pendingEntry, brokerClockOffsetMs);
+  state.pendingEntry = null;
+  saveState();
+  journal("ENTRY_FILLED", { orderId, position: opened, management: state.managed });
   if (state.managed.dailyMode !== "RECOVERY_TP") {
     await reconcileFixedTpBrokerTakeProfit({
       ticket: state.managed.ticket,
@@ -773,9 +776,6 @@ async function cycle() {
       strategy: "SIDEWAY",
     });
   }
-  state.pendingEntry = null;
-  saveState();
-  journal("ENTRY_FILLED", { orderId, position: opened, management: state.managed });
 }
 
 function readStrategyEntryConfigSnapshot() {
@@ -999,16 +999,26 @@ async function reconcileFixedTpBrokerTakeProfit(input) {
     targetPrice,
     commandId,
   });
-  const response = await bridgeRequest(
-    "PATCH",
-    `/v1/positions/${encodeURIComponent(ticket)}`,
-    payload,
-  );
-  if (!response.success) {
-    journal("FIXED_TP_BROKER_RECONCILE_REJECTED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
-    return;
+  try {
+    const response = await bridgeRequest(
+      "PATCH",
+      `/v1/positions/${encodeURIComponent(ticket)}`,
+      payload,
+    );
+    if (!response.success) {
+      journal("FIXED_TP_BROKER_RECONCILE_REJECTED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
+      return;
+    }
+    journal("FIXED_TP_BROKER_RECONCILED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
+  } catch (error) {
+    journal("FIXED_TP_BROKER_RECONCILE_ERROR", {
+      ticket,
+      strategy: input.strategy,
+      targetPrice,
+      commandId,
+      message: errorMessage(error),
+    });
   }
-  journal("FIXED_TP_BROKER_RECONCILED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
 }
 
 async function closeFixedTpIfTriggered(position, quote) {
