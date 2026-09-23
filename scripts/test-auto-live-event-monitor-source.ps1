@@ -60,7 +60,7 @@ Assert-Literal $Workflow 'MONITOR_ARM_MUTATION=NONE' 'ARM mutation forbidden'
 Assert-Literal $Workflow 'MONITOR_ORDER_MUTATION=NONE' 'order mutation forbidden'
 Assert-Literal $Workflow 'MONITOR_POSITION_MUTATION=NONE' 'position mutation forbidden'
 
-Assert-Literal $Monitor "[string]$ExpectedSourceCommit = '5ec6ccd374ea929ddaee1ed669e786109a0d71b8'" 'monitor default production source'
+Assert-Literal $Monitor "[string]`$ExpectedSourceCommit = '5ec6ccd374ea929ddaee1ed669e786109a0d71b8'" 'monitor default production source'
 Assert-Literal $Monitor '[switch]$Notify' 'explicit persistence switch'
 Assert-Literal $Monitor "Write-Host 'MONITOR_NOTIFY=FALSE'" 'dry-run evidence'
 Assert-Literal $Monitor "Write-Host 'MONITOR_REPOSITORY_MUTATION=NONE'" 'dry-run repository safety'
