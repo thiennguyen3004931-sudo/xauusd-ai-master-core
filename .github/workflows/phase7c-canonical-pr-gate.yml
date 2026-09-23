@@ -69,6 +69,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/test-phase7c-canonical-daily-recovery-executors-contract.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test scripts/phase7c-web-autostart-contract.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Structural and execution safety regressions
         shell: pwsh
         run: |
