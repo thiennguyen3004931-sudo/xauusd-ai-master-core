@@ -125,6 +125,9 @@ jobs:
       - name: Phase7C entry resolution contract
         run: node --test scripts/test-phase7c-telegram-entry-resolution-lifecycle-contract.mjs
 
+      - name: Trend management path regression
+        run: node scripts/test-phase7c-trend-management-path-regression.mjs
+
       - name: Telegram lifecycle regression
         run: >-
           node --test
