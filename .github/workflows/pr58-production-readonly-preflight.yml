@@ -1,0 +1,86 @@
+name: PR58 Production Read-Only Preflight
+
+on:
+  push:
+    branches:
+      - ops/pr58-production-readonly-preflight
+    paths:
+      - ".github/workflows/pr58-production-readonly-preflight.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  readonly-preflight:
+    name: pr58-production-readonly-preflight-self-hosted
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          clean: true
+
+      - name: Read-only production state
+        shell: powershell
+        env:
+          MAIN_HEAD: 4aeff4e62c5acecb85c8c344184f962fd7121928
+          TARGET_TREE: 7a6542f7fc839d9743e42d3e32dc28aba3c2b7b1
+          PROD_HEAD: 142e7755c136f677193ef075e1816a09664fe015
+          PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repoHead = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $repoTree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $prodHead = (git -C $env:PRODUCTION_ROOT rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodTree = (git -C $env:PRODUCTION_ROOT rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          $prodBranch = (git -C $env:PRODUCTION_ROOT branch --show-current).Trim()
+          $prodDirty = @(git -C $env:PRODUCTION_ROOT status --porcelain --untracked-files=normal | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+
+          $account = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/account-mode' -Method Get -TimeoutSec 10
+          $bot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $source = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation' -Method Get -TimeoutSec 10
+          $auto = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-auto-activation/status' -Method Get -TimeoutSec 10
+
+          Write-Host "PR58_PREFLIGHT_MAIN_HEAD=$repoHead"
+          Write-Host "PR58_PREFLIGHT_MAIN_TREE=$repoTree"
+          Write-Host "PR58_PREFLIGHT_PRODUCTION_HEAD=$prodHead"
+          Write-Host "PR58_PREFLIGHT_PRODUCTION_TREE=$prodTree"
+          Write-Host "PR58_PREFLIGHT_PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "PR58_PREFLIGHT_PRODUCTION_DIRTY_COUNT=$($prodDirty.Count)"
+          Write-Host "PR58_PREFLIGHT_ACCOUNT_MODE=$($account.state.accountMode)"
+          Write-Host "PR58_PREFLIGHT_BOT_MODE=$($bot.state.mode)"
+          Write-Host "PR58_PREFLIGHT_RUNNING=$($life.running)"
+          Write-Host "PR58_PREFLIGHT_READY=$($life.ready)"
+          Write-Host "PR58_PREFLIGHT_TELEGRAM_READY=$($life.telegramReady)"
+          Write-Host "PR58_PREFLIGHT_POSITIONS=$($life.bridge.openXauusdPositions)"
+          Write-Host "PR58_PREFLIGHT_ARM_STATUS=$($cap.liveArmStatus)"
+          Write-Host "PR58_PREFLIGHT_ARMED=$($cap.liveExecutionArmed)"
+          Write-Host "PR58_PREFLIGHT_SOURCE=$($source.overall)"
+          Write-Host "PR58_PREFLIGHT_SOURCE_COMMIT=$($source.deployment.sourceCommit)"
+          Write-Host "PR58_PREFLIGHT_PENDING_ZERO=$($auto.checks.zeroXauusdPendingOrders)"
+
+          if ($repoHead -ne $env:MAIN_HEAD) { throw 'MAIN_HEAD_MISMATCH' }
+          if ($repoTree -ne $env:TARGET_TREE) { throw 'MAIN_TREE_MISMATCH' }
+          if ($prodHead -ne $env:PROD_HEAD) { throw 'PRODUCTION_HEAD_UNEXPECTED' }
+          if ($prodBranch -ne 'main') { throw 'PRODUCTION_BRANCH_UNEXPECTED' }
+          if ($prodDirty.Count -ne 0) { throw 'PRODUCTION_WORKTREE_DIRTY' }
+          if ([string]$account.state.accountMode -ne 'LIVE') { throw 'ACCOUNT_NOT_LIVE' }
+          if ($life.running -ne $true -or $life.ready -ne $true -or $life.telegramReady -ne $true) { throw 'RUNTIME_NOT_READY' }
+          if ([string]$source.overall -ne 'EXACT_MATCH') { throw 'CURRENT_RUNTIME_SOURCE_NOT_EXACT' }
+          if ([string]$source.deployment.sourceCommit -ne $env:PROD_HEAD) { throw 'CURRENT_RUNTIME_SOURCE_COMMIT_MISMATCH' }
+          if ([int]$life.bridge.openXauusdPositions -ne 0) { throw 'XAUUSD_POSITIONS_NOT_ZERO' }
+          if ($auto.checks.zeroXauusdPendingOrders -ne $true) { throw 'XAUUSD_PENDING_NOT_ZERO' }
+
+          Write-Host 'PR58_PRODUCTION_READONLY_PREFLIGHT=PASS'
+          Write-Host 'PRODUCTION_HTTP_METHODS=GET_ONLY'
+          Write-Host 'PRODUCTION_MUTATION=NONE'
+          Write-Host 'ARM_MUTATION=NONE'
+          Write-Host 'AUTO_MUTATION=NONE'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
