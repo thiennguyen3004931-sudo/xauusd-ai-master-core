@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -45,4 +45,39 @@ test("AUTO source restriction remains unchanged when SEMI is introduced", () => 
     () => service.set("AUTO", "telegram"),
     /AUTO activation is restricted/,
   );
+});
+
+
+test("PAUSE barrier waits for an in-flight execution lock to drain", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "phase7c-pause-barrier-"));
+  const modePath = join(directory, "phase7c-bot-mode.json");
+  const lockPath = join(directory, "phase7c-execution.lock");
+  const service = new Phase7CBotModeService(modePath, lockPath);
+
+  writeFileSync(lockPath, JSON.stringify({ owner: "TREND", createdAt: Date.now() }), "utf8");
+  service.set("PAUSE", "web-control-center");
+
+  setTimeout(() => unlinkSync(lockPath), 60);
+  const barrier = await service.waitForPauseBarrierDrain(1_000, 10);
+
+  assert.equal(barrier.drained, true);
+  assert.equal(barrier.lockPath, lockPath);
+  assert.ok(barrier.waitedMs >= 40);
+  assert.equal(service.get().mode, "PAUSE");
+});
+
+test("PAUSE barrier reports timeout while preserving PAUSE when execution lock remains", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "phase7c-pause-barrier-timeout-"));
+  const modePath = join(directory, "phase7c-bot-mode.json");
+  const lockPath = join(directory, "phase7c-execution.lock");
+  const service = new Phase7CBotModeService(modePath, lockPath);
+
+  writeFileSync(lockPath, JSON.stringify({ owner: "TREND", createdAt: Date.now() }), "utf8");
+  service.set("PAUSE", "web-control-center");
+
+  const barrier = await service.waitForPauseBarrierDrain(40, 10);
+
+  assert.equal(barrier.drained, false);
+  assert.equal(service.get().mode, "PAUSE");
+  unlinkSync(lockPath);
 });

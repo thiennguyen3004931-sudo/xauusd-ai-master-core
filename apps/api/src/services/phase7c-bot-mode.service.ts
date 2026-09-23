@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { BotMode } from "@xauusd/strategy-engine";
 
@@ -44,12 +44,19 @@ export function isPhase7CAutoActivationSourceAllowed(updatedBy: unknown): boolea
 export class Phase7CBotModeService {
   private readonly filePath: string;
   private readonly auditPath: string;
+  private readonly executionLockPath: string;
 
-  constructor(filePath = process.env.PHASE7C_BOT_MODE_FILE) {
+  constructor(
+    filePath = process.env.PHASE7C_BOT_MODE_FILE,
+    executionLockPath = process.env.PHASE7C_EXECUTION_LOCK_FILE || process.env.ZIQ_PHASE7C_EXECUTION_LOCK,
+  ) {
     this.filePath = filePath?.trim()
       ? resolve(filePath)
       : resolve(process.cwd(), ".runtime", "phase7c-bot-mode.json");
     this.auditPath = resolve(dirname(this.filePath), "phase7c-bot-mode-audit.jsonl");
+    this.executionLockPath = executionLockPath?.trim()
+      ? resolve(executionLockPath)
+      : resolve(dirname(this.filePath), "phase7c-executors", "phase7c-execution.lock");
   }
 
   get(): Phase7CBotModeState {
@@ -79,6 +86,33 @@ export class Phase7CBotModeService {
     const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
     writeFileSync(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
     renameSync(temporaryPath, this.filePath);
+  }
+
+  async waitForPauseBarrierDrain(
+    timeoutMs = 5_000,
+    pollMs = 25,
+  ): Promise<{ drained: boolean; lockPath: string; waitedMs: number }> {
+    const startedAt = Date.now();
+    const safeTimeoutMs = Math.max(0, Math.trunc(timeoutMs));
+    const safePollMs = Math.max(1, Math.trunc(pollMs));
+
+    while (existsSync(this.executionLockPath)) {
+      const waitedMs = Date.now() - startedAt;
+      if (waitedMs >= safeTimeoutMs) {
+        return {
+          drained: false,
+          lockPath: this.executionLockPath,
+          waitedMs,
+        };
+      }
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, safePollMs));
+    }
+
+    return {
+      drained: true,
+      lockPath: this.executionLockPath,
+      waitedMs: Date.now() - startedAt,
+    };
   }
 
   set(mode: BotMode, updatedBy = "operator"): Phase7CBotModeState {

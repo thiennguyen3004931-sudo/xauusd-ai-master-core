@@ -49,6 +49,19 @@ globalThis.fetch = async function phase7CSidewayLockedFetch(input, init = undefi
       return blockedResponse("POSITION_PRESENT_UNDER_LOCK", `Open ${symbol} positions=${positions.length}`);
     }
 
+    const finalModePayload = await controlRequest("/api/v1/phase7c/bot-mode");
+    const finalPermission = resolveSidewayPermission(finalModePayload?.state?.mode, "SIDEWAY");
+    if (!finalPermission.allowed) {
+      const finalMode = String(finalModePayload?.state?.mode ?? "PAUSE").toUpperCase();
+      console.warn(
+        `PHASE7C_SIDEWAY_ENTRY_BLOCKED=BOT_MODE_CHANGED_BEFORE_BROKER_SUBMIT|FINAL_${finalMode}|DETAIL=${finalPermission.reason}`,
+      );
+      return blockedResponse(
+        "BOT_MODE_CHANGED_BEFORE_BROKER_SUBMIT",
+        `activeMode=${finalMode};reason=${finalPermission.reason}`,
+      );
+    }
+
     // `nativeFetch` is the account-order guard installed before this lock wrapper.
     // It performs the canonical Daily Recovery recheck and only then reaches the
     // raw broker transport, so the canonical final gate executes while this
