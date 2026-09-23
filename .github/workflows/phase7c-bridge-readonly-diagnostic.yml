@@ -1,0 +1,123 @@
+name: Phase7C Bridge Read-Only Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/phase7c-bridge-readonly-diagnostic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: bridge-readonly-diagnostic
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact diagnostic source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Inspect bridge task and runtime read-only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          $ProductionRoot = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $TaskName = "XAUUSD-Phase7C-Bridge"
+
+          Write-Host "DIAG_READ_ONLY=TRUE"
+          Write-Host "DIAG_MODE_MUTATION=NONE"
+          Write-Host "DIAG_ARM_MUTATION=NONE"
+          Write-Host "DIAG_ORDER_MUTATION=NONE"
+          Write-Host "DIAG_POSITION_MUTATION=NONE"
+
+          try {
+            $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            $info = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction Stop
+            Write-Host "BRIDGE_TASK_FOUND=TRUE"
+            Write-Host "BRIDGE_TASK_STATE=$($task.State)"
+            Write-Host "BRIDGE_TASK_LAST_RESULT=$($info.LastTaskResult)"
+            Write-Host "BRIDGE_TASK_LAST_RUN=$($info.LastRunTime.ToString('o'))"
+            Write-Host "BRIDGE_TASK_NEXT_RUN=$($info.NextRunTime.ToString('o'))"
+          } catch {
+            Write-Host "BRIDGE_TASK_FOUND=FALSE"
+            Write-Host "BRIDGE_TASK_ERROR=$($_.Exception.Message)"
+          }
+
+          $statusPath = Join-Path $ProductionRoot ".runtime\phase7c-account-bridge\startup-runner-status.json"
+          if (Test-Path -LiteralPath $statusPath) {
+            try {
+              $s = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+              Write-Host "BRIDGE_RUNNER_STATUS_FILE=FOUND"
+              Write-Host "BRIDGE_RUNNER_STATUS=$($s.status)"
+              Write-Host "BRIDGE_RUNNER_PID=$($s.runnerPid)"
+              Write-Host "BRIDGE_PROCESS_PID=$($s.bridgeProcessPid)"
+              Write-Host "BRIDGE_ACCOUNT_MODE=$($s.accountMode)"
+              Write-Host "BRIDGE_ATTEMPT=$($s.attempt)"
+              Write-Host "BRIDGE_STATUS_UPDATED_AT=$($s.updatedAt)"
+              if ($null -ne $s.exitCode) { Write-Host "BRIDGE_EXIT_CODE=$($s.exitCode)" }
+              if (-not [string]::IsNullOrWhiteSpace([string]$s.message)) {
+                $safeMessage = ([string]$s.message) -replace '(?i)(api[_-]?key|password|token)=[^\s;]+','$1=REDACTED'
+                Write-Host "BRIDGE_STATUS_MESSAGE=$safeMessage"
+              }
+              foreach ($pidValue in @($s.runnerPid,$s.bridgeProcessPid)) {
+                if ($null -ne $pidValue -and [int]$pidValue -gt 0) {
+                  $p = Get-Process -Id ([int]$pidValue) -ErrorAction SilentlyContinue
+                  Write-Host "PID_$pidValue_ALIVE=$($null -ne $p)"
+                }
+              }
+            } catch {
+              Write-Host "BRIDGE_RUNNER_STATUS_FILE=INVALID"
+              Write-Host "BRIDGE_RUNNER_STATUS_ERROR=$($_.Exception.Message)"
+            }
+          } else {
+            Write-Host "BRIDGE_RUNNER_STATUS_FILE=MISSING"
+          }
+
+          foreach ($name in @("startup-runner.err.log","bridge.err.log")) {
+            $path = Join-Path $ProductionRoot ".runtime\phase7c-account-bridge\$name"
+            if (Test-Path -LiteralPath $path) {
+              Write-Host "----- SAFE_TAIL $name -----"
+              Get-Content -LiteralPath $path -Tail 20 |
+                ForEach-Object {
+                  ([string]$_) -replace '(?i)(api[_-]?key|password|token)=[^\s;]+','$1=REDACTED'
+                } |
+                Write-Host
+              Write-Host "----- END_SAFE_TAIL $name -----"
+            } else {
+              Write-Host "$name=MISSING"
+            }
+          }
+
+          try {
+            $accountPath = Join-Path $ProductionRoot ".runtime\phase7c-account-mode.json"
+            $lib = Join-Path $ProductionRoot "scripts\lib\phase7c-account-mode.ps1"
+            . $lib
+            $account = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+            $envFile = [string]$account.envFile
+            if (-not [IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProductionRoot $envFile }
+            $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+            $base = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+            Write-Host "BRIDGE_PROBE_ENDPOINT=$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+            try {
+              $health = Invoke-RestMethod -Uri "$base/health" -Headers @{"x-mt5-api-key"=$envInfo.apiKey} -Method Get -TimeoutSec 5
+              Write-Host "BRIDGE_HEALTH_REACHABLE=TRUE"
+              Write-Host "BRIDGE_HEALTH_STATUS=$($health.status)"
+              Write-Host "BRIDGE_CONNECTED=$($health.connected)"
+              Write-Host "BRIDGE_ACCOUNT_MODE=$($health.accountMode)"
+              Write-Host "BRIDGE_GATEWAY_BUSY=$($health.gatewayBusy)"
+              Write-Host "BRIDGE_HEALTH_SOURCE=$($health.healthSource)"
+              Write-Host "BRIDGE_RECONNECT_COUNT=$($health.reconnectCount)"
+            } catch {
+              Write-Host "BRIDGE_HEALTH_REACHABLE=FALSE"
+              Write-Host "BRIDGE_HEALTH_ERROR=$($_.Exception.Message)"
+            }
+          } catch {
+            Write-Host "BRIDGE_CONFIG_PROBE=FAILED"
+            Write-Host "BRIDGE_CONFIG_ERROR=$($_.Exception.Message)"
+          }
+
+          Write-Host "DIAG_STATUS=COMPLETE"
