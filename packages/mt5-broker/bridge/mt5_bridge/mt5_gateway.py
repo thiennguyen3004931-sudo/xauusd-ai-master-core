@@ -15,6 +15,8 @@ from .models import CloseRequest, ModifyRequest, OrderRequest
 
 class Mt5Gateway:
     _RECONNECT_BACKOFF_SECONDS = 2.0
+    _HEALTH_LOCK_WAIT_SECONDS = 0.25
+    _HEALTH_CACHE_MAX_AGE_SECONDS = 5.0
 
     def __init__(self, settings: Settings, ledger: IdempotencyLedger, module: Any | None = None) -> None:
         self.settings = settings
@@ -26,6 +28,9 @@ class Mt5Gateway:
         # serialize health/positions/quote calls behind copy_rates_from_pos.
         self._closed_candle_cache_lock = threading.Lock()
         self._closed_candle_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self._health_snapshot_lock = threading.Lock()
+        self._last_health_snapshot: dict[str, Any] | None = None
+        self._last_health_snapshot_at = 0.0
         self.last_error: str | None = None
         self.reconnect_count = 0
         self.last_reconnect_at: int | None = None
@@ -50,11 +55,59 @@ class Mt5Gateway:
 
     def health(self, reconnect: bool = True) -> dict[str, Any]:
         now = int(time.time() * 1000)
-        with self._lock:
+        lock_wait_started = time.monotonic()
+        acquired = self._lock.acquire(timeout=self._HEALTH_LOCK_WAIT_SECONDS)
+        lock_wait_ms = int((time.monotonic() - lock_wait_started) * 1000)
+
+        if not acquired:
+            cached, cache_age_ms = self._recent_health_snapshot()
+            if cached is not None:
+                return {
+                    **cached,
+                    "gatewayBusy": True,
+                    "healthSource": "RECENT_CACHE",
+                    "healthSnapshotAgeMs": cache_age_ms,
+                    "healthLockWaitMs": lock_wait_ms,
+                    "timestamp": now,
+                }
+
+            return {
+                "status": "degraded",
+                "connected": False,
+                "tradingEnabled": self.settings.trading_enabled,
+                "terminalTradeAllowed": False,
+                "expertTradeAllowed": False,
+                "accountLogin": None,
+                "accountMode": None,
+                "accountBalance": None,
+                "accountEquity": None,
+                "accountMargin": None,
+                "accountFreeMargin": None,
+                "accountProfit": None,
+                "accountLeverage": None,
+                "accountCurrency": None,
+                "server": None,
+                "terminalVersion": None,
+                "lastError": "MT5 gateway is busy; no recent health snapshot is available.",
+                "reconnectCount": self.reconnect_count,
+                "lastReconnectAt": self.last_reconnect_at,
+                "reconnecting": False,
+                "gatewayBusy": True,
+                "healthSource": "LOCK_BUSY",
+                "healthSnapshotAgeMs": None,
+                "healthLockWaitMs": lock_wait_ms,
+                "timestamp": now,
+            }
+
+        try:
             terminal, account = self._connection_snapshot_locked(reconnect=reconnect)
+            terminal_version = self._terminal_version()
+        finally:
+            self._lock.release()
+
         connected = terminal is not None and account is not None
         mode = self._account_mode(getattr(account, "trade_mode", None)) if account else None
-        return {
+        snapshot = {
             "status": "ok" if connected else "degraded",
             "connected": connected,
             "tradingEnabled": self.settings.trading_enabled,
@@ -70,13 +123,33 @@ class Mt5Gateway:
             "accountLeverage": int(getattr(account, "leverage", 0)) if account else None,
             "accountCurrency": str(getattr(account, "currency", "")) if account else None,
             "server": str(account.server) if account else None,
-            "terminalVersion": self._terminal_version(),
+            "terminalVersion": terminal_version,
             "lastError": self.last_error,
             "reconnectCount": self.reconnect_count,
             "lastReconnectAt": self.last_reconnect_at,
             "reconnecting": not connected,
+            "gatewayBusy": False,
+            "healthSource": "LIVE_PROBE",
+            "healthSnapshotAgeMs": 0,
+            "healthLockWaitMs": lock_wait_ms,
             "timestamp": now,
         }
+        self._store_health_snapshot(snapshot)
+        return snapshot
+
+    def _store_health_snapshot(self, snapshot: dict[str, Any]) -> None:
+        with self._health_snapshot_lock:
+            self._last_health_snapshot = dict(snapshot)
+            self._last_health_snapshot_at = time.monotonic()
+
+    def _recent_health_snapshot(self) -> tuple[dict[str, Any] | None, int | None]:
+        with self._health_snapshot_lock:
+            if self._last_health_snapshot is None or self._last_health_snapshot_at <= 0:
+                return None, None
+            age_seconds = max(0.0, time.monotonic() - self._last_health_snapshot_at)
+            if age_seconds > self._HEALTH_CACHE_MAX_AGE_SECONDS:
+                return None, int(age_seconds * 1000)
+            return dict(self._last_health_snapshot), int(age_seconds * 1000)
 
     def quote(self, canonical_symbol: str) -> dict[str, Any]:
         broker_symbol = self._ensure_symbol(canonical_symbol)
