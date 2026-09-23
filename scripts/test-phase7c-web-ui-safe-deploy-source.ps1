@@ -73,12 +73,18 @@ Assert-LiteralOrder '[void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)
 
 Assert-Literal "--filter '@xauusd/mt5-broker' build" 'mt5 broker build before web build'
 Assert-Contains '(?ms)&\s+\$pnpm\.Source\s+--filter\s+''@xauusd/mt5-broker''\s+build\s*if\s*\(\$LASTEXITCODE\s+-ne\s+0\)\s*\{' 'mt5 broker build fail-fast guard'
-Assert-Literal "--filter '@xauusd/api...' build" 'API dependency graph prebuild before dashboard restart'
-Assert-Contains '(?ms)&\s+\$pnpm\.Source\s+--filter\s+''@xauusd/api\.\.\.''\s+build\s*if\s*\(\$LASTEXITCODE\s+-ne\s+0\)\s*\{' 'API dependency graph prebuild fail-fast guard'
+
+$ApiTurboPrimeLiteral = "& `$pnpm.Source build '--filter=@xauusd/api...'"
+$LegacyApiPrebuildLiteral = "& `$pnpm.Source --filter '@xauusd/api...' build"
+Assert-Literal $ApiTurboPrimeLiteral 'API dependency graph Turbo prebuild before dashboard restart'
+Assert-Contains '(?ms)&\s+\$pnpm\.Source\s+build\s+''--filter=@xauusd/api\.\.\.''\s*if\s*\(\$LASTEXITCODE\s+-ne\s+0\)\s*\{' 'API dependency graph Turbo prebuild fail-fast guard'
+if ($Source.IndexOf($LegacyApiPrebuildLiteral, [System.StringComparison]::Ordinal) -ge 0) {
+  throw 'Forbidden web UI deploy literal: workspace-direct API prebuild bypasses runtime Turbo cache'
+}
 Assert-Literal 'PHASE7C_WEB_UI_DEPLOY_API_DEPENDENCY_BUILD=PASS' 'API dependency graph prebuild pass marker'
 Assert-LiteralOrder "--filter '@xauusd/mt5-broker' build" "--filter '@xauusd/web' build" 'mt5 broker build precedes web build'
-Assert-LiteralOrder "--filter '@xauusd/mt5-broker' build" "--filter '@xauusd/api...' build" 'mt5 broker build precedes API dependency graph prebuild'
-Assert-LiteralOrder "--filter '@xauusd/api...' build" "--filter '@xauusd/web' build" 'API dependency graph prebuild precedes web build'
+Assert-LiteralOrder "--filter '@xauusd/mt5-broker' build" $ApiTurboPrimeLiteral 'mt5 broker build precedes API dependency graph Turbo prebuild'
+Assert-LiteralOrder $ApiTurboPrimeLiteral "--filter '@xauusd/web' build" 'API dependency graph Turbo prebuild precedes web build'
 Assert-Literal "--filter '@xauusd/web' build" 'web build before restart'
 Assert-Literal 'deploy-phase7c-mt5-dashboard-local.ps1' 'reuse verified dashboard restart helper'
 Assert-Literal '-SkipPanelInstall' 'web-only restart path'
