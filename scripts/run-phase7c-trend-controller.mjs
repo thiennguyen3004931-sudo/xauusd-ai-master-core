@@ -126,6 +126,21 @@ globalThis.fetch = async function phase7CTrendGate(input, init = undefined) {
       });
     }
 
+    const finalModePayload = await controlRequest("/api/v1/phase7c/bot-mode");
+    const finalMode = String(finalModePayload?.state?.mode ?? "PAUSE").toUpperCase();
+    if (finalMode !== decision.activeMode) {
+      console.warn(
+        `PHASE7C_TREND_ENTRY_BLOCKED=BOT_MODE_CHANGED_BEFORE_BROKER_SUBMIT|INITIAL_${decision.activeMode}|FINAL_${finalMode}`,
+      );
+      return blockedResponse({
+        allowed: false,
+        activeMode: finalMode,
+        recommendedMode: finalMode === "PAUSE" ? "PAUSE" : null,
+        reason: "BOT_MODE_CHANGED_BEFORE_BROKER_SUBMIT",
+        detail: `initial=${decision.activeMode};final=${finalMode}`,
+      });
+    }
+
     recordTrendEntryAttributionBestEffort({
       audit: trendFinalPermissionAudit,
       decision,
