@@ -1,0 +1,61 @@
+name: PR64 Web API Build Prime Exact-Head Validation
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/pr64-web-api-build-prime-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: pr64-build-prime-contract
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR64 head
+        uses: actions/checkout@v4
+        with:
+          ref: d8430a29bdbdc842f0f704aa02d6d12aba0c3e26
+          fetch-depth: 1
+
+      - name: Verify exact head
+        shell: powershell
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "PR64_VALIDATION_HEAD=$head"
+          if ($head -ne "d8430a29bdbdc842f0f704aa02d6d12aba0c3e26") { throw "Exact PR64 head mismatch." }
+
+      - name: Web UI safe deploy source contract - Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\scripts\test-phase7c-web-ui-safe-deploy-source.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: API runtime dependency build contract
+        shell: powershell
+        run: |
+          node scripts/test-phase7b-api-runtime-dependency-build-source.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: API runtime launcher contract
+        shell: powershell
+        run: |
+          node scripts/test-phase7b-api-runtime-launcher-source-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: PowerShell parse deploy scripts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          [void][scriptblock]::Create((Get-Content scripts\deploy-phase7c-web-ui-local.ps1 -Raw))
+          [void][scriptblock]::Create((Get-Content scripts\deploy-phase7c-mt5-dashboard-local.ps1 -Raw))
+          [void][scriptblock]::Create((Get-Content scripts\run-phase7b-api-runtime-local.ps1 -Raw))
+          Write-Host "PR64_POWERSHELL_PARSE=PASS"
+
+      - name: Diff hygiene
+        shell: powershell
+        run: git diff --check 505fc1ff6d2cf58039b001352bdee2cdad44637a...HEAD
