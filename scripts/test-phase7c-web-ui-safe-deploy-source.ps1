@@ -69,6 +69,13 @@ Assert-Literal '[DateTimeOffset]::Parse' 'broker boot timestamp parsing'
 Assert-Literal 'LastWriteTimeUtc' 'loaded lifecycle source timestamp comparison'
 Assert-Literal 'PHASE7C_WEB_UI_DEPLOY_BROKER_SOURCE_FRESH=PASS' 'broker freshness pass marker'
 Assert-Literal '[void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)' 'broker freshness preflight invocation'
+Assert-Literal '[int]$MaxReadAttempts = 5' 'bounded JSON read retry attempts'
+Assert-Literal '[int]$RetryDelayMilliseconds = 100' 'bounded JSON read retry delay'
+Assert-Literal 'catch [System.IO.IOException]' 'transient lifecycle heartbeat sharing violation retry'
+Assert-Literal 'Start-Sleep -Milliseconds $RetryDelayMilliseconds' 'bounded sharing violation backoff'
+Assert-Literal 'if ($attempt -ge $MaxReadAttempts)' 'bounded JSON read retry exhaustion guard'
+Assert-Literal '$raw | ConvertFrom-Json' 'JSON parse occurs after successful file read'
+Assert-LiteralOrder 'catch [System.IO.IOException]' '$raw | ConvertFrom-Json' 'sharing retry must complete before JSON validity check'
 Assert-LiteralOrder '[void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)' "--filter '@xauusd/mt5-broker' build" 'broker freshness must pass before any build/runtime restart'
 
 Assert-Literal "--filter '@xauusd/mt5-broker' build" 'mt5 broker build before web build'
@@ -121,5 +128,78 @@ Assert-DashboardNotContains 'preflight requires DEMO account' 'legacy DEMO-only 
 Assert-DashboardNotContains '(?m)\^accountMode=DEMO\$' 'hard-coded DEMO readiness check'
 Assert-DashboardNotContains 'switch-phase7c-account-mode' 'dashboard deploy must not switch accounts'
 Assert-DashboardNotContains 'arm-phase7c-live|disarm-phase7c-live' 'dashboard deploy must not alter LIVE arm'
+
+if ($env:OS -eq 'Windows_NT') {
+  $tokens = $null
+  $parseErrors = $null
+  $ast = [System.Management.Automation.Language.Parser]::ParseInput($Source, [ref]$tokens, [ref]$parseErrors)
+  if (@($parseErrors).Count -gt 0) {
+    throw "Web UI deploy source could not be parsed for Read-JsonFile behavior test."
+  }
+  $readJsonFunction = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq 'Read-JsonFile'
+  }, $true)
+  if ($null -eq $readJsonFunction) {
+    throw "Read-JsonFile function was not found for behavior test."
+  }
+  Invoke-Expression $readJsonFunction.Extent.Text
+
+  $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("phase7c-json-read-" + [Guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+  $jsonPath = Join-Path $tempRoot 'heartbeat.json'
+  $readyPath = Join-Path $tempRoot 'lock-ready.txt'
+  try {
+    Set-Content -LiteralPath $jsonPath -Value '{"brokerPid":12345}' -Encoding UTF8
+    $lockJob = Start-Job -ArgumentList $jsonPath, $readyPath -ScriptBlock {
+      param($Path, $ReadyPath)
+      $stream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None
+      )
+      try {
+        Set-Content -LiteralPath $ReadyPath -Value 'READY' -Encoding ASCII
+        Start-Sleep -Milliseconds 250
+      } finally {
+        $stream.Dispose()
+      }
+    }
+
+    $deadline = (Get-Date).AddSeconds(5)
+    while (-not (Test-Path -LiteralPath $readyPath -PathType Leaf) -and (Get-Date) -lt $deadline) {
+      Start-Sleep -Milliseconds 25
+    }
+    if (-not (Test-Path -LiteralPath $readyPath -PathType Leaf)) {
+      throw "Could not establish the transient heartbeat sharing-violation fixture."
+    }
+
+    $result = Read-JsonFile -Path $jsonPath -Label 'Lifecycle broker heartbeat'
+    if ([int]$result.brokerPid -ne 12345) {
+      throw "Read-JsonFile did not recover from the transient heartbeat sharing violation."
+    }
+    Wait-Job -Job $lockJob -Timeout 5 | Out-Null
+    Remove-Job -Job $lockJob -Force -ErrorAction SilentlyContinue
+    Write-Host "PHASE7C_WEB_UI_HEARTBEAT_CONTENTION_RETRY_TEST=PASS"
+
+    Set-Content -LiteralPath $jsonPath -Value '{invalid-json' -Encoding UTF8
+    $invalidFailedClosed = $false
+    try {
+      [void](Read-JsonFile -Path $jsonPath -Label 'Lifecycle broker heartbeat')
+    } catch {
+      $invalidFailedClosed = $_.Exception.Message -match 'file is invalid'
+    }
+    if (-not $invalidFailedClosed) {
+      throw "Read-JsonFile must fail closed for malformed JSON after a successful file read."
+    }
+    Write-Host "PHASE7C_WEB_UI_INVALID_JSON_FAIL_CLOSED_TEST=PASS"
+  } finally {
+    Get-Job | Where-Object { $_.State -ne 'Completed' } | Stop-Job -ErrorAction SilentlyContinue
+    Get-Job | Remove-Job -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
 
 Write-Host "PHASE7C_WEB_UI_SAFE_DEPLOY_SOURCE_TEST=PASS"
