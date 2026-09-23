@@ -117,3 +117,41 @@ test("existing Sideway native close paths and command identity stay untouched", 
   assert.match(sidewaySource, /takeProfit\s*:\s*brokerTakeProfit/,
     "initial Sideway broker order must use the canonical brokerTakeProfit selector.");
 });
+
+
+test("Sideway durable ownership is committed before additive Fixed TP broker reconcile", () => {
+  const cycle = block("async function cycle()", "function readStrategyEntryConfigSnapshot()");
+
+  const pendingIndex = cycle.indexOf("if (!state.managed && state.pendingEntry)");
+  const recoveredManagedIndex = cycle.indexOf("state.managed = buildManagedState(recovery.position", pendingIndex);
+  const recoveredClearIndex = cycle.indexOf("state.pendingEntry = null;", recoveredManagedIndex);
+  const recoveredSaveIndex = cycle.indexOf("saveState();", recoveredClearIndex);
+  const recoveredJournalIndex = cycle.indexOf('journal("PENDING_ENTRY_RECOVERED"', recoveredSaveIndex);
+  const recoveredReconcileIndex = cycle.indexOf("await reconcileFixedTpBrokerTakeProfit({", recoveredJournalIndex);
+
+  assert.ok(recoveredManagedIndex > pendingIndex, "Sideway pending recovery must restore managed ownership.");
+  assert.ok(recoveredClearIndex > recoveredManagedIndex);
+  assert.ok(recoveredSaveIndex > recoveredClearIndex, "Recovered Sideway ownership must be durable before broker TP reconcile.");
+  assert.ok(recoveredJournalIndex > recoveredSaveIndex);
+  assert.ok(recoveredReconcileIndex > recoveredJournalIndex, "Sideway recovery event must precede additive broker TP reconcile.");
+
+  const submitManagedIndex = cycle.lastIndexOf("state.managed = buildManagedState(opened");
+  const submitClearIndex = cycle.indexOf("state.pendingEntry = null;", submitManagedIndex);
+  const submitSaveIndex = cycle.indexOf("saveState();", submitClearIndex);
+  const filledIndex = cycle.indexOf('journal("ENTRY_FILLED"', submitSaveIndex);
+  const reconcileIndex = cycle.indexOf("await reconcileFixedTpBrokerTakeProfit({", filledIndex);
+
+  assert.ok(submitManagedIndex >= 0, "Sideway fill must create managed state.");
+  assert.ok(submitClearIndex > submitManagedIndex);
+  assert.ok(submitSaveIndex > submitClearIndex, "Sideway managed ownership must be durable before broker TP reconcile.");
+  assert.ok(filledIndex > submitSaveIndex, "Sideway ENTRY_FILLED must follow durable ownership.");
+  assert.ok(reconcileIndex > filledIndex, "Sideway Fixed TP broker reconcile must run after durable ownership and ENTRY_FILLED.");
+});
+
+test("Sideway Fixed TP broker reconcile errors are observable but non-fatal", () => {
+  const helper = block("async function reconcileFixedTpBrokerTakeProfit(", "async function closeFixedTpIfTriggered(");
+  assert.match(helper, /try\s*\{[\s\S]*?bridgeRequest\s*\(\s*["']PATCH["']/,
+    "Sideway Fixed TP broker reconcile must isolate the PATCH call.");
+  assert.match(helper, /catch\s*\(error\)[\s\S]*?FIXED_TP_BROKER_RECONCILE_ERROR[\s\S]*?errorMessage\(error\)/,
+    "Sideway Fixed TP broker reconcile failure must journal an error instead of escaping and breaking ownership lifecycle.");
+});
