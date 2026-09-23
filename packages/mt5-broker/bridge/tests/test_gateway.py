@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from mt5_bridge.config import Settings
 from mt5_bridge.ledger import IdempotencyLedger
-from mt5_bridge.models import OrderRequest
+from mt5_bridge.models import ModifyRequest, OrderRequest
 from mt5_bridge.mt5_gateway import Mt5Gateway
 
 
@@ -255,6 +255,43 @@ class GatewayTests(unittest.TestCase):
 
             self.assertEqual(fake.send_calls, 1)
             self.assertEqual(gateway.reconnect_count, 0)
+            ledger.close()
+
+    def test_take_profit_only_patch_preserves_live_broker_stop_loss(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = FakeMt5()
+            fake.position = SimpleNamespace(
+                ticket=305091979,
+                symbol="XAUUSDm",
+                type=fake.POSITION_TYPE_SELL,
+                volume=0.12,
+                price_open=4340.87,
+                sl=4347.52,
+                tp=0.0,
+                profit=-3.96,
+                swap=0.0,
+                time=1700000000,
+                time_msc=1700000000000,
+                magic=260806,
+                comment="xau:test",
+            )
+            ledger_path = Path(directory) / "ledger.sqlite3"
+            ledger = IdempotencyLedger(ledger_path)
+            gateway = Mt5Gateway(settings(ledger_path), ledger, fake)
+            self.assertTrue(gateway.start())
+
+            response = gateway.modify_position(
+                "305091979",
+                ModifyRequest(
+                    takeProfit=4320.82,
+                    commandId="phase7c-fixed-tp-broker-trend-305091979",
+                ),
+            )
+
+            self.assertTrue(response["success"])
+            self.assertEqual(fake.send_calls, 1)
+            self.assertAlmostEqual(fake.position.sl, 4347.52)
+            self.assertAlmostEqual(fake.position.tp, 4320.82)
             ledger.close()
 
     def test_closed_candles_reuse_bar_aligned_cache_without_reloading_mt5_history(self):

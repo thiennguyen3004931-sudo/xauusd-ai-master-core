@@ -96,3 +96,41 @@ test("existing Trend non-Fixed-TP full-close command identity stays untouched", 
   assert.match(closeAll, /`p7b-exit-\$\{reason\}-\$\{managed\.ticket\}-\$\{m15CloseTime\}-\$\{managed\.exitAttempt\}`/,
     "existing reversal/runner full-close command identity must not be rewritten by Fixed TP.");
 });
+
+
+test("Trend durable ownership is committed before additive Fixed TP broker reconcile", () => {
+  const submit = block("async function submitTrendEntry(", "async function resolveDailyRecoveryPlan(");
+  const managedIndex = submit.indexOf("state.managed = {");
+  const pendingClearIndex = submit.indexOf("state.pendingEntry = null;", managedIndex);
+  const saveIndex = submit.indexOf("saveState();", pendingClearIndex);
+  const filledIndex = submit.indexOf('journal("ENTRY_FILLED"', saveIndex);
+  const reconcileIndex = submit.indexOf("await reconcileFixedTpBrokerTakeProfit({", filledIndex);
+
+  assert.ok(managedIndex >= 0, "Trend fill must create managed state.");
+  assert.ok(pendingClearIndex > managedIndex, "Trend fill must clear pending only after managed ownership exists.");
+  assert.ok(saveIndex > pendingClearIndex, "Trend managed ownership must be durable before additive broker TP work.");
+  assert.ok(filledIndex > saveIndex, "ENTRY_FILLED must be emitted only after durable ownership.");
+  assert.ok(reconcileIndex > filledIndex, "Fixed TP broker reconcile must run after durable ownership and ENTRY_FILLED.");
+
+  const cycle = block("async function cycle()", "async function submitTrendEntry(");
+  const pendingIndex = cycle.indexOf("if (state.pendingEntry)");
+  const recoveredManagedIndex = cycle.indexOf("state.managed = managedFromPending(", pendingIndex);
+  const recoveredClearIndex = cycle.indexOf("state.pendingEntry = null;", recoveredManagedIndex);
+  const recoveredSaveIndex = cycle.indexOf("saveState();", recoveredClearIndex);
+  const recoveredJournalIndex = cycle.indexOf('journal("PENDING_ENTRY_RECOVERED"', recoveredSaveIndex);
+  const recoveredReconcileIndex = cycle.indexOf("await reconcileFixedTpBrokerTakeProfit({", recoveredJournalIndex);
+
+  assert.ok(recoveredManagedIndex > pendingIndex, "Pending recovery must restore managed ownership.");
+  assert.ok(recoveredClearIndex > recoveredManagedIndex);
+  assert.ok(recoveredSaveIndex > recoveredClearIndex, "Recovered ownership must be durable before broker TP reconcile.");
+  assert.ok(recoveredJournalIndex > recoveredSaveIndex);
+  assert.ok(recoveredReconcileIndex > recoveredJournalIndex, "Recovered ownership event must precede additive broker TP reconcile.");
+});
+
+test("Trend Fixed TP broker reconcile errors are observable but non-fatal", () => {
+  const helper = block("async function reconcileFixedTpBrokerTakeProfit(", "function recordManagementExitSideSample(");
+  assert.match(helper, /try\s*\{[\s\S]*?patch<CommandResponse>/,
+    "Fixed TP broker reconcile must isolate the PATCH call.");
+  assert.match(helper, /catch\s*\(error\)[\s\S]*?FIXED_TP_BROKER_RECONCILE_ERROR[\s\S]*?errorMessage\(error\)/,
+    "Fixed TP broker reconcile failure must journal an error instead of escaping and breaking ownership lifecycle.");
+});
