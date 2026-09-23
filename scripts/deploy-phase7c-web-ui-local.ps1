@@ -45,12 +45,31 @@ foreach ($required in @(
 . $LifecycleBrokerAccountLibrary
 . $RuntimeSourceAttestationLibrary
 
-function Read-JsonFile([string]$Path, [string]$Label) {
+function Read-JsonFile(
+  [string]$Path,
+  [string]$Label,
+  [int]$MaxReadAttempts = 5,
+  [int]$RetryDelayMilliseconds = 100
+) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
     throw "$Label file is missing: $Path"
   }
+
+  $raw = $null
+  for ($attempt = 1; $attempt -le $MaxReadAttempts; $attempt++) {
+    try {
+      $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+      break
+    } catch [System.IO.IOException] {
+      if ($attempt -ge $MaxReadAttempts) {
+        throw "$Label file could not be read after $MaxReadAttempts attempts: $Path. $($_.Exception.Message)"
+      }
+      Start-Sleep -Milliseconds $RetryDelayMilliseconds
+    }
+  }
+
   try {
-    return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    return $raw | ConvertFrom-Json
   } catch {
     throw "$Label file is invalid: $Path. $($_.Exception.Message)"
   }
