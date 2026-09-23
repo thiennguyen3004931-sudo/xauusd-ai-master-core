@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class OrderRequest(BaseModel):
@@ -29,6 +29,12 @@ class CloseRequest(BaseModel):
 
 
 class ModifyRequest(BaseModel):
-    stopLoss: float = Field(gt=0)
+    stopLoss: float | None = Field(default=None, gt=0)
     takeProfit: float | None = Field(default=None, gt=0)
     commandId: str = Field(min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def require_protection_change(self) -> "ModifyRequest":
+        if self.stopLoss is None and self.takeProfit is None:
+            raise ValueError("At least one of stopLoss or takeProfit is required")
+        return self
