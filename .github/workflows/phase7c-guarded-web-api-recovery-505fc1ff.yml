@@ -1,0 +1,200 @@
+name: Phase7C Guarded Web API Recovery 505fc1ff
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/phase7c-guarded-web-api-recovery-505fc1ff.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    name: guarded-web-api-recovery
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout recovery source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Prime build and recover Web API fail-closed
+        shell: powershell
+        run: |
+          $ErrorActionPreference="Stop"
+          $Root="F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $Runtime=Join-Path $Root ".runtime"
+          $Target="505fc1ff6d2cf58039b001352bdee2cdad44637a"
+          $WebTask="XAUUSD-Phase7B-Web"
+          $Api="http://127.0.0.1:3711"
+
+          Write-Host "RECOVERY_SCOPE=WEB_API_ONLY"
+          Write-Host "RECOVERY_AUTO_ENABLE=NONE"
+          Write-Host "RECOVERY_ARM_ENABLE=NONE"
+          Write-Host "RECOVERY_ORDER_MUTATION=NONE"
+          Write-Host "RECOVERY_POSITION_MUTATION=NONE"
+          Write-Host "RECOVERY_LIVE_TEST_ORDER=NONE"
+
+          $branch=(& git -C $Root branch --show-current).Trim()
+          $head=(& git -C $Root rev-parse HEAD).Trim().ToLowerInvariant()
+          $dirty=@(& git -C $Root status --porcelain)
+          Write-Host "PREFLIGHT_BRANCH=$branch"
+          Write-Host "PREFLIGHT_HEAD=$head"
+          Write-Host "PREFLIGHT_DIRTY_COUNT=$($dirty.Count)"
+          if($branch -ne "main" -or $head -ne $Target -or $dirty.Count -ne 0){ throw "Production source guard failed." }
+
+          $armPath=Join-Path $Runtime "phase7c-live-arm.json"
+          $armFile=Test-Path -LiteralPath $armPath
+          Write-Host "PREFLIGHT_ARM_FILE_PRESENT=$armFile"
+          if($armFile){ throw "LIVE ARM file exists; refusing Web/API recovery." }
+
+          $modePath=Join-Path $Runtime "phase7c-bot-mode.json"
+          $modeRaw=Get-Content -LiteralPath $modePath -Raw | ConvertFrom-Json
+          $modeValue=""
+          if($null -ne $modeRaw.PSObject.Properties['mode']){ $modeValue=[string]$modeRaw.mode }
+          elseif($null -ne $modeRaw.PSObject.Properties['state']){ $modeValue=[string]$modeRaw.state.mode }
+          $modeValue=$modeValue.Trim().ToUpperInvariant()
+          Write-Host "PREFLIGHT_MODE_FILE=$modeValue"
+          if($modeValue -ne "PAUSE"){ throw "Bot mode file is not PAUSE." }
+
+          $accountPath=Join-Path $Runtime "phase7c-account-mode.json"
+          $lib=Join-Path $Root "scripts\lib\phase7c-account-mode.ps1"
+          . $lib
+          $account=Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+          if(([string]$account.accountMode).Trim().ToUpperInvariant() -ne "LIVE"){ throw "Selected account is not LIVE." }
+          $envFile=[string]$account.envFile
+          if(-not [IO.Path]::IsPathRooted($envFile)){ $envFile=Join-Path $Root $envFile }
+          $envInfo=Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+          $bridge="http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers=@{"x-mt5-api-key"=$envInfo.apiKey}
+
+          $health=Invoke-RestMethod -Uri "$bridge/health" -Headers $headers -Method Get -TimeoutSec 8
+          if(-not [bool]$health.connected -or [string]$health.status -ne "ok" -or [string]$health.configuredAccountMode -ne "LIVE" -or [string]$health.accountMode -ne "real"){ throw "Bridge is not healthy LIVE/real." }
+          Write-Host "PREFLIGHT_BRIDGE=PASS|SESSION=$($health.bridgeSessionId)|HEALTH_SOURCE=$($health.healthSource)|GATEWAY_BUSY=$($health.gatewayBusy)"
+
+          function Read-Count([string]$Path){
+            $r=Invoke-WebRequest -Uri "$bridge$Path" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 8
+            $raw=([string]$r.Content).Trim()
+            if([string]::IsNullOrWhiteSpace($raw)-or $raw -eq "[]"){return 0}
+            return @($raw|ConvertFrom-Json|Where-Object{$null-ne$_}).Count
+          }
+          $positions=Read-Count "/v1/positions?symbol=XAUUSD"
+          $orders=Read-Count "/v1/orders?symbol=XAUUSD"
+          Write-Host "PREFLIGHT_POSITIONS=$positions"
+          Write-Host "PREFLIGHT_PENDING_ORDERS=$orders"
+          if($positions -ne 0 -or $orders -ne 0){ throw "Broker must be flat." }
+
+          $task=Get-ScheduledTask -TaskName $WebTask -ErrorAction Stop
+          $actions=@($task.Actions)
+          $actionText=if($actions.Count -eq 1){"$([string]$actions[0].Execute) $([string]$actions[0].Arguments)"}else{""}
+          if($actions.Count -ne 1 -or $actionText -notmatch '(?i)run-phase7b-web-autostart\.ps1'){ throw "Web task action is not canonical." }
+          Write-Host "PREFLIGHT_WEB_TASK=PASS|STATE=$($task.State)"
+
+          Push-Location $Root
+          try {
+            Write-Host "API_BUILD_PRIME=START"
+            & pnpm build '--filter=@xauusd/api...'
+            if($LASTEXITCODE -ne 0){ throw "API dependency build prime failed with code $LASTEXITCODE." }
+            Write-Host "API_BUILD_PRIME=PASS"
+          } finally { Pop-Location }
+
+          $dirtyAfterBuild=@(& git -C $Root status --porcelain)
+          Write-Host "POST_BUILD_DIRTY_COUNT=$($dirtyAfterBuild.Count)"
+          if($dirtyAfterBuild.Count -ne 0){ throw "Build prime changed tracked production source." }
+
+          $existing3711=@(Get-NetTCPConnection -LocalPort 3711 -State Listen -ErrorAction SilentlyContinue)
+          $existing5717=@(Get-NetTCPConnection -LocalPort 5717 -State Listen -ErrorAction SilentlyContinue)
+          if($existing3711.Count -eq 0 -and $existing5717.Count -eq 0){
+            Start-ScheduledTask -TaskName $WebTask -ErrorAction Stop
+            Write-Host "WEB_TASK_START_REQUEST=PASS"
+          } elseif($existing3711.Count -gt 0 -and $existing5717.Count -gt 0) {
+            Write-Host "WEB_TASK_START_REQUEST=SKIP_PORTS_ALREADY_UP"
+          } else {
+            throw "Partial Web/API port state before task start."
+          }
+
+          $ready=$false
+          $last=""
+          for($i=1;$i -le 90;$i++){
+            Start-Sleep -Seconds 2
+            try {
+              $ui=Invoke-WebRequest -Uri "$Api/api/v1/phase7c-ui/mt5?symbol=XAUUSD" -UseBasicParsing -TimeoutSec 5
+              $content=[string]$ui.Content
+              if(
+                $ui.StatusCode -eq 200 -and
+                $content -match '(?m)^version=2$' -and
+                $content -match '(?m)^accountMode=LIVE$' -and
+                $content -match '(?m)^mt5Connected=true$' -and
+                $content -match '(?m)^accountGuardValid=true$' -and
+                $content -match '(?m)^readOnly=true$' -and
+                $content -match '(?m)^mt5OrderPermission=NONE$'
+              ){
+                $ready=$true
+                break
+              }
+              $last="UI_CONTENT_NOT_READY"
+            } catch { $last=$_.Exception.Message }
+          }
+          Write-Host "WEB_API_READY=$ready"
+          if(-not $ready){ throw "Web/API did not become ready after build prime. last=$last" }
+
+          $mode=Invoke-RestMethod -Uri "$Api/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+          $cap=Invoke-RestMethod -Uri "$Api/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+          Write-Host "POST_RECOVERY_MODE=$($mode.state.mode)"
+          Write-Host "POST_RECOVERY_ARM=$($cap.liveArmStatus)"
+          Write-Host "POST_RECOVERY_LIVE_EXECUTION_ARMED=$($cap.liveExecutionArmed)"
+          if(([string]$mode.state.mode).Trim().ToUpperInvariant() -ne "PAUSE"){ throw "Recovered API mode is not PAUSE." }
+          if(([string]$cap.liveArmStatus).Trim().ToUpperInvariant() -ne "DISARMED" -or [bool]$cap.liveExecutionArmed){ throw "Recovered API is not DISARMED." }
+
+          $positions=Read-Count "/v1/positions?symbol=XAUUSD"
+          $orders=Read-Count "/v1/orders?symbol=XAUUSD"
+          Write-Host "POST_RECOVERY_POSITIONS=$positions"
+          Write-Host "POST_RECOVERY_PENDING_ORDERS=$orders"
+          if($positions -ne 0 -or $orders -ne 0){ throw "Recovered broker is not flat." }
+
+          $att=$null
+          for($i=1;$i -le 30;$i++){
+            try {
+              $candidate=Invoke-RestMethod -Uri "$Api/api/v1/phase7c/runtime-source-attestation/" -Method Get -TimeoutSec 8
+              if([string]$candidate.overall -eq "EXACT_MATCH" -and ([string]$candidate.deployment.sourceCommit).Trim().ToLowerInvariant() -eq $Target){
+                $att=$candidate
+                break
+              }
+            } catch {}
+            Start-Sleep -Seconds 2
+          }
+          if($null -eq $att){ throw "Runtime source attestation did not become EXACT_MATCH." }
+          Write-Host "SOURCE_ATTESTATION_OVERALL=$($att.overall)"
+          Write-Host "SOURCE_ATTESTATION_COMMIT=$($att.deployment.sourceCommit)"
+          $mismatches=@($att.components|Where-Object{[string]$_.verdict -ne "EXACT_MATCH"})
+          Write-Host "SOURCE_ATTESTATION_MISMATCH_COUNT=$($mismatches.Count)"
+          if($mismatches.Count -ne 0){ throw "Runtime source attestation still has mismatches." }
+
+          $verifier=Join-Path $Root "scripts\verify-phase7c-account-runtime-local.ps1"
+          $verified=$false
+          for($i=1;$i -le 18;$i++){
+            try {
+              & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $verifier -WorkDir $Runtime -ExpectedAccountMode LIVE -ControlApiUrl $Api -RequireTelegram
+              if($LASTEXITCODE -eq 0){$verified=$true;break}
+            } catch {}
+            Start-Sleep -Seconds 5
+          }
+          Write-Host "STRICT_LIVE_VERIFY=$verified"
+          if(-not $verified){ throw "Strict LIVE runtime verifier did not pass." }
+
+          if(Test-Path -LiteralPath $armPath){ throw "LIVE ARM file appeared during Web/API recovery." }
+          $finalHead=(& git -C $Root rev-parse HEAD).Trim().ToLowerInvariant()
+          $finalDirty=@(& git -C $Root status --porcelain)
+          if($finalHead -ne $Target -or $finalDirty.Count -ne 0){ throw "Final production source guard failed." }
+
+          Write-Host "WEB_API_RECOVERY_STATUS=PASS"
+          Write-Host "FINAL_PRODUCTION_HEAD=$finalHead"
+          Write-Host "FINAL_MODE=PAUSE"
+          Write-Host "FINAL_ARM=DISARMED"
+          Write-Host "FINAL_POSITIONS=0"
+          Write-Host "FINAL_PENDING_ORDERS=0"
+          Write-Host "FINAL_SOURCE_ATTESTATION=EXACT_MATCH"
+          Write-Host "NEXT_ACTION=FIX_STARTUP_TIMEOUT_CONTRACT"
