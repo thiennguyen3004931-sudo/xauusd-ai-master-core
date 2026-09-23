@@ -1,0 +1,154 @@
+name: Phase7C Bridge Guarded Restart
+
+on:
+  push:
+    branches:
+      - ops/bridge-readonly-diagnostic-20260923
+    paths:
+      - ".github/workflows/phase7c-bridge-guarded-restart.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    name: bridge-guarded-restart
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 8
+    steps:
+      - name: Checkout recovery control source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restart canonical bridge task fail-closed
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProductionRoot = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $TaskName = "XAUUSD-Phase7C-Bridge"
+          $ExpectedOldSource = "4aeff4e62c5acecb85c8c344184f962fd7121928"
+          $ControlApi = "http://127.0.0.1:3711"
+
+          Write-Host "BRIDGE_RECOVERY_SCOPE=TASK_RESTART_ONLY"
+          Write-Host "BRIDGE_RECOVERY_SOURCE_MUTATION=NONE"
+          Write-Host "BRIDGE_RECOVERY_MODE_TARGET=PAUSE"
+          Write-Host "BRIDGE_RECOVERY_ARM_TARGET=DISARMED"
+          Write-Host "BRIDGE_RECOVERY_ORDER_MUTATION=NONE"
+          Write-Host "BRIDGE_RECOVERY_POSITION_MUTATION=NONE"
+          Write-Host "BRIDGE_RECOVERY_LIVE_TEST_ORDER=NONE"
+
+          $branch = (& git -C $ProductionRoot branch --show-current).Trim()
+          $head = (& git -C $ProductionRoot rev-parse HEAD).Trim().ToLowerInvariant()
+          $dirty = @(& git -C $ProductionRoot status --porcelain)
+          Write-Host "PRODUCTION_BRANCH=$branch"
+          Write-Host "PRODUCTION_HEAD=$head"
+          Write-Host "PRODUCTION_DIRTY_COUNT=$($dirty.Count)"
+          if ($branch -ne "main") { throw "Production branch must be main." }
+          if ($head -ne $ExpectedOldSource) { throw "Production source changed unexpectedly; refusing bridge restart. expected=$ExpectedOldSource actual=$head" }
+          if ($dirty.Count -ne 0) { throw "Production worktree is dirty; refusing bridge restart." }
+
+          $mode = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+          $modeValue = ([string]$mode.state.mode).Trim().ToUpperInvariant()
+          Write-Host "PREFLIGHT_BOT_MODE=$modeValue"
+          if ($modeValue -ne "PAUSE") { throw "Bridge recovery requires PAUSE." }
+
+          $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+          $actions = @($task.Actions)
+          if ($actions.Count -ne 1) { throw "Bridge task must contain exactly one action." }
+          $actionText = "$([string]$actions[0].Execute) $([string]$actions[0].Arguments)"
+          if ($actionText -notmatch '(?i)run-phase7c-account-bridge-task-runner-local\.ps1') {
+            throw "Bridge task ownership/action is not canonical."
+          }
+          Write-Host "BRIDGE_TASK_OWNERSHIP=PASS"
+          Write-Host "BRIDGE_TASK_STATE_BEFORE=$($task.State)"
+
+          $accountPath = Join-Path $ProductionRoot ".runtime\phase7c-account-mode.json"
+          $lib = Join-Path $ProductionRoot "scripts\lib\phase7c-account-mode.ps1"
+          . $lib
+          $account = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+          if (([string]$account.accountMode).Trim().ToUpperInvariant() -ne "LIVE") {
+            throw "Bridge recovery expected LIVE selected account."
+          }
+          $envFile = [string]$account.envFile
+          if (-not [IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProductionRoot $envFile }
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+          $base = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers = @{"x-mt5-api-key"=$envInfo.apiKey}
+
+          $healthyBefore = $false
+          try {
+            $h0 = Invoke-RestMethod -Uri "$base/health" -Headers $headers -Method Get -TimeoutSec 3
+            $healthyBefore = [bool]$h0.connected -and [string]$h0.status -eq "ok"
+          } catch {}
+          Write-Host "BRIDGE_HEALTHY_BEFORE=$healthyBefore"
+          if ($healthyBefore) {
+            Write-Host "BRIDGE_RECOVERY_ACTION=SKIP_ALREADY_HEALTHY"
+          } else {
+            Write-Host "BRIDGE_RECOVERY_ACTION=STOP_START_TASK"
+            Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            $deadline = (Get-Date).AddSeconds(20)
+            do {
+              Start-Sleep -Milliseconds 500
+              $state = (Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop).State
+              if ($state -ne "Running") { break }
+            } while ((Get-Date) -lt $deadline)
+            if ($state -eq "Running") { throw "Bridge task did not stop within 20 seconds." }
+            Write-Host "BRIDGE_TASK_STOP=PASS"
+
+            Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            Write-Host "BRIDGE_TASK_START_REQUEST=PASS"
+          }
+
+          $health = $null
+          for ($i=1; $i -le 30; $i++) {
+            Start-Sleep -Seconds 2
+            try {
+              $candidate = Invoke-RestMethod -Uri "$base/health" -Headers $headers -Method Get -TimeoutSec 5
+              if ([bool]$candidate.connected -and [string]$candidate.status -eq "ok") {
+                $health = $candidate
+                break
+              }
+            } catch {}
+          }
+          if ($null -eq $health) { throw "Bridge did not become healthy within 60 seconds." }
+
+          Write-Host "BRIDGE_RECOVERY_HEALTH=PASS"
+          Write-Host "BRIDGE_RECOVERY_CONFIGURED_MODE=$($health.configuredAccountMode)"
+          Write-Host "BRIDGE_RECOVERY_BROKER_MODE=$($health.accountMode)"
+          Write-Host "BRIDGE_RECOVERY_SESSION=$($health.bridgeSessionId)"
+          Write-Host "BRIDGE_RECOVERY_RECONNECT_COUNT=$($health.reconnectCount)"
+          if ([string]$health.configuredAccountMode -ne "LIVE" -or [string]$health.accountMode -ne "real") {
+            throw "Recovered bridge is not LIVE/real."
+          }
+
+          function Read-Count([string]$path) {
+            $response = Invoke-WebRequest -Uri "$base$path" -Headers $headers -Method Get -UseBasicParsing -TimeoutSec 8
+            $raw = ([string]$response.Content).Trim()
+            if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq "[]") { return 0 }
+            return @($raw | ConvertFrom-Json | Where-Object { $null -ne $_ }).Count
+          }
+          $positions = Read-Count "/v1/positions?symbol=XAUUSD"
+          $orders = Read-Count "/v1/orders?symbol=XAUUSD"
+          Write-Host "BRIDGE_RECOVERY_XAUUSD_POSITIONS=$positions"
+          Write-Host "BRIDGE_RECOVERY_XAUUSD_PENDING_ORDERS=$orders"
+
+          $modeAfter = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+          $cap = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+          Write-Host "BRIDGE_RECOVERY_FINAL_MODE=$($modeAfter.state.mode)"
+          Write-Host "BRIDGE_RECOVERY_FINAL_ARM=$($cap.liveArmStatus)"
+          Write-Host "BRIDGE_RECOVERY_FINAL_LIVE_EXECUTION_ARMED=$($cap.liveExecutionArmed)"
+
+          if (([string]$modeAfter.state.mode).Trim().ToUpperInvariant() -ne "PAUSE") {
+            throw "Final bot mode is not PAUSE."
+          }
+          if (([string]$cap.liveArmStatus).Trim().ToUpperInvariant() -ne "DISARMED" -or [bool]$cap.liveExecutionArmed) {
+            throw "Bridge restart did not fail-close LIVE ARM."
+          }
+          if ($positions -ne 0 -or $orders -ne 0) {
+            throw "Bridge recovered but broker is not flat; cutover remains blocked."
+          }
+
+          Write-Host "BRIDGE_RECOVERY_FLAT=PASS"
+          Write-Host "BRIDGE_RECOVERY_STATUS=PASS"
+          Write-Host "BRIDGE_RECOVERY_NEXT_ACTION=GUARDED_SOURCE_CUTOVER"
