@@ -3,7 +3,7 @@ param(
   [string]$WebTask = "XAUUSD-Phase7B-Web",
   [int]$ApiPort = 3711,
   [int]$WebPort = 5717,
-  [int]$StartupTimeoutSeconds = 90,
+  [int]$StartupTimeoutSeconds = 240,
   [switch]$SkipPanelInstall,
   [switch]$AllowOwnedTaskProvenanceMigration,
   [string]$ExpectedRunnerSha256 = ""
