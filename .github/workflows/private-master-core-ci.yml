@@ -134,6 +134,7 @@ jobs:
           scripts/test-phase7c-telegram-lifecycle-observability-contract.mjs
           scripts/phase7c-trade-notifier-synthetic.test.mjs
           scripts/test-phase7c-hold-telegram-dedupe-contract.mjs
+          scripts/phase7c-system-alert-debounce.test.mjs
 
       - name: Broader private regression evidence
         id: broader_regression
