@@ -1,4 +1,9 @@
 import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
+import {
+  DEFAULT_TRANSIENT_MT5_READ_ALERT_THRESHOLD,
+  DEFAULT_TRANSIENT_MT5_READ_ALERT_WINDOW_MS,
+  evaluateTransientSystemAlertDebounce,
+} from "./phase7c-system-alert-debounce.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -169,6 +174,24 @@ const systemRecoveryQuietMs = Math.max(
       "30000",
   ),
 );
+
+const requestedTransientMt5ReadAlertThreshold = Number(
+  process.env.ZIQ_TELEGRAM_TRANSIENT_MT5_READ_ALERT_THRESHOLD ??
+    DEFAULT_TRANSIENT_MT5_READ_ALERT_THRESHOLD,
+);
+const transientMt5ReadAlertThreshold =
+  Number.isFinite(requestedTransientMt5ReadAlertThreshold)
+    ? Math.max(2, Math.trunc(requestedTransientMt5ReadAlertThreshold))
+    : DEFAULT_TRANSIENT_MT5_READ_ALERT_THRESHOLD;
+
+const requestedTransientMt5ReadAlertWindowMs = Number(
+  process.env.ZIQ_TELEGRAM_TRANSIENT_MT5_READ_ALERT_WINDOW_MS ??
+    DEFAULT_TRANSIENT_MT5_READ_ALERT_WINDOW_MS,
+);
+const transientMt5ReadAlertWindowMs =
+  Number.isFinite(requestedTransientMt5ReadAlertWindowMs)
+    ? Math.max(15_000, Math.trunc(requestedTransientMt5ReadAlertWindowMs))
+    : DEFAULT_TRANSIENT_MT5_READ_ALERT_WINDOW_MS;
 
 let nextSystemHealthCheckAt = 0;
 
@@ -1624,22 +1647,48 @@ function shouldSuppressSystemAlert(event) {
   state.systemAlerts ??= {};
 
   const current = state.systemAlerts[key];
-  if (!current?.active) return false;
+  if (current?.active) {
+    current.lastSeenAt = String(
+      event?.timestamp ?? new Date().toISOString(),
+    );
+    current.lastSeenAtMs = Date.now();
+    current.message = String(
+      event?.message ??
+        event?.reason ??
+        event?.type ??
+        current.message ??
+        "",
+    );
 
-  current.lastSeenAt = String(
-    event?.timestamp ?? new Date().toISOString(),
-  );
-  current.lastSeenAtMs = Date.now();
-  current.message = String(
-    event?.message ??
-      event?.reason ??
-      event?.type ??
-      current.message ??
-      "",
-  );
+    saveState();
+    return true;
+  }
 
-  saveState();
-  return true;
+  const transientRead = evaluateTransientSystemAlertDebounce({
+    event,
+    current,
+    nowMs: Date.now(),
+    threshold: transientMt5ReadAlertThreshold,
+    windowMs: transientMt5ReadAlertWindowMs,
+  });
+
+  if (transientRead.matched) {
+    state.systemAlerts[key] = transientRead.next;
+    saveState();
+
+    if (transientRead.suppress) {
+      console.warn(
+        `PHASE7B_TELEGRAM_TRANSIENT_MT5_READ_SUPPRESSED=count=${transientRead.count}|threshold=${transientMt5ReadAlertThreshold}`,
+      );
+      return true;
+    }
+
+    console.warn(
+      `PHASE7B_TELEGRAM_TRANSIENT_MT5_READ_ESCALATED=count=${transientRead.count}|threshold=${transientMt5ReadAlertThreshold}`,
+    );
+  }
+
+  return false;
 }
 
 function markSystemAlert(event) {
