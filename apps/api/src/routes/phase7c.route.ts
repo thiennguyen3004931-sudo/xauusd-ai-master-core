@@ -124,7 +124,7 @@ router.get("/bot-mode", (_req: Request, res: Response) => {
   });
 });
 
-router.post("/bot-mode", (req: Request, res: Response) => {
+router.post("/bot-mode", async (req: Request, res: Response) => {
   if (!canChangeBotMode(req)) {
     res.status(403).json({
       error: "Bot mode changes are restricted to localhost unless PHASE7C_BOT_MODE_TOKEN is configured.",
@@ -160,8 +160,32 @@ router.post("/bot-mode", (req: Request, res: Response) => {
     return;
   }
 
+  const state = phase7CBotModeService.set(requestedMode, source);
+
+  if (requestedMode === "PAUSE") {
+    const barrier = await phase7CBotModeService.waitForPauseBarrierDrain();
+    if (!barrier.drained) {
+      res.status(503).json({
+        error: "PAUSE was persisted but an entry execution lock did not drain before timeout.",
+        state,
+        pauseBarrier: barrier,
+        options: getPhase7CBotModeOptions(),
+        accountMode: accountModeState.accountMode,
+      });
+      return;
+    }
+
+    res.json({
+      state,
+      pauseBarrier: barrier,
+      options: getPhase7CBotModeOptions(),
+      accountMode: accountModeState.accountMode,
+    });
+    return;
+  }
+
   res.json({
-    state: phase7CBotModeService.set(requestedMode, source),
+    state,
     options: getPhase7CBotModeOptions(),
     accountMode: accountModeState.accountMode,
   });
