@@ -30,17 +30,29 @@ class GuardedMt5Gateway(Mt5Gateway):
         super().__init__(settings, ledger, module)
         self.bridge_session_id = uuid.uuid4().hex
 
-    def _live_arm_decision(self, account: Any | None) -> LiveArmDecision:
-        if account is None:
+    def _live_arm_decision_from_identity(
+        self,
+        account_login: Any | None,
+        account_server: Any | None,
+    ) -> LiveArmDecision:
+        if account_login is None:
             return LiveArmDecision(False, "ACCOUNT_UNAVAILABLE")
         return evaluate_live_arm(
             path=self.settings.live_arm_state_path,
             bridge_session_id=self.bridge_session_id,
             configured_account_mode=self.settings.account_mode,
-            account_login=int(getattr(account, "login", 0) or 0),
-            account_server=str(getattr(account, "server", "") or ""),
+            account_login=int(account_login or 0),
+            account_server=str(account_server or ""),
             terminal_path=self.settings.terminal_path,
             compatibility_enabled=self.settings.live_compatibility_enabled,
+        )
+
+    def _live_arm_decision(self, account: Any | None) -> LiveArmDecision:
+        if account is None:
+            return LiveArmDecision(False, "ACCOUNT_UNAVAILABLE")
+        return self._live_arm_decision_from_identity(
+            getattr(account, "login", None),
+            getattr(account, "server", None),
         )
 
     def health(self, reconnect: bool = True) -> dict[str, Any]:
@@ -50,9 +62,13 @@ class GuardedMt5Gateway(Mt5Gateway):
 
         decision = LiveArmDecision(False, "NOT_REQUIRED")
         if connected and actual_mode == "real":
-            with self._lock:
-                _, account = self._connection_snapshot_locked(reconnect=reconnect)
-            decision = self._live_arm_decision(account)
+            # Base health already captured the account identity while owning the
+            # MT5 gateway lock. Reuse that immutable identity here instead of
+            # probing terminal_info/account_info a second time.
+            decision = self._live_arm_decision_from_identity(
+                base.get("accountLogin"),
+                base.get("server"),
+            )
         elif connected and self.settings.account_mode == "LIVE":
             decision = LiveArmDecision(False, "ACCOUNT_MODE_MISMATCH")
 
