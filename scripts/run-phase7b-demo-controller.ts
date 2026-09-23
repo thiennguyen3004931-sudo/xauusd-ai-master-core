@@ -552,17 +552,6 @@ async function cycle(): Promise<void> {
       pending,
       candidate,
     );
-
-    if (pending.dailyMode !== "RECOVERY_TP") {
-      await reconcileFixedTpBrokerTakeProfit({
-        ticket: candidate.ticket,
-        enabled: state.managed.fixedTpEnabled,
-        targetPrice: state.managed.fixedTpPrice,
-        currentTakeProfit: candidate.takeProfit,
-        strategy: "TREND",
-      });
-    }
-
     state.pendingEntry = null;
     saveState();
 
@@ -573,6 +562,16 @@ async function cycle(): Promise<void> {
       side: pending.side,
       volume: candidate.volume,
     });
+
+    if (pending.dailyMode !== "RECOVERY_TP") {
+      await reconcileFixedTpBrokerTakeProfit({
+        ticket: candidate.ticket,
+        enabled: state.managed.fixedTpEnabled,
+        targetPrice: state.managed.fixedTpPrice,
+        currentTakeProfit: candidate.takeProfit,
+        strategy: "TREND",
+      });
+    }
 
     await managePosition(
       candidate,
@@ -1060,16 +1059,6 @@ async function submitTrendEntry(
     entry: opened.entry,
   });
 
-  if (dailyRecovery.mode !== "RECOVERY_TP") {
-    await reconcileFixedTpBrokerTakeProfit({
-      ticket: opened.ticket,
-      enabled: filledFixedTpSnapshot.enabled,
-      targetPrice: filledFixedTpSnapshot.targetPrice,
-      currentTakeProfit: opened.takeProfit,
-      strategy: "TREND",
-    });
-  }
-
   state.managed = {
     ticket: opened.ticket,
     side: signal.side,
@@ -1117,6 +1106,17 @@ async function submitTrendEntry(
     recoveryTakeProfit: takeProfit,
     recoveryCanRecoverInOneTrade: dailyRecovery.canRecoverInOneTrade,
   });
+
+  if (dailyRecovery.mode !== "RECOVERY_TP") {
+    await reconcileFixedTpBrokerTakeProfit({
+      ticket: opened.ticket,
+      enabled: filledFixedTpSnapshot.enabled,
+      targetPrice: filledFixedTpSnapshot.targetPrice,
+      currentTakeProfit: opened.takeProfit,
+      strategy: "TREND",
+    });
+  }
+
   return "FILLED";
 }
 
@@ -1625,15 +1625,27 @@ async function reconcileFixedTpBrokerTakeProfit(input: {
     targetPrice,
     commandId,
   });
-  const response = await patch<CommandResponse>(
-    `/v1/positions/${encodeURIComponent(ticket)}`,
-    payload,
-  );
-  if (!response.success) {
-    journal("FIXED_TP_BROKER_RECONCILE_REJECTED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
-    return;
+  try {
+    const response = await patch<CommandResponse>(
+      `/v1/positions/${encodeURIComponent(ticket)}`,
+      payload,
+    );
+    if (!response.success) {
+      journal("FIXED_TP_BROKER_RECONCILE_REJECTED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
+      return;
+    }
+    journal("FIXED_TP_BROKER_RECONCILED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
+  } catch (error) {
+    // Fixed TP broker alignment is additive protection. Ownership and durable
+    // management must survive a transport/schema/broker failure here.
+    journal("FIXED_TP_BROKER_RECONCILE_ERROR", {
+      ticket,
+      strategy: input.strategy,
+      targetPrice,
+      commandId,
+      message: errorMessage(error),
+    });
   }
-  journal("FIXED_TP_BROKER_RECONCILED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
 }
 
 function recordManagementExitSideSample({
