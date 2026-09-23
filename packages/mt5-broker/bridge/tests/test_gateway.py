@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from mt5_bridge.config import Settings
@@ -92,6 +93,49 @@ class FakeMt5:
         if symbol is not None and self.position.symbol != symbol: return ()
         if ticket is not None and self.position.ticket != ticket: return ()
         return (self.position,)
+
+
+class CandleFakeMt5(FakeMt5):
+    TIMEFRAME_M1 = 1
+    TIMEFRAME_M5 = 5
+    TIMEFRAME_M15 = 15
+    TIMEFRAME_M30 = 30
+    TIMEFRAME_H1 = 60
+    TIMEFRAME_H4 = 240
+    TIMEFRAME_D1 = 1440
+
+    def __init__(self):
+        super().__init__()
+        self.copy_rates_calls = 0
+        self.copy_rates_requested_counts = []
+
+    def copy_rates_from_pos(self, _symbol, timeframe, _start_pos, count):
+        self.copy_rates_calls += 1
+        self.copy_rates_requested_counts.append(count)
+        duration_seconds = {
+            self.TIMEFRAME_M1: 60,
+            self.TIMEFRAME_M5: 5 * 60,
+            self.TIMEFRAME_M15: 15 * 60,
+            self.TIMEFRAME_M30: 30 * 60,
+            self.TIMEFRAME_H1: 60 * 60,
+            self.TIMEFRAME_H4: 4 * 60 * 60,
+            self.TIMEFRAME_D1: 24 * 60 * 60,
+        }[timeframe]
+        now_seconds = 1_700_000_000
+        latest_close = (now_seconds // duration_seconds) * duration_seconds
+        first_open = latest_close - duration_seconds * count
+        return [
+            {
+                "time": first_open + duration_seconds * index,
+                "open": 2400.0 + index * 0.01,
+                "high": 2401.0 + index * 0.01,
+                "low": 2399.0 + index * 0.01,
+                "close": 2400.5 + index * 0.01,
+                "tick_volume": 100 + index,
+                "spread": 10,
+            }
+            for index in range(count)
+        ]
 
 
 class RecoveringFakeMt5(FakeMt5):
@@ -211,6 +255,89 @@ class GatewayTests(unittest.TestCase):
 
             self.assertEqual(fake.send_calls, 1)
             self.assertEqual(gateway.reconnect_count, 0)
+            ledger.close()
+
+    def test_closed_candles_reuse_bar_aligned_cache_without_reloading_mt5_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = CandleFakeMt5()
+            ledger_path = Path(directory) / "ledger.sqlite3"
+            ledger = IdempotencyLedger(ledger_path)
+            gateway = Mt5Gateway(settings(ledger_path), ledger, fake)
+            self.assertTrue(gateway.start())
+
+            with patch("mt5_bridge.mt5_gateway.time.time", return_value=1_700_000_000.0):
+                first = gateway.candles("XAUUSD", "M15", 320)
+
+                class LockMustNotBeTouched:
+                    def acquire(self, *_, **__):
+                        raise AssertionError("fresh candle cache hit touched the MT5 gateway lock")
+
+                    def release(self):
+                        raise AssertionError("fresh candle cache hit touched the MT5 gateway lock")
+
+                gateway._lock = LockMustNotBeTouched()
+                second = gateway.candles("XAUUSD", "M15", 320)
+                smaller = gateway.candles("XAUUSD", "M15", 100)
+
+            self.assertEqual(len(first), 320)
+            self.assertEqual(second, first)
+            self.assertEqual(smaller, first[-100:])
+            self.assertEqual(fake.copy_rates_calls, 1)
+            ledger.close()
+
+    def test_closed_candle_refresh_uses_small_incremental_tail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = CandleFakeMt5()
+            ledger_path = Path(directory) / "ledger.sqlite3"
+            ledger = IdempotencyLedger(ledger_path)
+            gateway = Mt5Gateway(settings(ledger_path), ledger, fake)
+            self.assertTrue(gateway.start())
+
+            with patch("mt5_bridge.mt5_gateway.time.time", return_value=1_700_000_000.0):
+                first = gateway.candles("XAUUSD", "M15", 320)
+
+            # Move just past the next M15 close. The existing cache is recent
+            # enough to advance incrementally instead of reloading 320 bars.
+            with patch("mt5_bridge.mt5_gateway.time.time", return_value=1_700_000_102.0):
+                refreshed = gateway.candles("XAUUSD", "M15", 320)
+
+            self.assertEqual(len(first), 320)
+            self.assertEqual(len(refreshed), 320)
+            self.assertEqual(fake.copy_rates_calls, 2)
+            self.assertEqual(fake.copy_rates_requested_counts, [320, 8])
+            ledger.close()
+
+    def test_expired_candle_cache_returns_recent_snapshot_when_mt5_lock_is_busy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = CandleFakeMt5()
+            ledger_path = Path(directory) / "ledger.sqlite3"
+            ledger = IdempotencyLedger(ledger_path)
+            gateway = Mt5Gateway(settings(ledger_path), ledger, fake)
+            self.assertTrue(gateway.start())
+
+            with patch("mt5_bridge.mt5_gateway.time.time", return_value=1_700_000_000.0):
+                first = gateway.candles("XAUUSD", "M15", 320)
+
+            class BusyLock:
+                def acquire(self, *_, **kwargs):
+                    self.blocking = kwargs.get("blocking")
+                    return False
+
+                def release(self):
+                    raise AssertionError("busy lock must not be released when acquire returned false")
+
+            busy_lock = BusyLock()
+            gateway._lock = busy_lock
+
+            # The cached M15 bar expires about 101 seconds after the first
+            # request in this fixture, but it is still well inside the
+            # one-timeframe stale-on-busy safety window.
+            with patch("mt5_bridge.mt5_gateway.time.time", return_value=1_700_000_102.0):
+                stale = gateway.candles("XAUUSD", "M15", 320)
+
+            self.assertEqual(stale, first)
+            self.assertFalse(busy_lock.blocking)
+            self.assertEqual(fake.copy_rates_calls, 1)
             ledger.close()
 
     def test_symbol_spec_exposes_broker_risk_values(self):
