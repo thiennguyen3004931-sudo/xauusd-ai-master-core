@@ -7,6 +7,10 @@ on:
     paths:
       - ".github/workflows/pr64-web-api-build-prime-validation.yml"
 
+concurrency:
+  group: pr64-web-api-build-prime-validation
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
