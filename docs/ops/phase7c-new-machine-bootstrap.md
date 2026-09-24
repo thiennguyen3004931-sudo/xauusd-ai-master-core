@@ -44,6 +44,7 @@ These files must be transferred securely from the old machine or recreated on th
 Typical old-machine sources are:
 
 - `packages\mt5-broker\bridge\.env.phase7b-live`
+  - On the new machine, update `MT5_TERMINAL_PATH` in this copied file if MT5 is installed at a different path.
 - `.env.phase7b-telegram`
 - `.runtime\phase7c-lot-settings.json`
 - optional: `.runtime\phase7c-strategy-entry-conditions.json`
