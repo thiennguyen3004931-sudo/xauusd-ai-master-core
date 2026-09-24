@@ -10,6 +10,7 @@ const required = [
   '"clone", "--no-checkout"',
   '"checkout", "-B", "main", $ExpectedCommit',
   'Assert-GitIgnored -Root $ProjectRoot -RelativePath ".runtime/"',
+  'Add-Content -LiteralPath $localExcludePath -Value "/.runtime/" -Encoding ascii',
   'mode = "PAUSE"',
   'Remove-Item -LiteralPath $armPath -Force -ErrorAction SilentlyContinue',
   "Write-Phase7CLiveAuthorizationState",
