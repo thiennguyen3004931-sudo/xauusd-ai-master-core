@@ -43,6 +43,19 @@ jobs:
             exit 1
           }
 
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts/install-phase7c-new-machine-local.ps1").Path,
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if (@($errors).Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host "PHASE7C_NEW_MACHINE_BOOTSTRAP_POWERSHELL_SYNTAX=PASS"
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -130,22 +143,6 @@ jobs:
 
       - name: New-machine bootstrap safety contract
         run: node --test scripts/test-phase7c-new-machine-installer-source.mjs
-
-      - name: New-machine bootstrap PowerShell syntax
-        shell: powershell
-        run: |
-          $tokens = $null
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path "scripts/install-phase7c-new-machine-local.ps1").Path,
-            [ref]$tokens,
-            [ref]$errors
-          )
-          if (@($errors).Count -gt 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            exit 1
-          }
-          Write-Host "PHASE7C_NEW_MACHINE_BOOTSTRAP_POWERSHELL_SYNTAX=PASS"
 
       - name: Telegram lifecycle regression
         run: >-
