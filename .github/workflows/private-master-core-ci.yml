@@ -61,12 +61,15 @@ jobs:
           git -C $currentCandidate checkout -B main $current
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $currentCandidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $current -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          git worktree remove --force $currentCandidate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
           git worktree add --detach $targetCandidate $target
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git -C $targetCandidate checkout -B main $target
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $currentCandidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $current -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetCandidate 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master' -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f -ExpectedInitialArm DISARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
