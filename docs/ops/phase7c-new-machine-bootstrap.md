@@ -10,7 +10,7 @@ Before running the bootstrap:
 2. XAUUSD must have zero open positions and zero pending orders.
 3. MT5 must be installed on the new machine, logged into the intended LIVE account, and Algo Trading must be enabled.
 4. Run PowerShell as Administrator.
-5. Install Git, Node.js, pnpm 10.18.0, and Python 3.
+5. Install Git, Node.js 24.x, pnpm 10.18.0, and Python 3.
 6. Git authentication for the private repository must already work on the new machine.
 
 Never run the same LIVE account ARMED on both machines.
@@ -34,7 +34,7 @@ The local production checkout remains on branch `main` at that exact commit so t
 Three machine/account-specific inputs are required:
 
 - LIVE bridge env file
-- Telegram env file
+- Telegram env file containing `ZIQ_TELEGRAM_BOT_TOKEN` and `ZIQ_TELEGRAM_CHAT_ID`
 - risk profile JSON
 
 Optionally, a persisted strategy-entry-condition JSON can be supplied. If it is omitted, the runtime uses the canonical safe default entry-condition state.
