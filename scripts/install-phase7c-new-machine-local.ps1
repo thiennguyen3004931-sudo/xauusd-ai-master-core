@@ -305,6 +305,266 @@ try {
 }
 Write-Step "GIT_CLONE" "PASS|HEAD=$ExpectedCommit|BRANCH=main"
 
+# The accepted production commit predates a tracked /.runtime/ ignore rule.
+# Keep machine-local runtime state out of git without changing the accepted
+# production tree: use this clone's private .git/info/exclude.
+$localExcludePath = Join-Path $ProjectRoot ".git\info\exclude"
+$localExclude = if (Test-Path -LiteralPath $localExcludePath) {
+  Get-Content -LiteralPath $localExcludePath -Raw
+} else {
+  ""
+}
+if ($localExclude -notmatch '(?m)^/\.runtime/$accountLibrary = Join-Path $ProjectRoot "scripts\lib\phase7c-account-mode.ps1"
+if (-not (Test-Path -LiteralPath $accountLibrary -PathType Leaf)) {
+  throw "Canonical account library missing from production source: $accountLibrary"
+}
+. $accountLibrary
+
+$liveEnvRelative = "packages/mt5-broker/bridge/.env.phase7b-live"
+$telegramEnvRelative = ".env.phase7b-telegram"
+Assert-GitIgnored -Root $ProjectRoot -RelativePath $liveEnvRelative
+Assert-GitIgnored -Root $ProjectRoot -RelativePath $telegramEnvRelative
+Assert-GitIgnored -Root $ProjectRoot -RelativePath ".runtime/"
+
+$liveEnvDestination = Join-Path $ProjectRoot ($liveEnvRelative -replace '/', '\')
+$telegramEnvDestination = Join-Path $ProjectRoot $telegramEnvRelative
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $liveEnvDestination) | Out-Null
+Copy-Item -LiteralPath $LiveEnvFile -Destination $liveEnvDestination -Force
+Copy-Item -LiteralPath $TelegramEnvFile -Destination $telegramEnvDestination -Force
+$liveEnvDestination = (Resolve-Path -LiteralPath $liveEnvDestination).Path
+$telegramEnvDestination = (Resolve-Path -LiteralPath $telegramEnvDestination).Path
+
+$envInfo = Assert-Phase7CAccountEnv -EnvFile $liveEnvDestination -AccountMode "LIVE" -RequireTrading
+$liveIdentity = Get-Phase7CLiveProfileIdentity $liveEnvDestination
+$riskRaw = Get-Content -LiteralPath $RiskProfileFile -Raw | ConvertFrom-Json
+$risk = Assert-Phase7CRiskProfile $riskRaw "New-machine migration risk profile"
+Write-Step "LOCAL_CONFIG_VALIDATE" "PASS|LOGIN=$($liveIdentity.login)|SERVER=$($liveIdentity.server)"
+
+$workDir = Join-Path $ProjectRoot ".runtime"
+New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+$workDir = (Resolve-Path -LiteralPath $workDir).Path
+
+$canonicalRisk = [pscustomobject]@{
+  version = 2
+  trendFixedLot = [double]$risk.trendFixedLot
+  sidewayRiskPercent = [double]$risk.sidewayRiskPercent
+  sidewayMaxLot = [double]$risk.sidewayMaxLot
+  trendFixedTpEnabled = [bool]$risk.trendFixedTpEnabled
+  trendFixedTpDistance = [double]$risk.trendFixedTpDistance
+  sidewayFixedTpEnabled = [bool]$risk.sidewayFixedTpEnabled
+  sidewayFixedTpDistance = [double]$risk.sidewayFixedTpDistance
+  updatedAt = [DateTimeOffset]::UtcNow.ToString("o")
+  updatedBy = "new-machine-bootstrap"
+}
+Write-JsonAtomic -Path (Join-Path $workDir "phase7c-lot-settings.json") -Value $canonicalRisk
+
+$liveRisk = [pscustomobject]@{
+  version = 2
+  accountMode = "LIVE"
+  accountLogin = [long]$liveIdentity.login
+  server = [string]$liveIdentity.server
+  profileFingerprint = [string]$liveIdentity.profileFingerprint
+  trendFixedLot = [double]$risk.trendFixedLot
+  sidewayRiskPercent = [double]$risk.sidewayRiskPercent
+  sidewayMaxLot = [double]$risk.sidewayMaxLot
+  trendFixedTpEnabled = [bool]$risk.trendFixedTpEnabled
+  trendFixedTpDistance = [double]$risk.trendFixedTpDistance
+  sidewayFixedTpEnabled = [bool]$risk.sidewayFixedTpEnabled
+  sidewayFixedTpDistance = [double]$risk.sidewayFixedTpDistance
+  appliesTo = "NEW_POSITIONS_ONLY"
+  martingale = $false
+  recoveryLotEscalation = $false
+  updatedAt = [DateTimeOffset]::UtcNow.ToString("o")
+  updatedBy = "new-machine-bootstrap"
+}
+Write-JsonAtomic -Path (Get-Phase7CRiskProfilePath $workDir "LIVE") -Value $liveRisk
+[void](Assert-Phase7CLiveRiskProfileBinding -Profile $liveRisk -LiveEnvFile $liveEnvDestination -Label "New-machine LIVE risk profile")
+
+$accountState = [pscustomobject]@{
+  version = 1
+  accountMode = "LIVE"
+  liveExecutionEnabled = $true
+  envFile = $liveEnvDestination
+  updatedAt = [DateTimeOffset]::UtcNow.ToString("o")
+  updatedBy = "new-machine-bootstrap"
+}
+Write-JsonAtomic -Path (Join-Path $workDir "phase7c-account-mode.json") -Value $accountState
+
+$botMode = [pscustomobject]@{
+  mode = "PAUSE"
+  updatedAt = [DateTimeOffset]::UtcNow.ToString("o")
+  updatedBy = "new-machine-bootstrap"
+}
+Write-JsonAtomic -Path (Join-Path $workDir "phase7c-bot-mode.json") -Value $botMode
+
+$armPath = Get-Phase7CLiveArmPath $workDir
+Remove-Item -LiteralPath $armPath -Force -ErrorAction SilentlyContinue
+[void](Write-Phase7CLiveAuthorizationState -WorkDir $workDir -LiveEnvFile $liveEnvDestination -AuthorizedBy "new-machine-bootstrap")
+
+if (-not [string]::IsNullOrWhiteSpace($StrategyEntryConditionsFile)) {
+  $strategyRaw = Get-Content -LiteralPath $StrategyEntryConditionsFile -Raw | ConvertFrom-Json
+  if ($null -eq $strategyRaw -or [int]$strategyRaw.version -le 0) {
+    throw "Strategy entry conditions migration file must contain a persisted version > 0."
+  }
+  Copy-Item -LiteralPath $StrategyEntryConditionsFile -Destination (Join-Path $workDir "phase7c-strategy-entry-conditions.json") -Force
+  Write-Step "STRATEGY_ENTRY_CONFIG" "MIGRATED"
+} else {
+  Write-Step "STRATEGY_ENTRY_CONFIG" "SAFE_DEFAULT"
+}
+
+$taskConfig = [pscustomobject]@{
+  version = 2
+  accountMode = "LIVE"
+  demoOnly = $false
+  liveExecutionEnabled = $true
+  armed = $true
+  workDir = $workDir
+  controlApiUrl = "http://127.0.0.1:$ApiPort"
+  envFile = $liveEnvDestination
+  telegramEnvFile = $telegramEnvDestination
+  nodePath = $nodeExe
+  pnpmPath = $pnpmExe
+  trendFixedVolume = [double]$risk.trendFixedLot
+  sidewayRiskPercent = [double]$risk.sidewayRiskPercent
+  sidewayMaxLot = [double]$risk.sidewayMaxLot
+}
+Write-JsonAtomic -Path (Join-Path $workDir "phase7c-executor-task-config.json") -Value $taskConfig
+Write-Step "RUNTIME_CONFIG" "PASS|BOT_MODE=PAUSE|LIVE_ARM=DISARMED"
+
+Push-Location $ProjectRoot
+try {
+  Invoke-Checked $pnpmExe @("install", "--frozen-lockfile") "pnpm install"
+  Invoke-Checked $pnpmExe @("build") "Workspace build"
+} finally {
+  Pop-Location
+}
+Write-Step "NODE_BUILD" "PASS"
+
+$bridgeDir = Join-Path $ProjectRoot "packages\mt5-broker\bridge"
+$venvPython = Join-Path $bridgeDir ".venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+  Push-Location $bridgeDir
+  try {
+    Invoke-Checked $pyExe @("-3", "-m", "venv", ".venv") "Bridge Python venv creation"
+  } finally {
+    Pop-Location
+  }
+}
+Invoke-Checked $venvPython @("-m", "pip", "install", "--upgrade", "pip") "Bridge pip upgrade"
+Invoke-Checked $venvPython @("-m", "pip", "install", "-r", (Join-Path $bridgeDir "requirements.txt")) "Bridge Python dependencies"
+Write-Step "BRIDGE_DEPENDENCIES" "PASS"
+
+$bridgeTaskInstaller = Join-Path $ProjectRoot "scripts\register-phase7c-account-bridge-task-local.ps1"
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bridgeTaskInstaller
+if ($LASTEXITCODE -ne 0) { throw "Phase7C account bridge task registration failed." }
+Start-ScheduledTask -TaskName "XAUUSD-Phase7C-Bridge" -ErrorAction Stop
+
+$bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+$bridgeHeaders = @{ "x-mt5-api-key" = $envInfo.apiKey }
+$bridgeHealth = Wait-Bridge `
+  -BaseUrl $bridgeBase `
+  -Headers $bridgeHeaders `
+  -ExpectedLogin ([long]$liveIdentity.login) `
+  -ExpectedServer ([string]$liveIdentity.server) `
+  -Timeout $TimeoutSeconds
+Assert-FlatBroker -BaseUrl $bridgeBase -Headers $bridgeHeaders -Stage "BRIDGE_PREFLIGHT"
+Write-Step "BRIDGE" "PASS|SESSION=$($bridgeHealth.bridgeSessionId)|LIVE_ARM=DISARMED"
+
+Register-WebTask -Root $ProjectRoot -WorkDir $workDir -BridgeEnv $liveEnvDestination -ApiPortValue $ApiPort -WebPortValue $WebPort
+Start-ScheduledTask -TaskName "XAUUSD-Phase7B-Web" -ErrorAction Stop
+$apiBase = "http://127.0.0.1:$ApiPort"
+Wait-Api -ApiBase $apiBase -Timeout $TimeoutSeconds
+
+$pause = Invoke-RestMethod `
+  -Uri "$apiBase/api/v1/phase7c/bot-mode" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body (@{ mode = "PAUSE"; source = "new-machine-bootstrap" } | ConvertTo-Json -Compress) `
+  -TimeoutSec 10
+if ([string]$pause.state.mode -ne "PAUSE") {
+  throw "Control API did not confirm PAUSE on the new machine."
+}
+
+$armCapability = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+if ([string]$armCapability.liveArmStatus -ne "DISARMED" -or [bool]$armCapability.liveExecutionArmed) {
+  throw "New machine must remain DISARMED before executor bootstrap."
+}
+Write-Step "CONTROL_API" "PASS|BOT_MODE=PAUSE|ARM=DISARMED"
+
+$currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$executorTaskInstaller = Join-Path $ProjectRoot "scripts\register-phase7c-executor-task-local.ps1"
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $executorTaskInstaller `
+  -TaskName "XAUUSD-Phase7C-Executors" `
+  -ProjectRoot $ProjectRoot `
+  -Create `
+  -PrincipalUserId "SYSTEM" `
+  -PrincipalLogonType "ServiceAccount" `
+  -ApiUserSid $currentSid
+if ($LASTEXITCODE -ne 0) { throw "Phase7C executor task registration failed." }
+Write-Step "EXECUTOR_TASK" "PASS|PRINCIPAL=SYSTEM"
+
+[void](Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/lifecycle/start" -Method Post -TimeoutSec 70)
+[void](Wait-LifecycleReady -ApiBase $apiBase -Timeout $TimeoutSeconds)
+Assert-FlatBroker -BaseUrl $bridgeBase -Headers $bridgeHeaders -Stage "PRE_ACCEPTANCE"
+Write-Step "INITIAL_LIFECYCLE" "PASS|MODE=PAUSE|ARM=DISARMED"
+
+Push-Location $ProjectRoot
+try {
+  $dirty = @(& $gitExe status --porcelain)
+  if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) {
+    throw "Production working tree must remain clean before canonical acceptance. status=$($dirty -join ';')"
+  }
+} finally {
+  Pop-Location
+}
+
+$recovery = Join-Path $ProjectRoot "scripts\recover-phase7c-runtime-ready-stable-deploy-local.ps1"
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $recovery -ExpectedCommit $ExpectedCommit -TimeoutSeconds $TimeoutSeconds
+if ($LASTEXITCODE -ne 0) {
+  throw "Canonical runtime-ready stable acceptance failed."
+}
+Write-Step "CANONICAL_ACCEPTANCE" "PASS"
+
+$finalMode = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+$finalArm = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+$finalLifecycle = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 8
+$finalSource = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/runtime-source-attestation" -Method Get -TimeoutSec 8
+
+if ([string]$finalMode.state.mode -ne "PAUSE") { throw "Final bot mode is not PAUSE." }
+if ([string]$finalArm.liveArmStatus -ne "DISARMED" -or [bool]$finalArm.liveExecutionArmed) { throw "Final LIVE ARM is not DISARMED." }
+if (-not [bool]$finalLifecycle.running -or -not [bool]$finalLifecycle.ready) { throw "Final lifecycle is not RUNNING/READY." }
+if ([string]$finalSource.deployment.sourceCommit -ne $ExpectedCommit) {
+  throw "Final runtime source commit mismatch. expected=$ExpectedCommit actual=$($finalSource.deployment.sourceCommit)"
+}
+if ([string]$finalSource.overall -ne "EXACT_MATCH") {
+  throw "Final runtime source attestation is not EXACT_MATCH. actual=$($finalSource.overall)"
+}
+Assert-FlatBroker -BaseUrl $bridgeBase -Headers $bridgeHeaders -Stage "FINAL"
+
+if (-not $SkipPanelInstall) {
+  $panelInstaller = Join-Path $ProjectRoot "scripts\install-phase7c-mt5-decision-panel-local.ps1"
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $panelInstaller -BridgeEnv $liveEnvDestination
+  if ($LASTEXITCODE -ne 0) { throw "MT5 decision panel installation failed." }
+  Write-Step "MT5_PANEL" "PASS"
+} else {
+  Write-Step "MT5_PANEL" "SKIPPED"
+}
+
+Write-Host "PHASE7C_NEW_MACHINE_STATUS=PASS"
+Write-Host "PHASE7C_NEW_MACHINE_SOURCE_COMMIT=$ExpectedCommit"
+Write-Host "PHASE7C_NEW_MACHINE_SOURCE_ATTESTATION=EXACT_MATCH"
+Write-Host "PHASE7C_NEW_MACHINE_ACCOUNT_MODE=LIVE"
+Write-Host "PHASE7C_NEW_MACHINE_BOT_MODE=PAUSE"
+Write-Host "PHASE7C_NEW_MACHINE_ARM=DISARMED"
+Write-Host "PHASE7C_NEW_MACHINE_POSITIONS=0"
+Write-Host "PHASE7C_NEW_MACHINE_PENDING_ORDERS=0"
+Write-Host "PHASE7C_NEW_MACHINE_LIVE_TEST_ORDER=NONE"
+Write-Host "PHASE7C_NEW_MACHINE_NEXT_ACTION=VERIFY_THEN_MANUAL_AUTO_AND_ARM"
+) {
+  Add-Content -LiteralPath $localExcludePath -Value "/.runtime/" -Encoding ascii
+}
+Write-Step "LOCAL_RUNTIME_GIT_EXCLUDE" "PASS"
+
 $accountLibrary = Join-Path $ProjectRoot "scripts\lib\phase7c-account-mode.ps1"
 if (-not (Test-Path -LiteralPath $accountLibrary -PathType Leaf)) {
   throw "Canonical account library missing from production source: $accountLibrary"
