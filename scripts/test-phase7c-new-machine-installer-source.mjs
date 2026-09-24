@@ -5,6 +5,8 @@ const source = fs.readFileSync("scripts/install-phase7c-new-machine-local.ps1", 
 
 const required = [
   'ExpectedCommit = "800ab441ffa1eec45488f7b7ff92c15b3a44846e"',
+  "Node.js 24.x is required to match the production CI toolchain.",
+  "Telegram env must contain ZIQ_TELEGRAM_BOT_TOKEN and ZIQ_TELEGRAM_CHAT_ID.",
   "[switch]$ConfirmOldMachineStopped",
   "Refusing new-machine LIVE bootstrap until -ConfirmOldMachineStopped is supplied.",
   '"clone", "--no-checkout"',
