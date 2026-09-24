@@ -47,21 +47,32 @@ jobs:
         if: github.event_name == 'pull_request' && github.head_ref == 'ops/cutover-800ab441-20260924'
         shell: powershell
         run: |
+          $current = 'a02fd82e87561891b0830da324da7f69f70b3754'
           $target = '800ab441ffa1eec45488f7b7ff92c15b3a44846e'
-          $candidate = Join-Path $env:RUNNER_TEMP 'xauusd-cutover-800ab441'
-          if (Test-Path -LiteralPath $candidate) { Remove-Item -LiteralPath $candidate -Recurse -Force }
-          git worktree add --detach $candidate $target
+          $currentCandidate = Join-Path $env:RUNNER_TEMP 'xauusd-current-a02fd82e'
+          $targetCandidate = Join-Path $env:RUNNER_TEMP 'xauusd-target-800ab441'
+
+          foreach ($path in @($currentCandidate, $targetCandidate)) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+          }
+
+          git worktree add --detach $currentCandidate $current
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C $candidate checkout -B main $target
+          git -C $currentCandidate checkout -B main $current
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit a02fd82e87561891b0830da324da7f69f70b3754 -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          git worktree add --detach $targetCandidate $target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $targetCandidate checkout -B main $target
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master' -ExpectedCurrentCommit a02fd82e87561891b0830da324da7f69f70b3754 -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f -ExpectedInitialArm DISARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $currentCandidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $current -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $target -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetCandidate 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master' -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f -ExpectedInitialArm DISARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetCandidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $target -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           Write-Host 'NOTIFIER_PRODUCTION_CUTOVER_800AB441=PASS'
