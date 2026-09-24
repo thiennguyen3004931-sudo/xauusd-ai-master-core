@@ -264,11 +264,15 @@ $nodeExe = Get-CommandPath @("node.exe", "node") "Node.js"
 $pnpmExe = Get-CommandPath @("pnpm.cmd", "pnpm.exe", "pnpm") "pnpm"
 $pyExe = Get-CommandPath @("py.exe", "py") "Python launcher"
 
+$nodeVersion = (& $nodeExe --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v24\.') {
+  throw "Node.js 24.x is required to match the production CI toolchain. Current=$nodeVersion"
+}
 $pnpmVersion = (& $pnpmExe --version).Trim()
 if ($LASTEXITCODE -ne 0 -or $pnpmVersion -ne "10.18.0") {
   throw "pnpm 10.18.0 is required. Current=$pnpmVersion"
 }
-Write-Step "PREREQUISITES" "PASS|PNPM=$pnpmVersion"
+Write-Step "PREREQUISITES" "PASS|NODE=$nodeVersion|PNPM=$pnpmVersion"
 
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 $bootstrapFull = [System.IO.Path]::GetFullPath($BootstrapRoot)
@@ -341,6 +345,11 @@ $telegramEnvDestination = (Resolve-Path -LiteralPath $telegramEnvDestination).Pa
 
 $envInfo = Assert-Phase7CAccountEnv -EnvFile $liveEnvDestination -AccountMode "LIVE" -RequireTrading
 $liveIdentity = Get-Phase7CLiveProfileIdentity $liveEnvDestination
+$telegramToken = ([string](Get-Phase7CEnvValue $telegramEnvDestination "ZIQ_TELEGRAM_BOT_TOKEN")).Trim()
+$telegramChatId = ([string](Get-Phase7CEnvValue $telegramEnvDestination "ZIQ_TELEGRAM_CHAT_ID")).Trim()
+if ([string]::IsNullOrWhiteSpace($telegramToken) -or [string]::IsNullOrWhiteSpace($telegramChatId)) {
+  throw "Telegram env must contain ZIQ_TELEGRAM_BOT_TOKEN and ZIQ_TELEGRAM_CHAT_ID."
+}
 $riskRaw = Get-Content -LiteralPath $RiskProfileFile -Raw | ConvertFrom-Json
 $risk = Assert-Phase7CRiskProfile $riskRaw "New-machine migration risk profile"
 Write-Step "LOCAL_CONFIG_VALIDATE" "PASS|LOGIN=$($liveIdentity.login)|SERVER=$($liveIdentity.server)"
