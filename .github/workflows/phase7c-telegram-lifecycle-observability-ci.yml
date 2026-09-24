@@ -8,6 +8,8 @@ on:
       - fix/phase7c-telegram-entry-resolution-lifecycle
     paths:
       - scripts/run-phase7b-telegram-notifier.mjs
+      - scripts/phase7c-system-alert-debounce.mjs
+      - scripts/phase7c-system-alert-debounce.test.mjs
       - scripts/run-phase7b-demo-controller.ts
       - scripts/test-phase7c-telegram-lifecycle-observability-contract.mjs
       - scripts/test-phase7c-telegram-entry-resolution-lifecycle-contract.mjs
@@ -17,6 +19,8 @@ on:
   pull_request:
     paths:
       - scripts/run-phase7b-telegram-notifier.mjs
+      - scripts/phase7c-system-alert-debounce.mjs
+      - scripts/phase7c-system-alert-debounce.test.mjs
       - scripts/run-phase7b-demo-controller.ts
       - scripts/test-phase7c-telegram-lifecycle-observability-contract.mjs
       - scripts/test-phase7c-telegram-entry-resolution-lifecycle-contract.mjs
@@ -55,3 +59,6 @@ jobs:
 
       - name: Existing HOLD canonical and dedupe regression
         run: node --test ./scripts/test-phase7c-hold-telegram-dedupe-contract.mjs
+
+      - name: Transient MT5 read system-alert debounce
+        run: node --test ./scripts/phase7c-system-alert-debounce.test.mjs
