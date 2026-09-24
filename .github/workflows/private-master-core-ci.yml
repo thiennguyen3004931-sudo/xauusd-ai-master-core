@@ -43,6 +43,32 @@ jobs:
             exit 1
           }
 
+      - name: Approved notifier production cutover 800ab441
+        if: github.event_name == 'pull_request' && github.head_ref == 'ops/cutover-800ab441-20260924'
+        shell: powershell
+        run: |
+          $target = '800ab441ffa1eec45488f7b7ff92c15b3a44846e'
+          $candidate = Join-Path $env:RUNNER_TEMP 'xauusd-cutover-800ab441'
+          if (Test-Path -LiteralPath $candidate) { Remove-Item -LiteralPath $candidate -Recurse -Force }
+          git worktree add --detach $candidate $target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $candidate checkout -B main $target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit a02fd82e87561891b0830da324da7f69f70b3754 -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master' -ExpectedCurrentCommit a02fd82e87561891b0830da324da7f69f70b3754 -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f -ExpectedInitialArm DISARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $candidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $target -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          Write-Host 'NOTIFIER_PRODUCTION_CUTOVER_800AB441=PASS'
+          Write-Host 'NOTIFIER_PRODUCTION_FINAL_MODE=PAUSE'
+          Write-Host 'NOTIFIER_PRODUCTION_FINAL_ARM=DISARMED'
+          Write-Host 'NOTIFIER_PRODUCTION_LIVE_TEST_ORDER=NONE'
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
