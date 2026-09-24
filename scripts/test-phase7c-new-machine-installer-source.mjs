@@ -53,4 +53,19 @@ assert.match(
   "bootstrap must explicitly verify DISARMED state",
 );
 
+const uniquePhaseMarkers = [
+  "$bridgeTaskInstaller =",
+  "$executorTaskInstaller =",
+  "$recovery = Join-Path",
+  "PHASE7C_NEW_MACHINE_STATUS=PASS",
+];
+
+for (const marker of uniquePhaseMarkers) {
+  assert.equal(
+    source.split(marker).length - 1,
+    1,
+    `new-machine bootstrap phase must occur exactly once: ${marker}`,
+  );
+}
+
 console.log("PHASE7C_NEW_MACHINE_BOOTSTRAP_SOURCE_CONTRACT=PASS");
