@@ -1,6 +1,6 @@
 param(
   [string]$ProductionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master',
-  [string]$ExpectedSourceCommit = '5ec6ccd374ea929ddaee1ed669e786109a0d71b8',
+  [string]$ExpectedSourceCommit = '800ab441ffa1eec45488f7b7ff92c15b3a44846e',
   [int]$IssueNumber = 28,
   [switch]$Notify
 )
