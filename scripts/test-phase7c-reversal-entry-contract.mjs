@@ -66,6 +66,21 @@ test("AUTO REVERSAL allows CHOCH-direction entry without SuperTrend alignment", 
   assert.equal(result.reversalTimestamp, 1_000);
 });
 
+test("AUTO REVERSAL stays fail-closed even if recommendedMode is stale TREND", () => {
+  const result = evaluateAutoTrendEntryModeGate({
+    activeMode: "AUTO",
+    regime: regime({ recommendedMode: "TREND" }),
+    demo: demo({
+      side: "BUY",
+      eligible: true,
+      reversalEligible: true,
+    }),
+  });
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.reason, "REVERSAL_DIRECTION_MISMATCH");
+});
+
 test("AUTO REVERSAL blocks a signal that continues the old trend", () => {
   const result = evaluateAutoTrendEntryModeGate({
     activeMode: "AUTO",
