@@ -183,6 +183,9 @@ test("read-only diagnostics expose reversal readiness without changing continuat
   assert.match(diagnosticsSource, /const reversalEligible = Boolean\([\s\S]*pattern[\s\S]*validStructure[\s\S]*structuralStopDistance <= 10/);
   assert.match(diagnosticsSource, /const stopDistance = eligible && structuralStopDistance/);
   assert.match(diagnosticsSource, /const reversalStopDistance = reversalEligible && structuralStopDistance/);
+  assert.match(diagnosticsSource, /reversalAction:/);
+  assert.match(diagnosticsSource, /reversalReason/);
+  assert.match(diagnosticsSource, /SuperTrend M15\/M5 chỉ quan sát và không chặn entry/);
 });
 
 test("Trend runtime ignores SuperTrend only inside canonical AUTO REVERSAL context", () => {
