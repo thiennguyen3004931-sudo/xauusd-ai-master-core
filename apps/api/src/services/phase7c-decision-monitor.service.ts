@@ -47,7 +47,9 @@ interface EntryDiagnostics {
     stopDistance?: number | null;
     reversalStopDistance?: number | null;
     action?: string;
+    reversalAction?: string;
     reason?: string;
+    reversalReason?: string;
   };
 }
 
@@ -412,7 +414,9 @@ function trendDecision(input: {
     estimatedRiskUsd: round(estimatedRiskUsd, 2),
     estimatedRiskPercent: round(estimatedRiskPercent, 4),
     limitReason,
-    decisionReason: entryInfo?.reason ?? demo?.entryDiagnosticsError ?? "Chưa có Trend diagnostics.",
+    decisionReason: autoReversalEntry
+      ? entryInfo?.reversalReason ?? "REVERSAL chờ CHOCH-direction Pattern + Structure + SL 6–10; SuperTrend không tham gia gate."
+      : entryInfo?.reason ?? demo?.entryDiagnosticsError ?? "Chưa có Trend diagnostics.",
     source: "PHASE7B_CANONICAL_ENTRY_DIAGNOSTICS+ACTIVE_LOT_SETTINGS",
     updatedAt: now,
   };
