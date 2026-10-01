@@ -1,4 +1,5 @@
 import { canonicalHoldReason } from "../../../../scripts/phase7c-hold-observability.mjs";
+import { evaluateAutoTrendEntryModeGate } from "../../../../scripts/phase7c-trend-mode-gate.mjs";
 import {
   closeSync,
   existsSync,
@@ -36,12 +37,15 @@ interface EntryDiagnostics {
     m15Supertrend?: "BUY" | "SELL" | null;
     m5Supertrend?: "BUY" | "SELL" | null;
   };
+  closeTime?: number;
   entry?: {
     eligible?: boolean;
+    reversalEligible?: boolean;
     side?: "BUY" | "SELL" | null;
     referenceEntry?: number;
     structuralStopDistance?: number | null;
     stopDistance?: number | null;
+    reversalStopDistance?: number | null;
     action?: string;
     reason?: string;
   };
@@ -329,8 +333,19 @@ function trendDecision(input: {
   const diagnostics = demo?.entryDiagnostics ?? null;
   const entryInfo = diagnostics?.entry;
   const side = entryInfo?.side ?? diagnostics?.pattern?.side ?? null;
+  const autoModeGate = regime.activeMode === "AUTO"
+    ? evaluateAutoTrendEntryModeGate({
+        activeMode: regime.activeMode,
+        regime,
+        demo,
+      })
+    : null;
+  const autoReversalEntry = autoModeGate?.allowed === true &&
+    autoModeGate.reason === "AUTO_REVERSAL_CHOCH_DIRECTION_ENTRY";
   const entry = finite(entryInfo?.referenceEntry);
-  const stopDistance = finite(entryInfo?.stopDistance) ?? finite(entryInfo?.structuralStopDistance);
+  const stopDistance = autoReversalEntry
+    ? finite(entryInfo?.reversalStopDistance) ?? finite(entryInfo?.structuralStopDistance)
+    : finite(entryInfo?.stopDistance) ?? finite(entryInfo?.structuralStopDistance);
   const stopLoss = entry !== null && stopDistance !== null && side
     ? side === "BUY" ? entry - stopDistance : entry + stopDistance
     : null;
@@ -345,13 +360,11 @@ function trendDecision(input: {
   const estimatedRiskPercent = estimatedRiskUsd !== null && balance !== null && balance > 0
     ? estimatedRiskUsd / balance * 100
     : null;
-  const eligible = entryInfo?.eligible === true;
-  const autoReversalCanonicalTrendEntry = regime.activeMode === "AUTO" &&
-    regime.regime === "REVERSAL" &&
-    eligible;
+  const eligible = autoReversalEntry
+    ? entryInfo?.reversalEligible === true
+    : entryInfo?.eligible === true;
   const modeAllows = regime.activeMode === "TREND" ||
-    (regime.activeMode === "AUTO" && regime.recommendedMode === "TREND") ||
-    autoReversalCanonicalTrendEntry;
+    (regime.activeMode === "AUTO" && autoModeGate?.allowed === true);
   const safetyAllows = telemetry.reachable &&
     accountModeAllowsBroker(telemetry.health?.accountMode, accountModeState) &&
     telemetry.positions.length === 0 &&
@@ -698,16 +711,19 @@ export function buildPhase7CDecisionMonitor(input: {
 }) {
   const now = input.now ?? Date.now();
   const accountModeState = input.accountModeState ?? getPhase7CAccountModeState();
-  const canonicalTrendEligible = input.demo?.entryDiagnostics?.entry?.eligible === true;
-  const autoReversalCanonicalTrendEntry = input.regime.activeMode === "AUTO" &&
-    input.regime.regime === "REVERSAL" &&
-    canonicalTrendEligible;
+  const autoTrendModeGate = input.regime.activeMode === "AUTO"
+    ? evaluateAutoTrendEntryModeGate({
+        activeMode: input.regime.activeMode,
+        regime: input.regime,
+        demo: input.demo,
+      })
+    : null;
   const position = positionMonitor({
     ...input,
     activeMode: input.regime.activeMode,
   });
   const requestedStrategy = input.regime.activeMode === "AUTO"
-    ? autoReversalCanonicalTrendEntry
+    ? autoTrendModeGate?.allowed === true
       ? "TREND"
       : input.regime.recommendedMode
     : input.regime.activeMode;
