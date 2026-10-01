@@ -115,6 +115,7 @@ type EntryDiagnostics = {
     referenceEntry: number;
     structuralStopDistance: number | null;
     stopDistance: number | null;
+    reversalStopDistance: number | null;
     action: "WAIT_SIGNAL" | "ENTRY_IMMEDIATE" | "WAIT_PULLBACK";
     reason: string;
   };
@@ -203,6 +204,7 @@ router.get("/", async (_req: Request, res: Response) => {
         trigger: "ENGULFING_OR_TWO_OR_THREE_SAME_COLOR_BODY_DOMINANCE",
         engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
         trend: "SUPERTREND_M15_10_3_AND_M5_10_3_MANDATORY",
+        reversalEntry: "CHOCH_DIRECTION_PATTERN_VALID_STRUCTURE_NO_SUPERTREND",
         fvg: "OPTIONAL_AT_ENTRY_HOLD_CONFIRMATION_ADDON_SHADOW",
         initialStop: "STRUCTURE_MIN_6_MAX_10_WAIT_PULLBACK_IF_WIDER",
         plus6: "SL_TO_ENTRY",
@@ -386,7 +388,10 @@ function buildEntryDiagnostics(
       && structuralStopDistance !== null
       && structuralStopDistance <= 10,
   );
-  const stopDistance = (eligible || reversalEligible) && structuralStopDistance !== null
+  const stopDistance = eligible && structuralStopDistance !== null
+    ? Math.max(6, structuralStopDistance)
+    : null;
+  const reversalStopDistance = reversalEligible && structuralStopDistance !== null
     ? Math.max(6, structuralStopDistance)
     : null;
 
@@ -457,7 +462,8 @@ function buildEntryDiagnostics(
       referenceEntry: round(referenceEntry, 5),
       structuralStopDistance: structuralStopDistance === null ? null : round(structuralStopDistance, 5),
       stopDistance: stopDistance === null ? null : round(stopDistance, 5),
-      action: waitPullback ? "WAIT_PULLBACK" : (eligible || reversalEligible) ? "ENTRY_IMMEDIATE" : "WAIT_SIGNAL",
+      reversalStopDistance: reversalStopDistance === null ? null : round(reversalStopDistance, 5),
+      action: waitPullback ? "WAIT_PULLBACK" : eligible ? "ENTRY_IMMEDIATE" : "WAIT_SIGNAL",
       reason,
     },
   };
