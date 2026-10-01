@@ -1321,12 +1321,36 @@ function latestSignal(
   m5: Phase7Bar[],
   spec: SymbolSpec,
   strategy: StrategyEntryConfigSnapshot,
+  reversalContext: ReversalEntryContext | null,
 ): RuntimeEntrySignal | null {
   const index = m15.length - 1;
   if (index < 200) return null;
   const current = m15[index]!;
   const trigger = detectEntryPattern(m15, index);
   if (!trigger) return null;
+
+  if (reversalContext) {
+    if (trigger.side !== reversalContext.side) {
+      journal("REVERSAL_DIRECTION_MISMATCH", {
+        signalTimestamp: current.closeTime,
+        signalSide: trigger.side,
+        reversalSide: reversalContext.side,
+        reversalDirection: reversalContext.direction,
+        chochTimestamp: reversalContext.chochTimestamp,
+      });
+      return null;
+    }
+
+    if (current.closeTime <= reversalContext.chochTimestamp) {
+      journal("REVERSAL_SIGNAL_NOT_AFTER_CHOCH", {
+        signalTimestamp: current.closeTime,
+        signalSide: trigger.side,
+        reversalSide: reversalContext.side,
+        chochTimestamp: reversalContext.chochTimestamp,
+      });
+      return null;
+    }
+  }
 
   const closes = m15.slice(0, index + 1).map((bar) => bar.close);
   const ma20 = smaPeriod(closes, 20);
@@ -1336,10 +1360,14 @@ function latestSignal(
   const m15Direction = m15Supertrend.direction[index] ?? null;
   let m5SignalIndex = m5.length - 1;
   while (m5SignalIndex >= 0 && m5[m5SignalIndex]!.closeTime > current.closeTime) m5SignalIndex -= 1;
-  if (m5SignalIndex < 9) return null;
-  const m5AtSignal = m5.slice(0, m5SignalIndex + 1);
-  const m5Supertrend = phase7BSupertrend(m5AtSignal, 10, 3);
-  const m5Direction = m5Supertrend.direction[m5SignalIndex] ?? null;
+  let m5Direction: "BUY" | "SELL" | null = null;
+  if (m5SignalIndex >= 9) {
+    const m5AtSignal = m5.slice(0, m5SignalIndex + 1);
+    const m5Supertrend = phase7BSupertrend(m5AtSignal, 10, 3);
+    m5Direction = m5Supertrend.direction[m5SignalIndex] ?? null;
+  } else if (!reversalContext) {
+    return null;
+  }
 
   const entry = current.close;
   const structuralStopPrice = structuralStopWithBuffer(trigger.side, trigger.patternExtreme);
@@ -1348,10 +1376,11 @@ function latestSignal(
     : structuralStopPrice - entry;
   const fvgConfirmed = hasRelevantFvg(m15, index, trigger.side, 12);
 
-  const entryConditions = strategy.valid && strategy.state
+  const effectiveConfig = effectiveTrendEntryConfig(strategy, reversalContext);
+  const entryConditions = effectiveConfig
     ? evaluateStrategyEntryConditions({
         strategy: "TREND",
-        config: strategy.state,
+        config: effectiveConfig,
         side: trigger.side,
         observations: {
           patternM15: { passed: true, observed: `${trigger.side}:${trigger.pattern}` },
@@ -1376,6 +1405,10 @@ function latestSignal(
         ? entryConditions.failedConditions.join(",")
         : "ENTRY_STRATEGY_CONFIG_INVALID",
       configError: strategy.error,
+      entryPolicy: reversalContext
+        ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+        : "TREND_CONTINUATION",
+      reversalContext,
       entryConditions,
     });
     return null;
@@ -1385,6 +1418,10 @@ function latestSignal(
     signalId: `phase7b-demo-${current.closeTime}-${trigger.side}-${trigger.pattern}`,
     side: trigger.side,
     pattern: trigger.pattern,
+    entryPolicy: reversalContext
+      ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+      : "TREND_CONTINUATION",
+    reversalContext,
     entryConditions,
   });
 
@@ -1410,6 +1447,7 @@ function latestSignal(
       valid: true,
     },
     entryConditions,
+    reversalContext,
   };
 }
 
