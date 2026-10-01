@@ -196,4 +196,9 @@ test("Trend runtime ignores SuperTrend only inside canonical AUTO REVERSAL conte
   assert.match(trendRuntimeSource, /validTrendStructure: true/);
   assert.match(trendRuntimeSource, /supertrendGate: activeReversalContext \? "IGNORED_REVERSAL" : "REQUIRED"/);
   assert.match(trendRuntimeSource, /REVERSAL_PULLBACK_CONTEXT_INVALIDATED/);
+  assert.match(trendWrapperSource, /reversalOrderGateDiagnostics\(request\?\.body\)/);
+  assert.match(trendWrapperSource, /\^p7b-\(\?:pb\|im\)-\(\\d\+\)-\(BUY\|SELL\)\$/);
+  assert.match(trendWrapperSource, /idempotencyKey === clientOrderId/);
+  assert.match(trendWrapperSource, /structuralStopDistance \+ 1e-9 >= 6/);
+  assert.match(trendWrapperSource, /structuralStopDistance <= 10 \+ 1e-9/);
 });
