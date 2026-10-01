@@ -161,3 +161,39 @@ test("TRENDING/BREAKOUT continuation behavior remains unchanged", () => {
   assert.equal(result.allowed, true);
   assert.equal(result.reason, "AUTO_REGIME_ALLOWS_TREND");
 });
+
+import fs from "node:fs";
+
+const liveRegimeSource = fs.readFileSync("apps/api/src/services/phase7c-live-regime.service.ts", "utf8");
+const diagnosticsSource = fs.readFileSync("apps/api/src/routes/phase7b-demo.route.ts", "utf8");
+const trendRuntimeSource = fs.readFileSync("scripts/run-phase7b-demo-controller.ts", "utf8");
+const trendWrapperSource = fs.readFileSync("scripts/run-phase7c-trend-controller.mjs", "utf8");
+
+test("live regime exposes latest confirmed CHOCH direction as canonical reversal side", () => {
+  assert.match(liveRegimeSource, /latestConfirmedChoch/);
+  assert.match(liveRegimeSource, /event\.confirmed && event\.type === "CHOCH"/);
+  assert.match(liveRegimeSource, /direction: latestConfirmedChoch\.direction/);
+  assert.match(liveRegimeSource, /side: reversalSide/);
+  assert.match(liveRegimeSource, /timestamp: latestConfirmedChoch\.timestamp/);
+});
+
+test("read-only diagnostics expose reversal readiness without changing continuation eligibility", () => {
+  assert.match(diagnosticsSource, /reversalEligible: boolean/);
+  assert.match(diagnosticsSource, /reversalRule: "PATTERN_PLUS_VALID_STRUCTURE_NO_SUPERTREND"/);
+  assert.match(diagnosticsSource, /const reversalEligible = Boolean\([\s\S]*pattern[\s\S]*validStructure[\s\S]*structuralStopDistance <= 10/);
+  assert.match(diagnosticsSource, /const stopDistance = eligible && structuralStopDistance/);
+  assert.match(diagnosticsSource, /const reversalStopDistance = reversalEligible && structuralStopDistance/);
+});
+
+test("Trend runtime ignores SuperTrend only inside canonical AUTO REVERSAL context", () => {
+  assert.match(trendWrapperSource, /ZIQ_PHASE7C_REVERSAL_ENTRY_ENABLED = "true"/);
+  assert.match(trendRuntimeSource, /activeMode !== "AUTO" \|\| regime !== "REVERSAL"/);
+  assert.match(trendRuntimeSource, /REVERSAL_CONTEXT_MISSING_OR_INVALID/);
+  assert.match(trendRuntimeSource, /REVERSAL_DIRECTION_MISMATCH/);
+  assert.match(trendRuntimeSource, /REVERSAL_SIGNAL_NOT_AFTER_CHOCH/);
+  assert.match(trendRuntimeSource, /supertrendM15: false/);
+  assert.match(trendRuntimeSource, /supertrendM5: false/);
+  assert.match(trendRuntimeSource, /validTrendStructure: true/);
+  assert.match(trendRuntimeSource, /supertrendGate: activeReversalContext \? "IGNORED_REVERSAL" : "REQUIRED"/);
+  assert.match(trendRuntimeSource, /REVERSAL_PULLBACK_CONTEXT_INVALIDATED/);
+});
