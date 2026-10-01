@@ -120,6 +120,22 @@ export async function getPhase7CLiveRegime(symbol = "XAUUSD", count = 320) {
   const range = RangeBoundaryUtils.find(close, analysis.supplyDemandZones);
   const activeMode = phase7CBotModeService.get();
   const recommendedMode = recommendMode(assessment.regime);
+  const latestConfirmedChoch = [...analysis.structureEvents]
+    .filter((event) => event.confirmed && event.type === "CHOCH")
+    .sort((a, b) => b.timestamp - a.timestamp)[0] ?? null;
+  const reversalSide = latestConfirmedChoch?.direction === "BULLISH"
+    ? "BUY"
+    : latestConfirmedChoch?.direction === "BEARISH"
+      ? "SELL"
+      : null;
+  const reversal = assessment.regime === "REVERSAL" && latestConfirmedChoch && reversalSide
+    ? {
+        direction: latestConfirmedChoch.direction,
+        side: reversalSide,
+        timestamp: latestConfirmedChoch.timestamp,
+        level: latestConfirmedChoch.level,
+      }
+    : null;
 
   return {
     symbol: normalizedSymbol,
@@ -129,6 +145,7 @@ export async function getPhase7CLiveRegime(symbol = "XAUUSD", count = 320) {
     recommendedMode,
     activeMode: activeMode.mode,
     modeMatchesRecommendation: activeMode.mode === recommendedMode || activeMode.mode === "AUTO",
+    reversal,
     reasons: assessment.reasons,
     metrics: {
       ...assessment.metrics,
