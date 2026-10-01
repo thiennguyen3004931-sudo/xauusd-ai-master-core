@@ -452,6 +452,17 @@ function startTrendRuntimeHeartbeat() {
 async function evaluateTrendEntryPermission(request) {
   const modePayload = await controlRequest("/api/v1/phase7c/bot-mode");
   const activeMode = String(modePayload?.state?.mode ?? "PAUSE").toUpperCase();
+  const orderEvidence = reversalOrderGateDiagnostics(request?.body);
+
+  if (orderEvidence.reversalOrigin && activeMode !== "AUTO") {
+    return {
+      allowed: false,
+      activeMode,
+      recommendedMode: null,
+      reason: "REVERSAL_CONTEXT_CHANGED_BEFORE_SUBMIT",
+      detail: `REVERSAL-origin order requires AUTO at final submit; actual mode=${activeMode}.`,
+    };
+  }
 
   if (activeMode === "TREND") {
     return {
@@ -507,8 +518,19 @@ async function evaluateTrendEntryPermission(request) {
     controlRequest("/api/v1/phase7b-demo"),
   ]);
 
-  const gateDemo = String(regime?.regime ?? "").toUpperCase() === "REVERSAL"
-    ? reversalOrderGateDiagnostics(request?.body)
+  const finalRegime = String(regime?.regime ?? "").toUpperCase();
+  if (orderEvidence.reversalOrigin && finalRegime !== "REVERSAL") {
+    return {
+      allowed: false,
+      activeMode,
+      recommendedMode: String(regime?.recommendedMode ?? "PAUSE").toUpperCase(),
+      reason: "REVERSAL_CONTEXT_CHANGED_BEFORE_SUBMIT",
+      detail: `REVERSAL-origin order requires REVERSAL at final submit; actual regime=${finalRegime || "UNKNOWN"}.`,
+    };
+  }
+
+  const gateDemo = finalRegime === "REVERSAL"
+    ? orderEvidence.demo
     : demo;
 
   return evaluateAutoTrendEntryModeGate({
@@ -531,9 +553,10 @@ function reversalOrderGateDiagnostics(rawBody) {
   const idempotencyKey = String(body?.idempotencyKey ?? "").trim();
   const requestedPrice = Number(body?.requestedPrice);
   const stopLoss = Number(body?.stopLoss);
-  const match = /^p7b-(?:pb|im)-(\d+)-(BUY|SELL)$/.exec(clientOrderId);
-  const signalTimestamp = match ? Number(match[1]) : null;
-  const idSide = match?.[2] ?? "";
+  const match = /^p7b-(rv-)?(?:pb|im)-(\d+)-(BUY|SELL)$/.exec(clientOrderId);
+  const reversalOrigin = match?.[1] === "rv-";
+  const signalTimestamp = match ? Number(match[2]) : null;
+  const idSide = match?.[3] ?? "";
   const structuralStopDistance =
     side === "BUY" && Number.isFinite(requestedPrice) && Number.isFinite(stopLoss)
       ? requestedPrice - stopLoss
@@ -541,6 +564,7 @@ function reversalOrderGateDiagnostics(rawBody) {
         ? stopLoss - requestedPrice
         : NaN;
   const canonicalOrderEvidence = Boolean(
+    reversalOrigin &&
     (side === "BUY" || side === "SELL") &&
     idSide === side &&
     idempotencyKey === clientOrderId &&
@@ -552,7 +576,9 @@ function reversalOrderGateDiagnostics(rawBody) {
   );
 
   return {
-    entryDiagnostics: {
+    reversalOrigin,
+    demo: {
+      entryDiagnostics: {
       closeTime: signalTimestamp,
       pattern: {
         matched: canonicalOrderEvidence,
@@ -569,6 +595,7 @@ function reversalOrderGateDiagnostics(rawBody) {
         reversalStopDistance: canonicalOrderEvidence
           ? structuralStopDistance
           : null,
+        },
       },
     },
   };
