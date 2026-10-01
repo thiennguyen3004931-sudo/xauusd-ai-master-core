@@ -183,6 +183,14 @@ const liveRegimeSource = fs.readFileSync("apps/api/src/services/phase7c-live-reg
 const diagnosticsSource = fs.readFileSync("apps/api/src/routes/phase7b-demo.route.ts", "utf8");
 const trendRuntimeSource = fs.readFileSync("scripts/run-phase7b-demo-controller.ts", "utf8");
 const trendWrapperSource = fs.readFileSync("scripts/run-phase7c-trend-controller.mjs", "utf8");
+const trendModeGateDeclaration = fs.readFileSync("scripts/phase7c-trend-mode-gate.d.mts", "utf8");
+
+test("shared Trend mode gate keeps a TypeScript declaration for API consumers", () => {
+  assert.match(trendModeGateDeclaration, /export function evaluateAutoTrendEntryModeGate/);
+  assert.match(trendModeGateDeclaration, /allowed: boolean/);
+  assert.match(trendModeGateDeclaration, /reason: string/);
+  assert.match(trendModeGateDeclaration, /detail: string/);
+});
 
 test("live regime exposes latest confirmed CHOCH direction as canonical reversal side", () => {
   assert.match(liveRegimeSource, /latestConfirmedChoch/);
