@@ -183,12 +183,24 @@ type StrategyEntryConfigSnapshot = {
   error: string | null;
 };
 
+type ReversalEntryContext = {
+  side: "BUY" | "SELL";
+  direction: "BULLISH" | "BEARISH";
+  chochTimestamp: number;
+  level: number | null;
+};
+
+type PendingTrendPullback = Phase7BPendingPullback & {
+  reversalContext?: ReversalEntryContext | null;
+};
+
 type RuntimeEntrySignal = Pick<
   Phase7BSignal,
   "id" | "side" | "pattern" | "signalTimestamp" | "entry" | "patternExtreme"
 > & {
   strategyConfigSnapshot: { version: number; valid: boolean };
   entryConditions: ReturnType<typeof evaluateStrategyEntryConditions>;
+  reversalContext: ReversalEntryContext | null;
 };
 
 type PendingTrendEntry = {
@@ -222,7 +234,7 @@ type BotState = {
   accountLogin: number | null;
   lastEvaluatedM15Close: number;
   lastEvaluatedM5Close: number;
-  pendingPullback: Phase7BPendingPullback | null;
+  pendingPullback: PendingTrendPullback | null;
   pendingEntry: PendingTrendEntry | null;
   managed: ManagedState | null;
 };
@@ -232,7 +244,7 @@ type PersistedBotState = {
   accountLogin?: number | null;
   lastEvaluatedM15Close?: number;
   lastEvaluatedM5Close?: number;
-  pendingPullback?: Phase7BPendingPullback | null;
+  pendingPullback?: PendingTrendPullback | null;
   pendingEntry?: PendingTrendEntry | null;
   managed?: ManagedState | null;
 };
@@ -245,6 +257,12 @@ const trendFixedTpDistance = Number(process.env.ZIQ_PHASE7C_TREND_FIXED_TP_DISTA
 const intervalSeconds = Math.max(1, Number(process.env.ZIQ_DEMO_INTERVAL_SECONDS ?? "5"));
 const armed = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ARMED ?? "false");
 const once = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ONCE ?? "false");
+const phase7cReversalEntryEnabled = /^(1|true|yes|on)$/i.test(
+  process.env.ZIQ_PHASE7C_REVERSAL_ENTRY_ENABLED ?? "false",
+);
+const phase7cControlApiBase = (
+  process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711"
+).replace(/\/$/, "");
 const workDir = requiredEnv("ZIQ_DEMO_WORK_DIR");
 const strategyEntryConditionsFile = process.env.PHASE7C_STRATEGY_ENTRY_CONDITIONS_FILE?.trim()
   ? path.resolve(process.env.PHASE7C_STRATEGY_ENTRY_CONDITIONS_FILE.trim())
@@ -313,6 +331,7 @@ console.log(`PHASE7B_DEMO_INTERVAL_SECONDS=${intervalSeconds}`);
 console.log(`PHASE7B_DEMO_ARMED=${armed ? "YES" : "NO"}`);
 console.log("PHASE7B_DEMO_ENTRY_GATE=PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE");
 console.log("PHASE7B_DEMO_SUPERTREND=M15_10_3_AND_M5_10_3_MANDATORY");
+console.log(`PHASE7B_DEMO_PHASE7C_REVERSAL_ENTRY=${phase7cReversalEntryEnabled ? "CHOCH_DIRECTION_PATTERN_STRUCTURE_NO_SUPERTREND" : "DISABLED"}`);
 console.log("PHASE7B_DEMO_MA20_MA50=CONFIDENCE_ONLY_NOT_ENTRY_GATE");
 console.log("PHASE7B_DEMO_MA50=RUNNER_HOLD_EXIT_AFTER_PLUS10_PARTIAL_ONLY");
 console.log("PHASE7B_DEMO_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING");
