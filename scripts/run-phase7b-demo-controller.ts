@@ -422,7 +422,8 @@ async function previewLatestSignal(): Promise<void> {
     get<Quote>(`/v1/quotes/${encodeURIComponent(symbol)}`),
   ]);
   const strategyEntryConfig = readStrategyEntryConfigSnapshot();
-  const signal = latestSignal(m15, m5, spec, strategyEntryConfig);
+  const reversalContext = await readPhase7CReversalEntryContext();
+  const signal = latestSignal(m15, m5, spec, strategyEntryConfig, reversalContext);
   const latest = m15.at(-1);
   console.log(`PHASE7B_DEMO_LATEST_M15_CLOSE=${latest?.closeTime ?? "NONE"}`);
   if (!signal || !latest || signal.signalTimestamp !== latest.closeTime) {
@@ -740,7 +741,8 @@ async function cycle(): Promise<void> {
   saveState();
 
   const strategyEntryConfig = readStrategyEntryConfigSnapshot();
-  const signal = latestSignal(m15, m5, spec, strategyEntryConfig);
+  const reversalContext = await readPhase7CReversalEntryContext();
+  const signal = latestSignal(m15, m5, spec, strategyEntryConfig, reversalContext);
   if (!signal || signal.signalTimestamp !== latestM15.closeTime) {
     journal("M15_NO_ENTRY_SIGNAL", {
       closeTime: latestM15.closeTime,
@@ -1229,6 +1231,88 @@ async function resolveDailyRecoveryPlan(
     canRecoverInOneTrade:
       rawTpDistance <= DAILY_RECOVERY_MAX_TP_DISTANCE + 1e-9,
     dealCount: dealCount,
+  };
+}
+
+async function readPhase7CReversalEntryContext(): Promise<ReversalEntryContext | null> {
+  if (!phase7cReversalEntryEnabled) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const query = new URLSearchParams({
+      symbol,
+      count: "320",
+    });
+    const response = await fetch(
+      `${phase7cControlApiBase}/api/v1/phase7c/live-regime?${query.toString()}`,
+      {
+        method: "GET",
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+        cache: "no-store",
+      },
+    );
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`Phase7C reversal context GET failed ${response.status}: ${text}`);
+    }
+
+    const payload = text ? JSON.parse(text) : null;
+    const activeMode = String(payload?.activeMode ?? "").trim().toUpperCase();
+    const regime = String(payload?.regime ?? "").trim().toUpperCase();
+
+    if (activeMode !== "AUTO" || regime !== "REVERSAL") {
+      return null;
+    }
+
+    const direction = String(payload?.reversal?.direction ?? "").trim().toUpperCase();
+    const side = String(payload?.reversal?.side ?? "").trim().toUpperCase();
+    const chochTimestamp = Number(payload?.reversal?.timestamp);
+    const levelRaw = Number(payload?.reversal?.level);
+    const expectedSide = direction === "BULLISH"
+      ? "BUY"
+      : direction === "BEARISH"
+        ? "SELL"
+        : "";
+
+    if (
+      (side !== "BUY" && side !== "SELL") ||
+      !Number.isFinite(chochTimestamp) ||
+      chochTimestamp <= 0 ||
+      expectedSide !== side
+    ) {
+      throw new Error(
+        `REVERSAL_CONTEXT_MISSING_OR_INVALID|direction=${direction || "NONE"}|side=${side || "NONE"}|timestamp=${Number.isFinite(chochTimestamp) ? chochTimestamp : "INVALID"}`,
+      );
+    }
+
+    return {
+      side: side as "BUY" | "SELL",
+      direction: direction as "BULLISH" | "BEARISH",
+      chochTimestamp,
+      level: Number.isFinite(levelRaw) ? levelRaw : null,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function effectiveTrendEntryConfig(
+  strategy: StrategyEntryConfigSnapshot,
+  reversalContext: ReversalEntryContext | null,
+) {
+  if (!strategy.valid || !strategy.state) return null;
+  if (!reversalContext) return strategy.state;
+
+  return {
+    ...strategy.state,
+    trend: {
+      ...strategy.state.trend,
+      supertrendM15: false,
+      supertrendM5: false,
+      validTrendStructure: true,
+    },
   };
 }
 
