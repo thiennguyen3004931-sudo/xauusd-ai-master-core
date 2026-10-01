@@ -346,6 +346,71 @@ function trendEntryChecks(snapshot: Snapshot): Phase7CEntryCheck[] {
       : "Mode hoặc AUTO regime hiện đang chặn Trend.",
   ));
 
+  const reversalEntryPolicy =
+    snapshot.mode.active === "AUTO" &&
+    snapshot.engine.regime === "REVERSAL";
+  if (reversalEntryPolicy) {
+    const reversalSide = snapshot.engine.reversal?.side ?? null;
+    const reversalDirection = snapshot.engine.reversal?.direction ?? null;
+    const chochTimestamp = Number(snapshot.engine.reversal?.timestamp);
+    const signalTimestamp = Number(diagnostics?.closeTime);
+    const hasChochContext =
+      (reversalSide === "BUY" || reversalSide === "SELL") &&
+      Number.isFinite(chochTimestamp);
+    const directionStatus: Phase7CEntryCheckStatus = !hasChochContext
+      ? "BLOCKED"
+      : !side
+        ? "WAIT"
+        : side === reversalSide
+          ? "PASS"
+          : "FAIL";
+
+    checks.push(entryCheck(
+      "TREND_REVERSAL_CHOCH_DIRECTION",
+      "CHOCH direction",
+      directionStatus,
+      hasChochContext
+        ? `${reversalDirection ?? "—"} → ${reversalSide}; signal ${side ?? "—"}`
+        : "Thiếu canonical CHOCH context",
+      hasChochContext
+        ? `Signal phải là ${reversalSide}`
+        : "Latest confirmed CHOCH phải có direction hợp lệ",
+      !hasChochContext
+        ? "REVERSAL thiếu direction/timestamp canonical nên entry bị fail-closed."
+        : !side
+          ? `CHOCH yêu cầu ${reversalSide}; đang chờ pattern M15 xác định signal side.`
+          : side === reversalSide
+            ? `Signal ${side} cùng hướng latest confirmed CHOCH.`
+            : `Signal ${side} ngược yêu cầu ${reversalSide} của latest confirmed CHOCH; entry bị chặn.`,
+    ));
+
+    const freshnessStatus: Phase7CEntryCheckStatus = !hasChochContext
+      ? "BLOCKED"
+      : !Number.isFinite(signalTimestamp)
+        ? "WAIT"
+        : signalTimestamp > chochTimestamp
+          ? "PASS"
+          : "FAIL";
+    checks.push(entryCheck(
+      "TREND_REVERSAL_SIGNAL_AFTER_CHOCH",
+      "Signal sau CHOCH",
+      freshnessStatus,
+      Number.isFinite(signalTimestamp)
+        ? `${signalTimestamp}`
+        : "Chưa có signal timestamp",
+      hasChochContext
+        ? `> ${chochTimestamp}`
+        : "Có CHOCH timestamp canonical",
+      !hasChochContext
+        ? "Không thể xác minh freshness vì thiếu CHOCH context."
+        : !Number.isFinite(signalTimestamp)
+          ? "Chờ pattern M15 mới sau CHOCH."
+          : signalTimestamp > chochTimestamp
+            ? "Signal M15 phát sinh sau CHOCH; freshness PASS."
+            : "Signal không mới hơn CHOCH; entry bị chặn và phải chờ signal M15 mới.",
+    ));
+  }
+
   const priorities: string[] = [
     "THREE_CANDLE_BODY_DOMINANCE",
     "TWO_CANDLE_BODY_DOMINANCE",
@@ -396,9 +461,6 @@ function trendEntryChecks(snapshot: Snapshot): Phase7CEntryCheck[] {
     ));
   });
 
-  const reversalEntryPolicy =
-    snapshot.mode.active === "AUTO" &&
-    snapshot.engine.regime === "REVERSAL";
   const m15 = diagnostics?.trend?.m15Supertrend ?? null;
   checks.push(entryCheck(
     "TREND_SUPERTREND_M15",
