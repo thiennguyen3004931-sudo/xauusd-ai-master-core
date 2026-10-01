@@ -13,7 +13,15 @@ function input(overrides = {}) {
     },
     demo: {
       entryDiagnostics: {
-        entry: { eligible: true },
+        closeTime: 2_000,
+        pattern: { matched: true, side: "SELL", name: "ENGULFING" },
+        entry: {
+          eligible: true,
+          reversalEligible: true,
+          side: "SELL",
+          structuralStopDistance: 8,
+          reversalStopDistance: 8,
+        },
       },
     },
     ...overrides,
@@ -28,36 +36,51 @@ test("AUTO keeps the normal TREND recommendation path and authoritative regime s
   assert.equal(decision.regimeConfidence, 0.83);
 });
 
-test("AUTO allows REVERSAL only when the canonical Trend entry is eligible and preserves its snapshot", () => {
+test("AUTO allows REVERSAL only for a newer CHOCH-direction entry, without requiring continuation eligibility", () => {
   const value = input();
   value.regime = {
     activeMode: "AUTO",
     regime: "REVERSAL",
     recommendedMode: "PAUSE",
     confidence: 0.71,
+    reversal: {
+      direction: "BEARISH",
+      side: "SELL",
+      timestamp: 1_000,
+      level: 4300,
+    },
   };
+  value.demo.entryDiagnostics.entry.eligible = false;
+  value.demo.entryDiagnostics.entry.reversalEligible = true;
 
   const decision = evaluateAutoTrendEntryModeGate(value);
   assert.equal(decision.allowed, true);
   assert.equal(decision.recommendedMode, "PAUSE");
-  assert.equal(decision.reason, "AUTO_REVERSAL_CANONICAL_TREND_ENTRY");
+  assert.equal(decision.reason, "AUTO_REVERSAL_CHOCH_DIRECTION_ENTRY");
   assert.equal(decision.regime, "REVERSAL");
   assert.equal(decision.regimeConfidence, 0.71);
+  assert.equal(decision.reversalSide, "SELL");
 });
 
-test("AUTO keeps REVERSAL fail-closed without canonical eligibility", () => {
+test("AUTO keeps REVERSAL fail-closed when reversal pattern/structure readiness is false", () => {
   const value = input();
   value.regime = {
     activeMode: "AUTO",
     regime: "REVERSAL",
     recommendedMode: "PAUSE",
     confidence: 0.62,
+    reversal: {
+      direction: "BEARISH",
+      side: "SELL",
+      timestamp: 1_000,
+      level: 4300,
+    },
   };
-  value.demo.entryDiagnostics.entry.eligible = false;
+  value.demo.entryDiagnostics.entry.reversalEligible = false;
 
   const decision = evaluateAutoTrendEntryModeGate(value);
   assert.equal(decision.allowed, false);
-  assert.equal(decision.reason, "AUTO_REGIME_RECOMMENDS_PAUSE");
+  assert.equal(decision.reason, "REVERSAL_ENTRY_CONDITIONS_NOT_READY");
   assert.equal(decision.regime, "REVERSAL");
   assert.equal(decision.regimeConfidence, 0.62);
 });
