@@ -102,6 +102,17 @@ test("AUTO REVERSAL UI gate follows the canonical effective Trend strategy", () 
     /Supertrend/i,
   );
 
+  const chochDirectionCheck = ui.entryChecks.trend.find(
+    (check) => check.code === "TREND_REVERSAL_CHOCH_DIRECTION",
+  );
+  const chochFreshnessCheck = ui.entryChecks.trend.find(
+    (check) => check.code === "TREND_REVERSAL_SIGNAL_AFTER_CHOCH",
+  );
+  assert.equal(chochDirectionCheck?.status, "PASS");
+  assert.match(chochDirectionCheck?.actual ?? "", /BULLISH.*BUY.*signal BUY/i);
+  assert.equal(chochFreshnessCheck?.status, "PASS");
+  assert.match(chochFreshnessCheck?.required ?? "", /> 1775999000000/);
+
   const m15Check = ui.entryChecks.trend.find((check) => check.code === "TREND_SUPERTREND_M15");
   const m5Check = ui.entryChecks.trend.find((check) => check.code === "TREND_SUPERTREND_M5");
   assert.equal(m15Check?.status, "IGNORED");
