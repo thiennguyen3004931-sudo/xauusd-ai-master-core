@@ -108,8 +108,10 @@ type EntryDiagnostics = {
   };
   entry: {
     eligible: boolean;
+    reversalEligible: boolean;
     side: Phase7BSide | null;
     rule: "PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE";
+    reversalRule: "PATTERN_PLUS_VALID_STRUCTURE_NO_SUPERTREND";
     referenceEntry: number;
     structuralStopDistance: number | null;
     stopDistance: number | null;
@@ -378,7 +380,13 @@ function buildEntryDiagnostics(
       && structuralStopDistance !== null
       && structuralStopDistance <= 10,
   );
-  const stopDistance = eligible && structuralStopDistance !== null
+  const reversalEligible = Boolean(
+    pattern
+      && validStructure
+      && structuralStopDistance !== null
+      && structuralStopDistance <= 10,
+  );
+  const stopDistance = (eligible || reversalEligible) && structuralStopDistance !== null
     ? Math.max(6, structuralStopDistance)
     : null;
 
@@ -442,12 +450,14 @@ function buildEntryDiagnostics(
     },
     entry: {
       eligible,
+      reversalEligible,
       side: pattern?.side ?? null,
       rule: "PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
+      reversalRule: "PATTERN_PLUS_VALID_STRUCTURE_NO_SUPERTREND",
       referenceEntry: round(referenceEntry, 5),
       structuralStopDistance: structuralStopDistance === null ? null : round(structuralStopDistance, 5),
       stopDistance: stopDistance === null ? null : round(stopDistance, 5),
-      action: waitPullback ? "WAIT_PULLBACK" : eligible ? "ENTRY_IMMEDIATE" : "WAIT_SIGNAL",
+      action: waitPullback ? "WAIT_PULLBACK" : (eligible || reversalEligible) ? "ENTRY_IMMEDIATE" : "WAIT_SIGNAL",
       reason,
     },
   };
