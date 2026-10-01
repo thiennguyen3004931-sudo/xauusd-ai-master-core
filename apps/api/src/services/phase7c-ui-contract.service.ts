@@ -3,7 +3,7 @@ import type { getPhase7CDecisionMonitor } from "./phase7c-decision-monitor.servi
 type Snapshot = Awaited<ReturnType<typeof getPhase7CDecisionMonitor>>;
 export type Phase7CUiState = "WAITING" | "SETUP_READY" | "MANAGING";
 export type Phase7CUiGate = "ALLOWED" | "BLOCKED_BY_MODE" | "BLOCKED_BY_REGIME" | "PENDING";
-export type Phase7CEntryCheckStatus = "PASS" | "FAIL" | "WAIT" | "BLOCKED";
+export type Phase7CEntryCheckStatus = "PASS" | "FAIL" | "WAIT" | "BLOCKED" | "IGNORED";
 
 export interface Phase7CEntryCheck {
   code: string;
@@ -388,32 +388,51 @@ function trendEntryChecks(snapshot: Snapshot): Phase7CEntryCheck[] {
     ));
   });
 
+  const reversalEntryPolicy =
+    snapshot.mode.active === "AUTO" &&
+    snapshot.engine.regime === "REVERSAL";
   const m15 = diagnostics?.trend?.m15Supertrend ?? null;
   checks.push(entryCheck(
     "TREND_SUPERTREND_M15",
     "Supertrend M15",
-    !side ? "WAIT" : m15 === side ? "PASS" : "FAIL",
-    m15 ?? "—",
-    side ?? "Chờ pattern xác định hướng",
-    !side
-      ? "Chưa có pattern để xác định hướng Supertrend cần khớp."
-      : m15 === side
-        ? "Supertrend M15 10/3 cùng hướng pattern."
-        : "Supertrend M15 10/3 chưa cùng hướng pattern.",
+    reversalEntryPolicy
+      ? "IGNORED"
+      : !side
+        ? "WAIT"
+        : m15 === side
+          ? "PASS"
+          : "FAIL",
+    reversalEntryPolicy ? `IGNORED · observed ${m15 ?? "—"}` : m15 ?? "—",
+    reversalEntryPolicy ? "Không áp dụng cho REVERSAL" : side ?? "Chờ pattern xác định hướng",
+    reversalEntryPolicy
+      ? "REVERSAL dùng latest confirmed CHOCH direction + pattern + structure; Supertrend M15 chỉ được quan sát, không chặn entry."
+      : !side
+        ? "Chưa có pattern để xác định hướng Supertrend cần khớp."
+        : m15 === side
+          ? "Supertrend M15 10/3 cùng hướng pattern."
+          : "Supertrend M15 10/3 chưa cùng hướng pattern.",
   ));
 
   const m5 = diagnostics?.trend?.m5Supertrend ?? null;
   checks.push(entryCheck(
     "TREND_SUPERTREND_M5",
     "Supertrend M5",
-    !side ? "WAIT" : m5 === side ? "PASS" : "FAIL",
-    m5 ?? "—",
-    side ?? "Chờ pattern xác định hướng",
-    !side
-      ? "Chưa có pattern để xác định hướng Supertrend cần khớp."
-      : m5 === side
-        ? "Supertrend M5 10/3 cùng hướng pattern."
-        : "Supertrend M5 10/3 chưa cùng hướng pattern.",
+    reversalEntryPolicy
+      ? "IGNORED"
+      : !side
+        ? "WAIT"
+        : m5 === side
+          ? "PASS"
+          : "FAIL",
+    reversalEntryPolicy ? `IGNORED · observed ${m5 ?? "—"}` : m5 ?? "—",
+    reversalEntryPolicy ? "Không áp dụng cho REVERSAL" : side ?? "Chờ pattern xác định hướng",
+    reversalEntryPolicy
+      ? "REVERSAL dùng latest confirmed CHOCH direction + pattern + structure; Supertrend M5 chỉ được quan sát, không chặn entry."
+      : !side
+        ? "Chưa có pattern để xác định hướng Supertrend cần khớp."
+        : m5 === side
+          ? "Supertrend M5 10/3 cùng hướng pattern."
+          : "Supertrend M5 10/3 chưa cùng hướng pattern.",
   ));
 
   const structuralRaw = diagnostics?.entry?.structuralStopDistance;
