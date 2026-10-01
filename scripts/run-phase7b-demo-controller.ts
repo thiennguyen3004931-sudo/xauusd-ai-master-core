@@ -613,6 +613,29 @@ async function cycle(): Promise<void> {
 
   if (state.pendingPullback) {
     const pending = state.pendingPullback;
+    const persistedReversalContext = pending.reversalContext ?? null;
+    let activeReversalContext: ReversalEntryContext | null = null;
+
+    if (persistedReversalContext) {
+      activeReversalContext = await readPhase7CReversalEntryContext();
+      const sameReversal = Boolean(
+        activeReversalContext &&
+        activeReversalContext.side === persistedReversalContext.side &&
+        activeReversalContext.direction === persistedReversalContext.direction &&
+        activeReversalContext.chochTimestamp === persistedReversalContext.chochTimestamp
+      );
+      if (!sameReversal) {
+        journal("REVERSAL_PULLBACK_CONTEXT_INVALIDATED", {
+          signalId: pending.signalId,
+          persistedReversalContext,
+          activeReversalContext,
+        });
+        state.pendingPullback = null;
+        saveState();
+        return;
+      }
+    }
+
     const pullbackCycleTimestamp = Number(quote.timestamp);
     if (!Number.isFinite(pullbackCycleTimestamp)) {
       journal("QUOTE_TIMESTAMP_INVALID", {
@@ -640,10 +663,14 @@ async function cycle(): Promise<void> {
     const fvgConfirmed = m15Index >= 0
       ? hasRelevantFvg(m15, m15Index, pending.side, 12)
       : false;
-    const entryConditions = strategyEntryConfig.valid && strategyEntryConfig.state
+    const effectiveConfig = effectiveTrendEntryConfig(
+      strategyEntryConfig,
+      activeReversalContext,
+    );
+    const entryConditions = effectiveConfig
       ? evaluateStrategyEntryConditions({
           strategy: "TREND",
-          config: strategyEntryConfig.state,
+          config: effectiveConfig,
           side: pending.side,
           observations: {
             patternM15: { passed: true, observed: `${pending.side}:${pending.pattern}` },
@@ -666,8 +693,8 @@ async function cycle(): Promise<void> {
       barLow: latestM5.low,
       barHigh: latestM5.high,
       setupStillValid: structuralStopDistance > 0,
-      m15SupertrendAligned: m15Direction === pending.side,
-      m5SupertrendAligned: m5Direction === pending.side,
+      m15SupertrendAligned: activeReversalContext ? true : m15Direction === pending.side,
+      m5SupertrendAligned: activeReversalContext ? true : m5Direction === pending.side,
     });
 
     journal(evaluation.state, {
@@ -680,6 +707,8 @@ async function cycle(): Promise<void> {
       marketEntry,
       m15Direction,
       m5Direction,
+      supertrendGate: activeReversalContext ? "IGNORED_REVERSAL" : "REQUIRED",
+      reversalContext: activeReversalContext,
       m5CloseTime: latestM5.closeTime,
       pullbackCycleTimestamp,
       expiresAt: pending.expiresAt,
@@ -701,6 +730,10 @@ async function cycle(): Promise<void> {
           ? entryConditions.failedConditions.join(",")
           : "ENTRY_STRATEGY_CONFIG_INVALID",
         configError: strategyEntryConfig.error,
+        entryPolicy: activeReversalContext
+          ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+          : "TREND_CONTINUATION",
+        reversalContext: activeReversalContext,
         entryConditions,
       });
       return;
@@ -710,6 +743,10 @@ async function cycle(): Promise<void> {
       signalId: pending.signalId,
       side: pending.side,
       pattern: pending.pattern,
+      entryPolicy: activeReversalContext
+        ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+        : "TREND_CONTINUATION",
+      reversalContext: activeReversalContext,
       entryConditions,
     });
 
@@ -727,6 +764,7 @@ async function cycle(): Promise<void> {
         valid: true,
       },
       entryConditions,
+      reversalContext: activeReversalContext,
     };
     const submitted = await submitTrendEntry(signal, marketEntry, quote, spec, m15, "PULLBACK_ENTRY", health.accountBalance);
     if (submitted !== "BROKER_GAP_WAIT" && submitted !== "TOO_WIDE_WAIT") {
@@ -789,7 +827,12 @@ async function cycle(): Promise<void> {
   });
 
   if (decision.state === "WAIT_PULLBACK") {
-    state.pendingPullback = decision.pending;
+    state.pendingPullback = decision.pending
+      ? {
+          ...decision.pending,
+          reversalContext: signal.reversalContext,
+        }
+      : null;
     state.lastEvaluatedM5Close = signal.signalTimestamp;
     saveState();
     journal("WAIT_PULLBACK", {
