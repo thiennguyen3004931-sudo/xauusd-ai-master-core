@@ -215,6 +215,14 @@ function strategyWaitReasons(snapshot: Snapshot, strategy: "TREND" | "SIDEWAY"):
     const event = String(row.event ?? "");
     if (!event) continue;
     if (snapshot.generatedAt - Number(row.timestamp) > 30 * 60_000) continue;
+    if (
+      strategy === "TREND" &&
+      snapshot.mode.active === "AUTO" &&
+      snapshot.engine.regime === "REVERSAL" &&
+      /SUPERTREND/i.test(`${event} ${String(row.reason ?? "")}`)
+    ) {
+      continue;
+    }
 
     // Submission lifecycle events are not reasons why a strategy is waiting.
     // They belong to execution history, not the "why no entry" checklist.
@@ -742,7 +750,11 @@ export function buildPhase7CUiContract(snapshot: Snapshot): Phase7CUiContract {
     gates: {
       trend: trendGate,
       sideway: sidewayGate,
-      reversalFilter: snapshot.engine.regime === "REVERSAL" ? "BLOCKING" : "CLEAR",
+      reversalFilter:
+        snapshot.engine.regime === "REVERSAL" &&
+        snapshot.mode.effectiveStrategy !== "TREND"
+          ? "BLOCKING"
+          : "CLEAR",
     },
     status: {
       mt5Connected: snapshot.account.reachable === true,
