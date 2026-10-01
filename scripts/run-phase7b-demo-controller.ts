@@ -943,8 +943,13 @@ async function submitTrendEntry(
       tp1: partialTarget,
       takeProfit: takeProfit > 0 ? takeProfit : null,
     },
-    entryRule: "THREE_PATTERNS_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
-    supertrend: "M15_10_3_AND_M5_10_3",
+    entryRule: signal.reversalContext
+      ? "REVERSAL_CHOCH_DIRECTION_PLUS_PATTERN_PLUS_VALID_STRUCTURE"
+      : "THREE_PATTERNS_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
+    supertrend: signal.reversalContext
+      ? "IGNORED_REVERSAL_ENTRY"
+      : "M15_10_3_AND_M5_10_3",
+    reversalContext: signal.reversalContext,
     engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
     fvgConfirmedAtEntry,
     fvgRequiredForEntry: false,
