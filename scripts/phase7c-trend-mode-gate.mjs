@@ -51,17 +51,6 @@ export function evaluateAutoTrendEntryModeGate({ activeMode, regime, demo }) {
     };
   }
 
-  if (recommendedMode === "TREND") {
-    return {
-      allowed: true,
-      activeMode: normalizedActiveMode,
-      recommendedMode,
-      ...regimeSnapshot,
-      reason: "AUTO_REGIME_ALLOWS_TREND",
-      detail: `Regime=${regimeName}.`,
-    };
-  }
-
   if (regimeName === "REVERSAL") {
     const reversalSnapshot = {
       reversalDirection: reversalDirection || null,
@@ -134,6 +123,17 @@ export function evaluateAutoTrendEntryModeGate({ activeMode, regime, demo }) {
       ...reversalSnapshot,
       reason: "AUTO_REVERSAL_CHOCH_DIRECTION_ENTRY",
       detail: "REVERSAL entry matches latest confirmed CHOCH direction, is newer than CHOCH, and passes pattern/structure/SL gates without SuperTrend.",
+    };
+  }
+
+  if (recommendedMode === "TREND") {
+    return {
+      allowed: true,
+      activeMode: normalizedActiveMode,
+      recommendedMode,
+      ...regimeSnapshot,
+      reason: "AUTO_REGIME_ALLOWS_TREND",
+      detail: `Regime=${regimeName}.`,
     };
   }
 
