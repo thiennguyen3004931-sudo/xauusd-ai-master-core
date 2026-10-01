@@ -166,6 +166,10 @@ globalThis.fetch = async function phase7CTrendGate(input, init = undefined) {
   }
 };
 
+process.env.ZIQ_PHASE7C_REVERSAL_ENTRY_ENABLED = "true";
+process.env.ZIQ_PHASE7C_CONTROL_API_URL = controlApiBase;
+console.log("PHASE7C_REVERSAL_ENTRY_POLICY=CHOCH_DIRECTION_PATTERN_STRUCTURE_NO_SUPERTREND");
+
 await importLegacyTrendController();
 
 async function importLegacyTrendController() {
