@@ -1,7 +1,7 @@
 export interface Phase7CTrendModeGateInput {
   activeMode?: unknown;
-  regime?: Record<string, unknown> | null;
-  demo?: Record<string, unknown> | null;
+  regime?: unknown;
+  demo?: unknown;
 }
 
 export interface Phase7CTrendModeGateDecision {
