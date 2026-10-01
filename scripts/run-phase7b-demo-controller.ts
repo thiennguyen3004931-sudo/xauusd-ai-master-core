@@ -925,7 +925,9 @@ async function submitTrendEntry(
     signal.side === "BUY" ? marketEntry + 10 : marketEntry - 10,
     spec.digits,
   );
-  const orderId = `p7b-${entryState === "PULLBACK_ENTRY" ? "pb" : "im"}-${signal.signalTimestamp}-${signal.side}`;
+  const orderId = signal.reversalContext
+    ? `p7b-rv-${entryState === "PULLBACK_ENTRY" ? "pb" : "im"}-${signal.signalTimestamp}-${signal.side}`
+    : `p7b-${entryState === "PULLBACK_ENTRY" ? "pb" : "im"}-${signal.signalTimestamp}-${signal.side}`;
   journal("ENTRY_SUBMIT", {
     signalId: signal.id,
     side: signal.side,
