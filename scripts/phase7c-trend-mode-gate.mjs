@@ -15,7 +15,6 @@ export function evaluateAutoTrendEntryModeGate({ activeMode, regime, demo }) {
   const recommendedMode = upper(regime?.recommendedMode, "PAUSE");
   const regimeName = upper(regime?.regime, "UNCERTAIN");
   const regimeConfidence = finite(regime?.confidence);
-  const canonicalEntryEligible = demo?.entryDiagnostics?.entry?.eligible === true;
   const reversalEntryEligible = demo?.entryDiagnostics?.entry?.reversalEligible === true;
   const signalSide = upper(
     demo?.entryDiagnostics?.entry?.side ?? demo?.entryDiagnostics?.pattern?.side,
