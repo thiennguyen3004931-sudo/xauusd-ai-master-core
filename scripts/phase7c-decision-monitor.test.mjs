@@ -149,6 +149,8 @@ test("AUTO permits only a newer CHOCH-direction REVERSAL entry and does not requ
   assert.equal(snapshot.preTrade.approved, true);
   assert.equal(snapshot.preTrade.side, "BUY");
   assert.equal(snapshot.preTrade.stopDistance, 6);
+  assert.doesNotMatch(snapshot.preTrade.decisionReason, /Supertrend.*chưa cùng hướng/i);
+  assert.match(snapshot.preTrade.decisionReason, /REVERSAL|CHOCH/i);
 });
 
 test("AUTO keeps REVERSAL fail-closed when reversal pattern/structure readiness is false", () => {
