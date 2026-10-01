@@ -141,6 +141,9 @@ jobs:
       - name: Trend management path regression
         run: node scripts/test-phase7c-trend-management-path-regression.mjs
 
+      - name: REVERSAL CHOCH direction entry contract
+        run: node --test scripts/test-phase7c-reversal-entry-contract.mjs
+
       - name: New-machine bootstrap safety contract
         run: node --test scripts/test-phase7c-new-machine-installer-source.mjs
 
