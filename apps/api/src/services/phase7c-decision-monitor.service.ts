@@ -757,6 +757,7 @@ export function buildPhase7CDecisionMonitor(input: {
       regime: input.regime.regime,
       confidence: input.regime.confidence,
       recommendedMode: input.regime.recommendedMode,
+      reversal: input.regime.reversal,
       reasons: input.regime.reasons,
       checkedAt: input.regime.checkedAt,
       lastCandleCloseTime: input.regime.lastCandleCloseTime,
