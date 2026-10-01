@@ -96,4 +96,13 @@ test("AUTO REVERSAL UI gate follows the canonical effective Trend strategy", () 
     ui.reasons.trendWait.join("\n"),
     /AUTO hiện chưa chọn TREND/,
   );
+
+  const m15Check = ui.entryChecks.trend.find((check) => check.code === "TREND_SUPERTREND_M15");
+  const m5Check = ui.entryChecks.trend.find((check) => check.code === "TREND_SUPERTREND_M5");
+  assert.equal(m15Check?.status, "IGNORED");
+  assert.equal(m5Check?.status, "IGNORED");
+  assert.match(m15Check?.actual ?? "", /IGNORED.*SELL/i);
+  assert.match(m5Check?.actual ?? "", /IGNORED.*SELL/i);
+  assert.match(m15Check?.required ?? "", /Không áp dụng cho REVERSAL/i);
+  assert.match(m5Check?.required ?? "", /Không áp dụng cho REVERSAL/i);
 });
