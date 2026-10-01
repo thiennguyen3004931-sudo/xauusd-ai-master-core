@@ -87,6 +87,7 @@ test("AUTO REVERSAL UI gate follows the canonical effective Trend strategy", () 
 
   const ui = buildPhase7CUiContract(snapshot);
   assert.equal(ui.gates.trend, "ALLOWED");
+  assert.equal(ui.gates.reversalFilter, "CLEAR");
   assert.equal(ui.status.trendOn, true);
   assert.equal(
     ui.entryChecks.trend.find((check) => check.code === "TREND_MODE_REGIME")?.status,
@@ -95,6 +96,10 @@ test("AUTO REVERSAL UI gate follows the canonical effective Trend strategy", () 
   assert.doesNotMatch(
     ui.reasons.trendWait.join("\n"),
     /AUTO hiện chưa chọn TREND/,
+  );
+  assert.doesNotMatch(
+    ui.reasons.trendWait.join("\n"),
+    /Supertrend/i,
   );
 
   const m15Check = ui.entryChecks.trend.find((check) => check.code === "TREND_SUPERTREND_M15");
