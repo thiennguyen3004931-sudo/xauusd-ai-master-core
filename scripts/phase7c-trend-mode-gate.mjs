@@ -16,6 +16,15 @@ export function evaluateAutoTrendEntryModeGate({ activeMode, regime, demo }) {
   const regimeName = upper(regime?.regime, "UNCERTAIN");
   const regimeConfidence = finite(regime?.confidence);
   const canonicalEntryEligible = demo?.entryDiagnostics?.entry?.eligible === true;
+  const reversalEntryEligible = demo?.entryDiagnostics?.entry?.reversalEligible === true;
+  const signalSide = upper(
+    demo?.entryDiagnostics?.entry?.side ?? demo?.entryDiagnostics?.pattern?.side,
+    "",
+  );
+  const signalTimestamp = finite(demo?.entryDiagnostics?.closeTime);
+  const reversalSide = upper(regime?.reversal?.side, "");
+  const reversalTimestamp = finite(regime?.reversal?.timestamp);
+  const reversalDirection = upper(regime?.reversal?.direction, "");
   const regimeSnapshot = {
     regime: regimeName,
     regimeConfidence,
@@ -54,14 +63,78 @@ export function evaluateAutoTrendEntryModeGate({ activeMode, regime, demo }) {
     };
   }
 
-  if (regimeName === "REVERSAL" && canonicalEntryEligible) {
+  if (regimeName === "REVERSAL") {
+    const reversalSnapshot = {
+      reversalDirection: reversalDirection || null,
+      reversalSide: reversalSide || null,
+      reversalTimestamp,
+      signalSide: signalSide || null,
+      signalTimestamp,
+    };
+
+    if (
+      (reversalSide !== "BUY" && reversalSide !== "SELL") ||
+      reversalTimestamp === null
+    ) {
+      return {
+        allowed: false,
+        activeMode: normalizedActiveMode,
+        recommendedMode,
+        ...regimeSnapshot,
+        ...reversalSnapshot,
+        reason: "REVERSAL_CONTEXT_MISSING",
+        detail: "REVERSAL requires canonical latest confirmed CHOCH direction and timestamp.",
+      };
+    }
+
+    if (signalSide && signalSide !== reversalSide) {
+      return {
+        allowed: false,
+        activeMode: normalizedActiveMode,
+        recommendedMode,
+        ...regimeSnapshot,
+        ...reversalSnapshot,
+        reason: "REVERSAL_DIRECTION_MISMATCH",
+        detail: `REVERSAL requires ${reversalSide}; current signal is ${signalSide}.`,
+      };
+    }
+
+    if (signalTimestamp !== null && signalTimestamp <= reversalTimestamp) {
+      return {
+        allowed: false,
+        activeMode: normalizedActiveMode,
+        recommendedMode,
+        ...regimeSnapshot,
+        ...reversalSnapshot,
+        reason: "REVERSAL_SIGNAL_NOT_AFTER_CHOCH",
+        detail: `Signal timestamp ${signalTimestamp} must be newer than CHOCH ${reversalTimestamp}.`,
+      };
+    }
+
+    if (
+      signalSide !== reversalSide ||
+      signalTimestamp === null ||
+      !reversalEntryEligible
+    ) {
+      return {
+        allowed: false,
+        activeMode: normalizedActiveMode,
+        recommendedMode,
+        ...regimeSnapshot,
+        ...reversalSnapshot,
+        reason: "REVERSAL_ENTRY_CONDITIONS_NOT_READY",
+        detail: "REVERSAL waits for CHOCH-direction M15 pattern + valid structure + SL <= 10; SuperTrend is not an entry gate.",
+      };
+    }
+
     return {
       allowed: true,
       activeMode: normalizedActiveMode,
       recommendedMode,
       ...regimeSnapshot,
-      reason: "AUTO_REVERSAL_CANONICAL_TREND_ENTRY",
-      detail: "Confirmed REVERSAL/CHOCH is allowed only because the canonical Trend entry is eligible.",
+      ...reversalSnapshot,
+      reason: "AUTO_REVERSAL_CHOCH_DIRECTION_ENTRY",
+      detail: "REVERSAL entry matches latest confirmed CHOCH direction, is newer than CHOCH, and passes pattern/structure/SL gates without SuperTrend.",
     };
   }
 
@@ -71,8 +144,6 @@ export function evaluateAutoTrendEntryModeGate({ activeMode, regime, demo }) {
     recommendedMode,
     ...regimeSnapshot,
     reason: `AUTO_REGIME_RECOMMENDS_${recommendedMode}`,
-    detail: regimeName === "REVERSAL"
-      ? "REVERSAL remains fail-closed because the canonical Trend entry is not eligible."
-      : `Regime=${regimeName}; no canonical REVERSAL exception applies.`,
+    detail: `Regime=${regimeName}; no canonical REVERSAL exception applies.`,
   };
 }
