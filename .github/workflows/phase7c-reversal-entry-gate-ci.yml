@@ -58,6 +58,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
+        timeout-minutes: 3
         uses: actions/checkout@v4
       - name: Setup pnpm
         uses: pnpm/action-setup@v4

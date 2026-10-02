@@ -29,6 +29,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
+        timeout-minutes: 3
         uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
