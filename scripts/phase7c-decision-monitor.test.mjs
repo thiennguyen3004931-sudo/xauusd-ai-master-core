@@ -26,14 +26,17 @@ function fixture(overrides = {}) {
     demo: {
       botStatus: "WAITING_SIGNAL",
       entryDiagnostics: {
+        closeTime: 1_776_000_000_000,
         pattern: { matched: true, name: "ENGULFING", side: "BUY" },
         trend: { confidenceScore: 80, confidenceLevel: "RẤT_CAO" },
         entry: {
           eligible: true,
+          reversalEligible: true,
           side: "BUY",
           referenceEntry: 2500,
           structuralStopDistance: 5,
           stopDistance: 6,
+          reversalStopDistance: 6,
           action: "ENTRY_IMMEDIATE",
           reason: "Canonical Trend setup is valid.",
         },
@@ -119,15 +122,23 @@ test("decision monitor preserves canonical Sideway entry conditions from the aud
   assert.deepEqual(snapshot.strategyEntryConditions.sideway, entryConditions);
 });
 
-test("AUTO permits a canonical Trend entry during confirmed REVERSAL instead of collapsing to PAUSE", () => {
+test("AUTO permits only a newer CHOCH-direction REVERSAL entry and does not require SuperTrend continuation eligibility", () => {
   const input = fixture();
   input.regime = {
     ...input.regime,
     regime: "REVERSAL",
     recommendedMode: "PAUSE",
     modeMatchesRecommendation: true,
+    reversal: {
+      direction: "BULLISH",
+      side: "BUY",
+      timestamp: 1_775_999_000_000,
+      level: 2490,
+    },
     reasons: ["A confirmed CHOCH indicates a possible structural reversal."],
   };
+  input.demo.entryDiagnostics.entry.eligible = false;
+  input.demo.entryDiagnostics.entry.reversalEligible = true;
 
   const snapshot = buildPhase7CDecisionMonitor(input);
   assert.equal(snapshot.mode.active, "AUTO");
@@ -136,21 +147,54 @@ test("AUTO permits a canonical Trend entry during confirmed REVERSAL instead of 
   assert.equal(snapshot.mode.effectiveStrategy, "TREND");
   assert.equal(snapshot.preTrade.strategy, "TREND");
   assert.equal(snapshot.preTrade.approved, true);
+  assert.equal(snapshot.preTrade.side, "BUY");
+  assert.equal(snapshot.preTrade.stopDistance, 6);
+  assert.doesNotMatch(snapshot.preTrade.decisionReason, /Supertrend.*chưa cùng hướng/i);
+  assert.match(snapshot.preTrade.decisionReason, /REVERSAL|CHOCH/i);
 });
 
-test("AUTO keeps REVERSAL fail-closed when the canonical Trend entry is not eligible", () => {
+test("AUTO keeps REVERSAL fail-closed when reversal pattern/structure readiness is false", () => {
   const input = fixture();
   input.regime = {
     ...input.regime,
     regime: "REVERSAL",
     recommendedMode: "PAUSE",
     modeMatchesRecommendation: true,
+    reversal: {
+      direction: "BULLISH",
+      side: "BUY",
+      timestamp: 1_775_999_000_000,
+      level: 2490,
+    },
   };
-  input.demo.entryDiagnostics.entry.eligible = false;
+  input.demo.entryDiagnostics.entry.eligible = true;
+  input.demo.entryDiagnostics.entry.reversalEligible = false;
   input.demo.entryDiagnostics.entry.action = "WAIT_SIGNAL";
 
   const snapshot = buildPhase7CDecisionMonitor(input);
   assert.equal(snapshot.mode.active, "AUTO");
+  assert.equal(snapshot.mode.effectiveStrategy, "PAUSE");
+  assert.equal(snapshot.preTrade.strategy, "PAUSE");
+  assert.equal(snapshot.preTrade.approved, false);
+});
+
+test("AUTO keeps REVERSAL fail-closed when entry side disagrees with CHOCH direction", () => {
+  const input = fixture();
+  input.regime = {
+    ...input.regime,
+    regime: "REVERSAL",
+    recommendedMode: "PAUSE",
+    modeMatchesRecommendation: true,
+    reversal: {
+      direction: "BEARISH",
+      side: "SELL",
+      timestamp: 1_775_999_000_000,
+      level: 2510,
+    },
+  };
+  input.demo.entryDiagnostics.entry.reversalEligible = true;
+
+  const snapshot = buildPhase7CDecisionMonitor(input);
   assert.equal(snapshot.mode.effectiveStrategy, "PAUSE");
   assert.equal(snapshot.preTrade.strategy, "PAUSE");
   assert.equal(snapshot.preTrade.approved, false);
@@ -163,7 +207,15 @@ test("AUTO REVERSAL exception never bypasses active-lot hard safety", () => {
     regime: "REVERSAL",
     recommendedMode: "PAUSE",
     modeMatchesRecommendation: true,
+    reversal: {
+      direction: "BULLISH",
+      side: "BUY",
+      timestamp: 1_775_999_000_000,
+      level: 2490,
+    },
   };
+  input.demo.entryDiagnostics.entry.eligible = false;
+  input.demo.entryDiagnostics.entry.reversalEligible = true;
   input.lots.restartRequired = true;
 
   const snapshot = buildPhase7CDecisionMonitor(input);

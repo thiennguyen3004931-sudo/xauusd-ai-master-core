@@ -108,13 +108,18 @@ type EntryDiagnostics = {
   };
   entry: {
     eligible: boolean;
+    reversalEligible: boolean;
     side: Phase7BSide | null;
     rule: "PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE";
+    reversalRule: "PATTERN_PLUS_VALID_STRUCTURE_NO_SUPERTREND";
     referenceEntry: number;
     structuralStopDistance: number | null;
     stopDistance: number | null;
+    reversalStopDistance: number | null;
     action: "WAIT_SIGNAL" | "ENTRY_IMMEDIATE" | "WAIT_PULLBACK";
+    reversalAction: "WAIT_SIGNAL" | "ENTRY_IMMEDIATE" | "WAIT_PULLBACK";
     reason: string;
+    reversalReason: string;
   };
 };
 
@@ -201,6 +206,7 @@ router.get("/", async (_req: Request, res: Response) => {
         trigger: "ENGULFING_OR_TWO_OR_THREE_SAME_COLOR_BODY_DOMINANCE",
         engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
         trend: "SUPERTREND_M15_10_3_AND_M5_10_3_MANDATORY",
+        reversalEntry: "CHOCH_DIRECTION_PATTERN_VALID_STRUCTURE_NO_SUPERTREND",
         fvg: "OPTIONAL_AT_ENTRY_HOLD_CONFIRMATION_ADDON_SHADOW",
         initialStop: "STRUCTURE_MIN_6_MAX_10_WAIT_PULLBACK_IF_WIDER",
         plus6: "SL_TO_ENTRY",
@@ -378,7 +384,16 @@ function buildEntryDiagnostics(
       && structuralStopDistance !== null
       && structuralStopDistance <= 10,
   );
+  const reversalEligible = Boolean(
+    pattern
+      && validStructure
+      && structuralStopDistance !== null
+      && structuralStopDistance <= 10,
+  );
   const stopDistance = eligible && structuralStopDistance !== null
+    ? Math.max(6, structuralStopDistance)
+    : null;
+  const reversalStopDistance = reversalEligible && structuralStopDistance !== null
     ? Math.max(6, structuralStopDistance)
     : null;
 
@@ -393,6 +408,21 @@ function buildEntryDiagnostics(
     reason = sameDirectionConfirmed
       ? `${pattern!.side} đủ Pattern + Supertrend M15/M5 + SL cấu trúc; MA20/50 cùng hướng chỉ tăng độ tin cậy; FVG cùng hướng cũng xác nhận.`
       : `${pattern!.side} đủ Pattern + Supertrend M15/M5 + SL cấu trúc; MA20/50 chỉ là độ tin cậy và FVG không chặn entry.`;
+  }
+
+  const reversalWaitPullback = Boolean(
+    pattern
+      && validStructure
+      && structuralStopDistance !== null
+      && structuralStopDistance > 10,
+  );
+  let reversalReason = `Chưa có một trong 3 mô hình M15 hợp lệ để xét REVERSAL; SuperTrend không tham gia gate.`;
+  if (pattern && !validStructure) {
+    reversalReason = `${pattern.side} pattern đã xuất hiện nhưng cấu trúc không tạo được khoảng SL hợp lệ.`;
+  } else if (reversalWaitPullback) {
+    reversalReason = `${pattern!.side} đủ Pattern + Structure nhưng SL cấu trúc ${structuralStopDistance!.toFixed(2)} giá vượt 10; chờ pullback về vùng SL 6–10. SuperTrend không tham gia gate.`;
+  } else if (reversalEligible) {
+    reversalReason = `${pattern!.side} đủ Pattern + Structure + SL 6–10 cho REVERSAL; SuperTrend M15/M5 chỉ quan sát và không chặn entry.`;
   }
 
   const normalizedCloseTime = normalizeBrokerTimestamp(current.closeTime, brokerClockOffsetMs);
@@ -442,13 +472,22 @@ function buildEntryDiagnostics(
     },
     entry: {
       eligible,
+      reversalEligible,
       side: pattern?.side ?? null,
       rule: "PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
+      reversalRule: "PATTERN_PLUS_VALID_STRUCTURE_NO_SUPERTREND",
       referenceEntry: round(referenceEntry, 5),
       structuralStopDistance: structuralStopDistance === null ? null : round(structuralStopDistance, 5),
       stopDistance: stopDistance === null ? null : round(stopDistance, 5),
+      reversalStopDistance: reversalStopDistance === null ? null : round(reversalStopDistance, 5),
       action: waitPullback ? "WAIT_PULLBACK" : eligible ? "ENTRY_IMMEDIATE" : "WAIT_SIGNAL",
+      reversalAction: reversalWaitPullback
+        ? "WAIT_PULLBACK"
+        : reversalEligible
+          ? "ENTRY_IMMEDIATE"
+          : "WAIT_SIGNAL",
       reason,
+      reversalReason,
     },
   };
 }

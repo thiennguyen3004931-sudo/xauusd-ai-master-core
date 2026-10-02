@@ -93,7 +93,7 @@ globalThis.fetch = async function phase7CTrendGate(input, init = undefined) {
   }
 
   try {
-    const decision = await evaluateTrendEntryPermission();
+    const decision = await evaluateTrendEntryPermission(request);
     if (decision.activeMode === "SEMI") {
       const semiDecision = {
         ...decision,
@@ -165,6 +165,10 @@ globalThis.fetch = async function phase7CTrendGate(input, init = undefined) {
     lock.release();
   }
 };
+
+process.env.ZIQ_PHASE7C_REVERSAL_ENTRY_ENABLED = "true";
+process.env.ZIQ_PHASE7C_CONTROL_API_URL = controlApiBase;
+console.log("PHASE7C_REVERSAL_ENTRY_POLICY=CHOCH_DIRECTION_PATTERN_STRUCTURE_NO_SUPERTREND");
 
 await importLegacyTrendController();
 
@@ -445,9 +449,20 @@ function startTrendRuntimeHeartbeat() {
   );
 }
 
-async function evaluateTrendEntryPermission() {
+async function evaluateTrendEntryPermission(request) {
   const modePayload = await controlRequest("/api/v1/phase7c/bot-mode");
   const activeMode = String(modePayload?.state?.mode ?? "PAUSE").toUpperCase();
+  const orderEvidence = reversalOrderGateDiagnostics(request?.body);
+
+  if (orderEvidence.reversalOrigin && activeMode !== "AUTO") {
+    return {
+      allowed: false,
+      activeMode,
+      recommendedMode: null,
+      reason: "REVERSAL_CONTEXT_CHANGED_BEFORE_SUBMIT",
+      detail: `REVERSAL-origin order requires AUTO at final submit; actual mode=${activeMode}.`,
+    };
+  }
 
   if (activeMode === "TREND") {
     return {
@@ -503,11 +518,87 @@ async function evaluateTrendEntryPermission() {
     controlRequest("/api/v1/phase7b-demo"),
   ]);
 
+  const finalRegime = String(regime?.regime ?? "").toUpperCase();
+  if (orderEvidence.reversalOrigin && finalRegime !== "REVERSAL") {
+    return {
+      allowed: false,
+      activeMode,
+      recommendedMode: String(regime?.recommendedMode ?? "PAUSE").toUpperCase(),
+      reason: "REVERSAL_CONTEXT_CHANGED_BEFORE_SUBMIT",
+      detail: `REVERSAL-origin order requires REVERSAL at final submit; actual regime=${finalRegime || "UNKNOWN"}.`,
+    };
+  }
+
+  const gateDemo = finalRegime === "REVERSAL"
+    ? orderEvidence.demo
+    : demo;
+
   return evaluateAutoTrendEntryModeGate({
     activeMode,
     regime,
-    demo,
+    demo: gateDemo,
   });
+}
+
+function reversalOrderGateDiagnostics(rawBody) {
+  let body = null;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : null;
+  } catch {
+    body = null;
+  }
+
+  const side = String(body?.side ?? "").trim().toUpperCase();
+  const clientOrderId = String(body?.clientOrderId ?? "").trim();
+  const idempotencyKey = String(body?.idempotencyKey ?? "").trim();
+  const requestedPrice = Number(body?.requestedPrice);
+  const stopLoss = Number(body?.stopLoss);
+  const match = /^p7b-(rv-)?(?:pb|im)-(\d+)-(BUY|SELL)$/.exec(clientOrderId);
+  const reversalOrigin = match?.[1] === "rv-";
+  const signalTimestamp = match ? Number(match[2]) : null;
+  const idSide = match?.[3] ?? "";
+  const structuralStopDistance =
+    side === "BUY" && Number.isFinite(requestedPrice) && Number.isFinite(stopLoss)
+      ? requestedPrice - stopLoss
+      : side === "SELL" && Number.isFinite(requestedPrice) && Number.isFinite(stopLoss)
+        ? stopLoss - requestedPrice
+        : NaN;
+  const canonicalOrderEvidence = Boolean(
+    reversalOrigin &&
+    (side === "BUY" || side === "SELL") &&
+    idSide === side &&
+    idempotencyKey === clientOrderId &&
+    Number.isFinite(signalTimestamp) &&
+    signalTimestamp > 0 &&
+    Number.isFinite(structuralStopDistance) &&
+    structuralStopDistance + 1e-9 >= 6 &&
+    structuralStopDistance <= 10 + 1e-9
+  );
+
+  return {
+    reversalOrigin,
+    demo: {
+      entryDiagnostics: {
+      closeTime: signalTimestamp,
+      pattern: {
+        matched: canonicalOrderEvidence,
+        side: side === "BUY" || side === "SELL" ? side : null,
+        name: canonicalOrderEvidence ? "CANONICAL_RUNTIME_SIGNAL" : null,
+      },
+      entry: {
+        eligible: false,
+        reversalEligible: canonicalOrderEvidence,
+        side: side === "BUY" || side === "SELL" ? side : null,
+        structuralStopDistance: Number.isFinite(structuralStopDistance)
+          ? structuralStopDistance
+          : null,
+        reversalStopDistance: canonicalOrderEvidence
+          ? structuralStopDistance
+          : null,
+        },
+      },
+    },
+  };
 }
 
 async function fetchOpenPositionsUnderLock(request) {

@@ -3,7 +3,7 @@ import type { getPhase7CDecisionMonitor } from "./phase7c-decision-monitor.servi
 type Snapshot = Awaited<ReturnType<typeof getPhase7CDecisionMonitor>>;
 export type Phase7CUiState = "WAITING" | "SETUP_READY" | "MANAGING";
 export type Phase7CUiGate = "ALLOWED" | "BLOCKED_BY_MODE" | "BLOCKED_BY_REGIME" | "PENDING";
-export type Phase7CEntryCheckStatus = "PASS" | "FAIL" | "WAIT" | "BLOCKED";
+export type Phase7CEntryCheckStatus = "PASS" | "FAIL" | "WAIT" | "BLOCKED" | "IGNORED";
 
 export interface Phase7CEntryCheck {
   code: string;
@@ -215,6 +215,14 @@ function strategyWaitReasons(snapshot: Snapshot, strategy: "TREND" | "SIDEWAY"):
     const event = String(row.event ?? "");
     if (!event) continue;
     if (snapshot.generatedAt - Number(row.timestamp) > 30 * 60_000) continue;
+    if (
+      strategy === "TREND" &&
+      snapshot.mode.active === "AUTO" &&
+      snapshot.engine.regime === "REVERSAL" &&
+      /SUPERTREND/i.test(`${event} ${String(row.reason ?? "")}`)
+    ) {
+      continue;
+    }
 
     // Submission lifecycle events are not reasons why a strategy is waiting.
     // They belong to execution history, not the "why no entry" checklist.
@@ -338,6 +346,71 @@ function trendEntryChecks(snapshot: Snapshot): Phase7CEntryCheck[] {
       : "Mode hoặc AUTO regime hiện đang chặn Trend.",
   ));
 
+  const reversalEntryPolicy =
+    snapshot.mode.active === "AUTO" &&
+    snapshot.engine.regime === "REVERSAL";
+  if (reversalEntryPolicy) {
+    const reversalSide = snapshot.engine.reversal?.side ?? null;
+    const reversalDirection = snapshot.engine.reversal?.direction ?? null;
+    const chochTimestamp = Number(snapshot.engine.reversal?.timestamp);
+    const signalTimestamp = Number(diagnostics?.closeTime);
+    const hasChochContext =
+      (reversalSide === "BUY" || reversalSide === "SELL") &&
+      Number.isFinite(chochTimestamp);
+    const directionStatus: Phase7CEntryCheckStatus = !hasChochContext
+      ? "BLOCKED"
+      : !side
+        ? "WAIT"
+        : side === reversalSide
+          ? "PASS"
+          : "FAIL";
+
+    checks.push(entryCheck(
+      "TREND_REVERSAL_CHOCH_DIRECTION",
+      "CHOCH direction",
+      directionStatus,
+      hasChochContext
+        ? `${reversalDirection ?? "—"} → ${reversalSide}; signal ${side ?? "—"}`
+        : "Thiếu canonical CHOCH context",
+      hasChochContext
+        ? `Signal phải là ${reversalSide}`
+        : "Latest confirmed CHOCH phải có direction hợp lệ",
+      !hasChochContext
+        ? "REVERSAL thiếu direction/timestamp canonical nên entry bị fail-closed."
+        : !side
+          ? `CHOCH yêu cầu ${reversalSide}; đang chờ pattern M15 xác định signal side.`
+          : side === reversalSide
+            ? `Signal ${side} cùng hướng latest confirmed CHOCH.`
+            : `Signal ${side} ngược yêu cầu ${reversalSide} của latest confirmed CHOCH; entry bị chặn.`,
+    ));
+
+    const freshnessStatus: Phase7CEntryCheckStatus = !hasChochContext
+      ? "BLOCKED"
+      : !Number.isFinite(signalTimestamp)
+        ? "WAIT"
+        : signalTimestamp > chochTimestamp
+          ? "PASS"
+          : "FAIL";
+    checks.push(entryCheck(
+      "TREND_REVERSAL_SIGNAL_AFTER_CHOCH",
+      "Signal sau CHOCH",
+      freshnessStatus,
+      Number.isFinite(signalTimestamp)
+        ? `${signalTimestamp}`
+        : "Chưa có signal timestamp",
+      hasChochContext
+        ? `> ${chochTimestamp}`
+        : "Có CHOCH timestamp canonical",
+      !hasChochContext
+        ? "Không thể xác minh freshness vì thiếu CHOCH context."
+        : !Number.isFinite(signalTimestamp)
+          ? "Chờ pattern M15 mới sau CHOCH."
+          : signalTimestamp > chochTimestamp
+            ? "Signal M15 phát sinh sau CHOCH; freshness PASS."
+            : "Signal không mới hơn CHOCH; entry bị chặn và phải chờ signal M15 mới.",
+    ));
+  }
+
   const priorities: string[] = [
     "THREE_CANDLE_BODY_DOMINANCE",
     "TWO_CANDLE_BODY_DOMINANCE",
@@ -392,28 +465,44 @@ function trendEntryChecks(snapshot: Snapshot): Phase7CEntryCheck[] {
   checks.push(entryCheck(
     "TREND_SUPERTREND_M15",
     "Supertrend M15",
-    !side ? "WAIT" : m15 === side ? "PASS" : "FAIL",
-    m15 ?? "—",
-    side ?? "Chờ pattern xác định hướng",
-    !side
-      ? "Chưa có pattern để xác định hướng Supertrend cần khớp."
-      : m15 === side
-        ? "Supertrend M15 10/3 cùng hướng pattern."
-        : "Supertrend M15 10/3 chưa cùng hướng pattern.",
+    reversalEntryPolicy
+      ? "IGNORED"
+      : !side
+        ? "WAIT"
+        : m15 === side
+          ? "PASS"
+          : "FAIL",
+    reversalEntryPolicy ? `IGNORED · observed ${m15 ?? "—"}` : m15 ?? "—",
+    reversalEntryPolicy ? "Không áp dụng cho REVERSAL" : side ?? "Chờ pattern xác định hướng",
+    reversalEntryPolicy
+      ? "REVERSAL dùng latest confirmed CHOCH direction + pattern + structure; Supertrend M15 chỉ được quan sát, không chặn entry."
+      : !side
+        ? "Chưa có pattern để xác định hướng Supertrend cần khớp."
+        : m15 === side
+          ? "Supertrend M15 10/3 cùng hướng pattern."
+          : "Supertrend M15 10/3 chưa cùng hướng pattern.",
   ));
 
   const m5 = diagnostics?.trend?.m5Supertrend ?? null;
   checks.push(entryCheck(
     "TREND_SUPERTREND_M5",
     "Supertrend M5",
-    !side ? "WAIT" : m5 === side ? "PASS" : "FAIL",
-    m5 ?? "—",
-    side ?? "Chờ pattern xác định hướng",
-    !side
-      ? "Chưa có pattern để xác định hướng Supertrend cần khớp."
-      : m5 === side
-        ? "Supertrend M5 10/3 cùng hướng pattern."
-        : "Supertrend M5 10/3 chưa cùng hướng pattern.",
+    reversalEntryPolicy
+      ? "IGNORED"
+      : !side
+        ? "WAIT"
+        : m5 === side
+          ? "PASS"
+          : "FAIL",
+    reversalEntryPolicy ? `IGNORED · observed ${m5 ?? "—"}` : m5 ?? "—",
+    reversalEntryPolicy ? "Không áp dụng cho REVERSAL" : side ?? "Chờ pattern xác định hướng",
+    reversalEntryPolicy
+      ? "REVERSAL dùng latest confirmed CHOCH direction + pattern + structure; Supertrend M5 chỉ được quan sát, không chặn entry."
+      : !side
+        ? "Chưa có pattern để xác định hướng Supertrend cần khớp."
+        : m5 === side
+          ? "Supertrend M5 10/3 cùng hướng pattern."
+          : "Supertrend M5 10/3 chưa cùng hướng pattern.",
   ));
 
   const structuralRaw = diagnostics?.entry?.structuralStopDistance;
@@ -723,7 +812,11 @@ export function buildPhase7CUiContract(snapshot: Snapshot): Phase7CUiContract {
     gates: {
       trend: trendGate,
       sideway: sidewayGate,
-      reversalFilter: snapshot.engine.regime === "REVERSAL" ? "BLOCKING" : "CLEAR",
+      reversalFilter:
+        snapshot.engine.regime === "REVERSAL" &&
+        snapshot.mode.effectiveStrategy !== "TREND"
+          ? "BLOCKING"
+          : "CLEAR",
     },
     status: {
       mt5Connected: snapshot.account.reachable === true,

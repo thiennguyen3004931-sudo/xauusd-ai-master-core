@@ -13,6 +13,12 @@ function fixture() {
       recommendedMode: "PAUSE",
       activeMode: "AUTO",
       modeMatchesRecommendation: true,
+      reversal: {
+        direction: "BULLISH",
+        side: "BUY",
+        timestamp: 1_775_999_000_000,
+        level: 2490,
+      },
       reasons: ["A confirmed CHOCH indicates a possible structural reversal."],
       metrics: {},
       supplyDemandRange: null,
@@ -22,21 +28,24 @@ function fixture() {
     demo: {
       botStatus: "WAITING_SIGNAL",
       entryDiagnostics: {
+        closeTime: 1_776_000_000_000,
         pattern: { matched: true, name: "ENGULFING", side: "BUY" },
         trend: {
           confidenceScore: 80,
           confidenceLevel: "RẤT_CAO",
-          m15Supertrend: "BUY",
-          m5Supertrend: "BUY",
+          m15Supertrend: "SELL",
+          m5Supertrend: "SELL",
         },
         entry: {
-          eligible: true,
+          eligible: false,
+          reversalEligible: true,
           side: "BUY",
           referenceEntry: 2500,
           structuralStopDistance: 5,
-          stopDistance: 6,
-          action: "ENTRY_IMMEDIATE",
-          reason: "Canonical Trend setup is valid.",
+          stopDistance: null,
+          reversalStopDistance: 6,
+          action: "WAIT_SIGNAL",
+          reason: "REVERSAL uses CHOCH direction + pattern + structure; SuperTrend is ignored.",
         },
       },
     },
@@ -78,6 +87,7 @@ test("AUTO REVERSAL UI gate follows the canonical effective Trend strategy", () 
 
   const ui = buildPhase7CUiContract(snapshot);
   assert.equal(ui.gates.trend, "ALLOWED");
+  assert.equal(ui.gates.reversalFilter, "CLEAR");
   assert.equal(ui.status.trendOn, true);
   assert.equal(
     ui.entryChecks.trend.find((check) => check.code === "TREND_MODE_REGIME")?.status,
@@ -87,4 +97,28 @@ test("AUTO REVERSAL UI gate follows the canonical effective Trend strategy", () 
     ui.reasons.trendWait.join("\n"),
     /AUTO hiện chưa chọn TREND/,
   );
+  assert.doesNotMatch(
+    ui.reasons.trendWait.join("\n"),
+    /Supertrend/i,
+  );
+
+  const chochDirectionCheck = ui.entryChecks.trend.find(
+    (check) => check.code === "TREND_REVERSAL_CHOCH_DIRECTION",
+  );
+  const chochFreshnessCheck = ui.entryChecks.trend.find(
+    (check) => check.code === "TREND_REVERSAL_SIGNAL_AFTER_CHOCH",
+  );
+  assert.equal(chochDirectionCheck?.status, "PASS");
+  assert.match(chochDirectionCheck?.actual ?? "", /BULLISH.*BUY.*signal BUY/i);
+  assert.equal(chochFreshnessCheck?.status, "PASS");
+  assert.match(chochFreshnessCheck?.required ?? "", /> 1775999000000/);
+
+  const m15Check = ui.entryChecks.trend.find((check) => check.code === "TREND_SUPERTREND_M15");
+  const m5Check = ui.entryChecks.trend.find((check) => check.code === "TREND_SUPERTREND_M5");
+  assert.equal(m15Check?.status, "IGNORED");
+  assert.equal(m5Check?.status, "IGNORED");
+  assert.match(m15Check?.actual ?? "", /IGNORED.*SELL/i);
+  assert.match(m5Check?.actual ?? "", /IGNORED.*SELL/i);
+  assert.match(m15Check?.required ?? "", /Không áp dụng cho REVERSAL/i);
+  assert.match(m5Check?.required ?? "", /Không áp dụng cho REVERSAL/i);
 });

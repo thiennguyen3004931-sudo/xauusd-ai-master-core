@@ -183,12 +183,24 @@ type StrategyEntryConfigSnapshot = {
   error: string | null;
 };
 
+type ReversalEntryContext = {
+  side: "BUY" | "SELL";
+  direction: "BULLISH" | "BEARISH";
+  chochTimestamp: number;
+  level: number | null;
+};
+
+type PendingTrendPullback = Phase7BPendingPullback & {
+  reversalContext?: ReversalEntryContext | null;
+};
+
 type RuntimeEntrySignal = Pick<
   Phase7BSignal,
   "id" | "side" | "pattern" | "signalTimestamp" | "entry" | "patternExtreme"
 > & {
   strategyConfigSnapshot: { version: number; valid: boolean };
   entryConditions: ReturnType<typeof evaluateStrategyEntryConditions>;
+  reversalContext: ReversalEntryContext | null;
 };
 
 type PendingTrendEntry = {
@@ -222,7 +234,7 @@ type BotState = {
   accountLogin: number | null;
   lastEvaluatedM15Close: number;
   lastEvaluatedM5Close: number;
-  pendingPullback: Phase7BPendingPullback | null;
+  pendingPullback: PendingTrendPullback | null;
   pendingEntry: PendingTrendEntry | null;
   managed: ManagedState | null;
 };
@@ -232,7 +244,7 @@ type PersistedBotState = {
   accountLogin?: number | null;
   lastEvaluatedM15Close?: number;
   lastEvaluatedM5Close?: number;
-  pendingPullback?: Phase7BPendingPullback | null;
+  pendingPullback?: PendingTrendPullback | null;
   pendingEntry?: PendingTrendEntry | null;
   managed?: ManagedState | null;
 };
@@ -245,6 +257,12 @@ const trendFixedTpDistance = Number(process.env.ZIQ_PHASE7C_TREND_FIXED_TP_DISTA
 const intervalSeconds = Math.max(1, Number(process.env.ZIQ_DEMO_INTERVAL_SECONDS ?? "5"));
 const armed = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ARMED ?? "false");
 const once = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ONCE ?? "false");
+const phase7cReversalEntryEnabled = /^(1|true|yes|on)$/i.test(
+  process.env.ZIQ_PHASE7C_REVERSAL_ENTRY_ENABLED ?? "false",
+);
+const phase7cControlApiBase = (
+  process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711"
+).replace(/\/$/, "");
 const workDir = requiredEnv("ZIQ_DEMO_WORK_DIR");
 const strategyEntryConditionsFile = process.env.PHASE7C_STRATEGY_ENTRY_CONDITIONS_FILE?.trim()
   ? path.resolve(process.env.PHASE7C_STRATEGY_ENTRY_CONDITIONS_FILE.trim())
@@ -313,6 +331,7 @@ console.log(`PHASE7B_DEMO_INTERVAL_SECONDS=${intervalSeconds}`);
 console.log(`PHASE7B_DEMO_ARMED=${armed ? "YES" : "NO"}`);
 console.log("PHASE7B_DEMO_ENTRY_GATE=PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE");
 console.log("PHASE7B_DEMO_SUPERTREND=M15_10_3_AND_M5_10_3_MANDATORY");
+console.log(`PHASE7B_DEMO_PHASE7C_REVERSAL_ENTRY=${phase7cReversalEntryEnabled ? "CHOCH_DIRECTION_PATTERN_STRUCTURE_NO_SUPERTREND" : "DISABLED"}`);
 console.log("PHASE7B_DEMO_MA20_MA50=CONFIDENCE_ONLY_NOT_ENTRY_GATE");
 console.log("PHASE7B_DEMO_MA50=RUNNER_HOLD_EXIT_AFTER_PLUS10_PARTIAL_ONLY");
 console.log("PHASE7B_DEMO_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING");
@@ -403,7 +422,8 @@ async function previewLatestSignal(): Promise<void> {
     get<Quote>(`/v1/quotes/${encodeURIComponent(symbol)}`),
   ]);
   const strategyEntryConfig = readStrategyEntryConfigSnapshot();
-  const signal = latestSignal(m15, m5, spec, strategyEntryConfig);
+  const reversalContext = await readPhase7CReversalEntryContext();
+  const signal = latestSignal(m15, m5, spec, strategyEntryConfig, reversalContext);
   const latest = m15.at(-1);
   console.log(`PHASE7B_DEMO_LATEST_M15_CLOSE=${latest?.closeTime ?? "NONE"}`);
   if (!signal || !latest || signal.signalTimestamp !== latest.closeTime) {
@@ -593,6 +613,29 @@ async function cycle(): Promise<void> {
 
   if (state.pendingPullback) {
     const pending = state.pendingPullback;
+    const persistedReversalContext = pending.reversalContext ?? null;
+    let activeReversalContext: ReversalEntryContext | null = null;
+
+    if (persistedReversalContext) {
+      activeReversalContext = await readPhase7CReversalEntryContext();
+      const sameReversal = Boolean(
+        activeReversalContext &&
+        activeReversalContext.side === persistedReversalContext.side &&
+        activeReversalContext.direction === persistedReversalContext.direction &&
+        activeReversalContext.chochTimestamp === persistedReversalContext.chochTimestamp
+      );
+      if (!sameReversal) {
+        journal("REVERSAL_PULLBACK_CONTEXT_INVALIDATED", {
+          signalId: pending.signalId,
+          persistedReversalContext,
+          activeReversalContext,
+        });
+        state.pendingPullback = null;
+        saveState();
+        return;
+      }
+    }
+
     const pullbackCycleTimestamp = Number(quote.timestamp);
     if (!Number.isFinite(pullbackCycleTimestamp)) {
       journal("QUOTE_TIMESTAMP_INVALID", {
@@ -620,10 +663,14 @@ async function cycle(): Promise<void> {
     const fvgConfirmed = m15Index >= 0
       ? hasRelevantFvg(m15, m15Index, pending.side, 12)
       : false;
-    const entryConditions = strategyEntryConfig.valid && strategyEntryConfig.state
+    const effectiveConfig = effectiveTrendEntryConfig(
+      strategyEntryConfig,
+      activeReversalContext,
+    );
+    const entryConditions = effectiveConfig
       ? evaluateStrategyEntryConditions({
           strategy: "TREND",
-          config: strategyEntryConfig.state,
+          config: effectiveConfig,
           side: pending.side,
           observations: {
             patternM15: { passed: true, observed: `${pending.side}:${pending.pattern}` },
@@ -646,8 +693,8 @@ async function cycle(): Promise<void> {
       barLow: latestM5.low,
       barHigh: latestM5.high,
       setupStillValid: structuralStopDistance > 0,
-      m15SupertrendAligned: m15Direction === pending.side,
-      m5SupertrendAligned: m5Direction === pending.side,
+      m15SupertrendAligned: activeReversalContext ? true : m15Direction === pending.side,
+      m5SupertrendAligned: activeReversalContext ? true : m5Direction === pending.side,
     });
 
     journal(evaluation.state, {
@@ -660,6 +707,8 @@ async function cycle(): Promise<void> {
       marketEntry,
       m15Direction,
       m5Direction,
+      supertrendGate: activeReversalContext ? "IGNORED_REVERSAL" : "REQUIRED",
+      reversalContext: activeReversalContext,
       m5CloseTime: latestM5.closeTime,
       pullbackCycleTimestamp,
       expiresAt: pending.expiresAt,
@@ -681,6 +730,10 @@ async function cycle(): Promise<void> {
           ? entryConditions.failedConditions.join(",")
           : "ENTRY_STRATEGY_CONFIG_INVALID",
         configError: strategyEntryConfig.error,
+        entryPolicy: activeReversalContext
+          ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+          : "TREND_CONTINUATION",
+        reversalContext: activeReversalContext,
         entryConditions,
       });
       return;
@@ -690,6 +743,10 @@ async function cycle(): Promise<void> {
       signalId: pending.signalId,
       side: pending.side,
       pattern: pending.pattern,
+      entryPolicy: activeReversalContext
+        ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+        : "TREND_CONTINUATION",
+      reversalContext: activeReversalContext,
       entryConditions,
     });
 
@@ -707,6 +764,7 @@ async function cycle(): Promise<void> {
         valid: true,
       },
       entryConditions,
+      reversalContext: activeReversalContext,
     };
     const submitted = await submitTrendEntry(signal, marketEntry, quote, spec, m15, "PULLBACK_ENTRY", health.accountBalance);
     if (submitted !== "BROKER_GAP_WAIT" && submitted !== "TOO_WIDE_WAIT") {
@@ -721,13 +779,19 @@ async function cycle(): Promise<void> {
   saveState();
 
   const strategyEntryConfig = readStrategyEntryConfigSnapshot();
-  const signal = latestSignal(m15, m5, spec, strategyEntryConfig);
+  const reversalContext = await readPhase7CReversalEntryContext();
+  const signal = latestSignal(m15, m5, spec, strategyEntryConfig, reversalContext);
   if (!signal || signal.signalTimestamp !== latestM15.closeTime) {
     journal("M15_NO_ENTRY_SIGNAL", {
       closeTime: latestM15.closeTime,
       close: latestM15.close,
-      entryRule: "THREE_PATTERNS_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
-      supertrend: "M15_10_3_AND_M5_10_3",
+      entryRule: reversalContext
+        ? "REVERSAL_CHOCH_DIRECTION_PLUS_PATTERN_PLUS_VALID_STRUCTURE"
+        : "THREE_PATTERNS_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
+      supertrend: reversalContext
+        ? "IGNORED_REVERSAL_ENTRY"
+        : "M15_10_3_AND_M5_10_3",
+      reversalContext,
       engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
     });
     return;
@@ -768,7 +832,12 @@ async function cycle(): Promise<void> {
   });
 
   if (decision.state === "WAIT_PULLBACK") {
-    state.pendingPullback = decision.pending;
+    state.pendingPullback = decision.pending
+      ? {
+          ...decision.pending,
+          reversalContext: signal.reversalContext,
+        }
+      : null;
     state.lastEvaluatedM5Close = signal.signalTimestamp;
     saveState();
     journal("WAIT_PULLBACK", {
@@ -856,7 +925,9 @@ async function submitTrendEntry(
     signal.side === "BUY" ? marketEntry + 10 : marketEntry - 10,
     spec.digits,
   );
-  const orderId = `p7b-${entryState === "PULLBACK_ENTRY" ? "pb" : "im"}-${signal.signalTimestamp}-${signal.side}`;
+  const orderId = signal.reversalContext
+    ? `p7b-rv-${entryState === "PULLBACK_ENTRY" ? "pb" : "im"}-${signal.signalTimestamp}-${signal.side}`
+    : `p7b-${entryState === "PULLBACK_ENTRY" ? "pb" : "im"}-${signal.signalTimestamp}-${signal.side}`;
   journal("ENTRY_SUBMIT", {
     signalId: signal.id,
     side: signal.side,
@@ -879,8 +950,13 @@ async function submitTrendEntry(
       tp1: partialTarget,
       takeProfit: takeProfit > 0 ? takeProfit : null,
     },
-    entryRule: "THREE_PATTERNS_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
-    supertrend: "M15_10_3_AND_M5_10_3",
+    entryRule: signal.reversalContext
+      ? "REVERSAL_CHOCH_DIRECTION_PLUS_PATTERN_PLUS_VALID_STRUCTURE"
+      : "THREE_PATTERNS_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
+    supertrend: signal.reversalContext
+      ? "IGNORED_REVERSAL_ENTRY"
+      : "M15_10_3_AND_M5_10_3",
+    reversalContext: signal.reversalContext,
     engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
     fvgConfirmedAtEntry,
     fvgRequiredForEntry: false,
@@ -1213,17 +1289,123 @@ async function resolveDailyRecoveryPlan(
   };
 }
 
+async function readPhase7CReversalEntryContext(): Promise<ReversalEntryContext | null> {
+  if (!phase7cReversalEntryEnabled) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const query = new URLSearchParams({
+      symbol,
+      count: "320",
+    });
+    const response = await fetch(
+      `${phase7cControlApiBase}/api/v1/phase7c/live-regime?${query.toString()}`,
+      {
+        method: "GET",
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+        cache: "no-store",
+      },
+    );
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`Phase7C reversal context GET failed ${response.status}: ${text}`);
+    }
+
+    const payload = text ? JSON.parse(text) : null;
+    const activeMode = String(payload?.activeMode ?? "").trim().toUpperCase();
+    const regime = String(payload?.regime ?? "").trim().toUpperCase();
+
+    if (activeMode !== "AUTO" || regime !== "REVERSAL") {
+      return null;
+    }
+
+    const direction = String(payload?.reversal?.direction ?? "").trim().toUpperCase();
+    const side = String(payload?.reversal?.side ?? "").trim().toUpperCase();
+    const chochTimestamp = Number(payload?.reversal?.timestamp);
+    const levelRaw = Number(payload?.reversal?.level);
+    const expectedSide = direction === "BULLISH"
+      ? "BUY"
+      : direction === "BEARISH"
+        ? "SELL"
+        : "";
+
+    if (
+      (side !== "BUY" && side !== "SELL") ||
+      !Number.isFinite(chochTimestamp) ||
+      chochTimestamp <= 0 ||
+      expectedSide !== side
+    ) {
+      throw new Error(
+        `REVERSAL_CONTEXT_MISSING_OR_INVALID|direction=${direction || "NONE"}|side=${side || "NONE"}|timestamp=${Number.isFinite(chochTimestamp) ? chochTimestamp : "INVALID"}`,
+      );
+    }
+
+    return {
+      side: side as "BUY" | "SELL",
+      direction: direction as "BULLISH" | "BEARISH",
+      chochTimestamp,
+      level: Number.isFinite(levelRaw) ? levelRaw : null,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function effectiveTrendEntryConfig(
+  strategy: StrategyEntryConfigSnapshot,
+  reversalContext: ReversalEntryContext | null,
+) {
+  if (!strategy.valid || !strategy.state) return null;
+  if (!reversalContext) return strategy.state;
+
+  return {
+    ...strategy.state,
+    trend: {
+      ...strategy.state.trend,
+      supertrendM15: false,
+      supertrendM5: false,
+      validTrendStructure: true,
+    },
+  };
+}
+
 function latestSignal(
   m15: Phase7Bar[],
   m5: Phase7Bar[],
   spec: SymbolSpec,
   strategy: StrategyEntryConfigSnapshot,
+  reversalContext: ReversalEntryContext | null,
 ): RuntimeEntrySignal | null {
   const index = m15.length - 1;
   if (index < 200) return null;
   const current = m15[index]!;
   const trigger = detectEntryPattern(m15, index);
   if (!trigger) return null;
+
+  if (reversalContext) {
+    if (trigger.side !== reversalContext.side) {
+      journal("REVERSAL_DIRECTION_MISMATCH", {
+        signalTimestamp: current.closeTime,
+        signalSide: trigger.side,
+        reversalSide: reversalContext.side,
+        reversalDirection: reversalContext.direction,
+        chochTimestamp: reversalContext.chochTimestamp,
+      });
+      return null;
+    }
+
+    if (current.closeTime <= reversalContext.chochTimestamp) {
+      journal("REVERSAL_SIGNAL_NOT_AFTER_CHOCH", {
+        signalTimestamp: current.closeTime,
+        signalSide: trigger.side,
+        reversalSide: reversalContext.side,
+        chochTimestamp: reversalContext.chochTimestamp,
+      });
+      return null;
+    }
+  }
 
   const closes = m15.slice(0, index + 1).map((bar) => bar.close);
   const ma20 = smaPeriod(closes, 20);
@@ -1233,10 +1415,14 @@ function latestSignal(
   const m15Direction = m15Supertrend.direction[index] ?? null;
   let m5SignalIndex = m5.length - 1;
   while (m5SignalIndex >= 0 && m5[m5SignalIndex]!.closeTime > current.closeTime) m5SignalIndex -= 1;
-  if (m5SignalIndex < 9) return null;
-  const m5AtSignal = m5.slice(0, m5SignalIndex + 1);
-  const m5Supertrend = phase7BSupertrend(m5AtSignal, 10, 3);
-  const m5Direction = m5Supertrend.direction[m5SignalIndex] ?? null;
+  let m5Direction: "BUY" | "SELL" | null = null;
+  if (m5SignalIndex >= 9) {
+    const m5AtSignal = m5.slice(0, m5SignalIndex + 1);
+    const m5Supertrend = phase7BSupertrend(m5AtSignal, 10, 3);
+    m5Direction = m5Supertrend.direction[m5SignalIndex] ?? null;
+  } else if (!reversalContext) {
+    return null;
+  }
 
   const entry = current.close;
   const structuralStopPrice = structuralStopWithBuffer(trigger.side, trigger.patternExtreme);
@@ -1245,10 +1431,11 @@ function latestSignal(
     : structuralStopPrice - entry;
   const fvgConfirmed = hasRelevantFvg(m15, index, trigger.side, 12);
 
-  const entryConditions = strategy.valid && strategy.state
+  const effectiveConfig = effectiveTrendEntryConfig(strategy, reversalContext);
+  const entryConditions = effectiveConfig
     ? evaluateStrategyEntryConditions({
         strategy: "TREND",
-        config: strategy.state,
+        config: effectiveConfig,
         side: trigger.side,
         observations: {
           patternM15: { passed: true, observed: `${trigger.side}:${trigger.pattern}` },
@@ -1273,6 +1460,10 @@ function latestSignal(
         ? entryConditions.failedConditions.join(",")
         : "ENTRY_STRATEGY_CONFIG_INVALID",
       configError: strategy.error,
+      entryPolicy: reversalContext
+        ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+        : "TREND_CONTINUATION",
+      reversalContext,
       entryConditions,
     });
     return null;
@@ -1282,6 +1473,10 @@ function latestSignal(
     signalId: `phase7b-demo-${current.closeTime}-${trigger.side}-${trigger.pattern}`,
     side: trigger.side,
     pattern: trigger.pattern,
+    entryPolicy: reversalContext
+      ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+      : "TREND_CONTINUATION",
+    reversalContext,
     entryConditions,
   });
 
@@ -1307,6 +1502,7 @@ function latestSignal(
       valid: true,
     },
     entryConditions,
+    reversalContext,
   };
 }
 
