@@ -61,7 +61,7 @@ function createConfig(): Mt5BrokerConfig {
     apiKey: (process.env.MT5_BRIDGE_API_KEY ?? "").trim(),
     requestTimeoutMs: readPositiveInteger("MT5_BRIDGE_REQUEST_TIMEOUT_MS", 3_000),
     healthTimeoutMs: readPositiveInteger("MT5_BRIDGE_HEALTH_TIMEOUT_MS", 1_500),
-    retryAttempts: 0,
+    retryAttempts: readPositiveInteger("MT5_TELEMETRY_RETRY_ATTEMPTS", 1),
     requireTradingEnabled: false,
   };
 }
@@ -72,6 +72,7 @@ function getClient(config: Mt5BrokerConfig): Mt5BridgeClient {
     config.apiKey,
     config.requestTimeoutMs,
     config.healthTimeoutMs,
+    config.retryAttempts,
   ].join("|");
 
   if (cachedClient?.signature === signature) return cachedClient.client;
