@@ -56,6 +56,47 @@ jobs:
           }
           Write-Host "PHASE7C_NEW_MACHINE_BOOTSTRAP_POWERSHELL_SYNTAX=PASS"
 
+      - name: Approved telemetry resilience production cutover 191da690
+        if: github.event_name == 'pull_request' && github.head_ref == 'ops/cutover-191da690-20261004'
+        shell: powershell
+        run: |
+          $current = '0e007abffa6129bf640a7e3f8ce754039a4be850'
+          $target = '191da69036795d6cd1d7e4ea9680d60f03a426ae'
+          $targetTree = '9daf75ec137ceff9f65bfb588ec1bdea94aa4ac3'
+          $currentCandidate = Join-Path $env:RUNNER_TEMP 'xauusd-current-0e007abf'
+          $targetCandidate = Join-Path $env:RUNNER_TEMP 'xauusd-target-191da690'
+
+          foreach ($path in @($currentCandidate, $targetCandidate)) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+          }
+
+          git worktree add --detach $currentCandidate $current
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $currentCandidate checkout -B main $current
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $currentCandidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $current -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          git worktree remove --force $currentCandidate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          git worktree add --detach $targetCandidate $target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $targetCandidate checkout -B main $target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetCandidate 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master' -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f -ExpectedInitialArm DISARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetCandidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $target -ExpectedTree $targetTree -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          Write-Host 'TELEMETRY_PRODUCTION_CUTOVER_191DA690=PASS'
+          Write-Host 'TELEMETRY_PRODUCTION_FINAL_MODE=PAUSE'
+          Write-Host 'TELEMETRY_PRODUCTION_FINAL_ARM=DISARMED'
+          Write-Host 'TELEMETRY_PRODUCTION_NO_ORDER_PROBE=TRUE'
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
