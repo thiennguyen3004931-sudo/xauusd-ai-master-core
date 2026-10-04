@@ -1,0 +1,45 @@
+name: M8 Read-Only Target Preflight 191da690
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/m8-readonly-target-191da690.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  m8-readonly-target:
+    name: m8-readonly-target-191da690
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact private main candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Verify exact target source
+        shell: powershell
+        run: |
+          $expectedCommit = "191da69036795d6cd1d7e4ea9680d60f03a426ae"
+          $expectedTree = "9daf75ec137ceff9f65bfb588ec1bdea94aa4ac3"
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (git rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          Write-Host "CHECKED_OUT_HEAD=$head"
+          Write-Host "EXPECTED_HEAD=$expectedCommit"
+          Write-Host "CHECKED_OUT_TREE=$tree"
+          Write-Host "EXPECTED_TREE=$expectedTree"
+          if ($head -ne $expectedCommit) { throw "CHECKED_OUT_HEAD_MISMATCH" }
+          if ($tree -ne $expectedTree) { throw "CHECKED_OUT_TREE_MISMATCH" }
+
+      - name: Run canonical M8 read-only preflight
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\security\preflight-private-cutover.ps1 `
+            -ExpectedCommit "191da69036795d6cd1d7e4ea9680d60f03a426ae" `
+            -ExpectedTree "9daf75ec137ceff9f65bfb588ec1bdea94aa4ac3" `
+            -RuntimeProjectRoot "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
