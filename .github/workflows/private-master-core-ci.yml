@@ -69,6 +69,8 @@ jobs:
           foreach ($path in @($currentCandidate, $targetCandidate)) {
             if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
           }
+          git worktree prune
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           git worktree add --detach $currentCandidate $current
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
