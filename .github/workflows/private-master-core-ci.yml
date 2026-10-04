@@ -88,10 +88,20 @@ jobs:
           git -C $targetCandidate checkout -B main $target
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetCandidate 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master' -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f -ExpectedInitialArm DISARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $productionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $actualProductionHead = (git -C $productionRoot rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "TELEMETRY_PRODUCTION_OBSERVED_HEAD=$actualProductionHead"
 
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetCandidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $target -ExpectedTree $targetTree -RuntimeProjectRoot 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          if ($actualProductionHead -eq $target) {
+            Write-Host 'TELEMETRY_PRODUCTION_TRANSITION=SKIPPED_ALREADY_TARGET'
+          } elseif ($actualProductionHead -eq $current) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetCandidate 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot $productionRoot -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f -ExpectedInitialArm DISARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            throw "UNEXPECTED_PRODUCTION_HEAD expected_current=$current expected_target=$target actual=$actualProductionHead"
+          }
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetCandidate 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $target -ExpectedTree $targetTree -RuntimeProjectRoot $productionRoot
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           Write-Host 'TELEMETRY_PRODUCTION_CUTOVER_191DA690=PASS'
