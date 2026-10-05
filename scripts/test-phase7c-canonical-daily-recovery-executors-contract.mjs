@@ -49,6 +49,10 @@ assert.ok(
   transformedTrend.includes("async function readPhase7CReversalEntryContext()"),
   "Trend canonical Daily Recovery transform must preserve the REVERSAL context reader definition.",
 );
+assert.ok(
+  transformedTrend.includes("function effectiveTrendEntryConfig("),
+  "Trend canonical Daily Recovery transform must preserve the REVERSAL effective-entry-config helper.",
+);
 assert.equal(
   (transformedTrend.match(/readPhase7CReversalEntryContext\\s*\\(/g) ?? []).length >= 2,
   true,
@@ -62,6 +66,11 @@ assert.equal(
   (transformedLiveTrend.match(/async\\s+function\\s+readPhase7CReversalEntryContext\\s*\\(/g) ?? []).length,
   1,
   "Full LIVE account + canonical Daily Recovery transform must preserve exactly one REVERSAL context definition.",
+);
+assert.equal(
+  (transformedLiveTrend.match(/function\\s+effectiveTrendEntryConfig\\s*\\(/g) ?? []).length,
+  1,
+  "Full LIVE transform must preserve exactly one REVERSAL effective-entry-config helper.",
 );
 assert.ok(
   (transformedLiveTrend.match(/readPhase7CReversalEntryContext\\s*\\(/g) ?? []).length >= 2,
