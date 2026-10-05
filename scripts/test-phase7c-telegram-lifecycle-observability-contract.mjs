@@ -553,3 +553,59 @@ test("runtime CYCLE_ERROR must not emit MT5 recovered when MT5 is healthy", asyn
     "JavaScript/runtime CYCLE_ERROR must never be classified as MT5 recovery.",
   );
 });
+
+
+test("MT5 CYCLE_ERROR still emits MT5 recovered when MT5 is healthy", async () => {
+  const initialState = {
+    version: 3,
+    initialized: true,
+    offset: 0,
+    offsets: { trend: 0, sideway: 0 },
+    sent: 0,
+    lastEventAt: null,
+    trade: null,
+    hold: null,
+    holdM15ByTicketReason: {},
+    systemAlerts: {
+      CYCLE_ERROR: {
+        active: true,
+        type: "CYCLE_ERROR",
+        message: "MT5 bridge GET /health | timeout=8000ms | attempts=2",
+        lastSeenAt: "2026-10-05T00:00:00.000Z",
+        lastSeenAtMs: 1,
+      },
+    },
+  };
+
+  const demo = {
+    mt5: {
+      reachable: true,
+      health: {
+        accountMode: "live",
+        connected: true,
+        tradingEnabled: true,
+        terminalTradeAllowed: true,
+        expertTradeAllowed: true,
+      },
+      positions: [],
+      managedPosition: null,
+    },
+    state: { managed: null },
+  };
+
+  const { notifications } = await withMonitor(
+    (monitorApiBase) => runNotifier({
+      events: [],
+      monitorApiBase,
+      label: "mt5-cycle-error-recovery-preserved",
+      initialState,
+    }),
+    { demo },
+  );
+
+  assert.equal(notifications.length, 1);
+  assert.match(
+    notifications[0].text,
+    /Kết nối dữ liệu \/ MT5 đã phục hồi/i,
+  );
+});
