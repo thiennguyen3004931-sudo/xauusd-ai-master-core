@@ -105,6 +105,7 @@ async function runNotifier({
   source = "TREND",
   monitorApiBase,
   label,
+  initialState = null,
 }) {
   const tempDir = fs.mkdtempSync(
     path.join(os.tmpdir(), `phase7c-telegram-lifecycle-${label}-`),
@@ -117,6 +118,9 @@ async function runNotifier({
 
   fs.writeFileSync(trendJournal, source === "TREND" ? serialized : "", "utf8");
   fs.writeFileSync(sidewayJournal, source === "SIDEWAY" ? serialized : "", "utf8");
+  if (initialState) {
+    fs.writeFileSync(statePath, JSON.stringify(initialState, null, 2) + "\n", "utf8");
+  }
 
   const child = spawn(process.execPath, [notifierPath], {
     env: {
@@ -492,4 +496,60 @@ test("EXIT uses canonical realized netPnl and MT5 performance only for actual av
   });
   assert.doesNotMatch(exit, /đang đồng bộ MT5/i);
   assert.doesNotMatch(exit, /≈/);
+});
+
+test("runtime CYCLE_ERROR must not emit MT5 recovered when MT5 is healthy", async () => {
+  const initialState = {
+    version: 3,
+    initialized: true,
+    offset: 0,
+    offsets: { trend: 0, sideway: 0 },
+    sent: 0,
+    lastEventAt: null,
+    trade: null,
+    hold: null,
+    holdM15ByTicketReason: {},
+    systemAlerts: {
+      CYCLE_ERROR: {
+        active: true,
+        type: "CYCLE_ERROR",
+        message: "readPhase7CReversalEntryContext is not defined",
+        lastSeenAt: "2026-10-05T00:00:00.000Z",
+        lastSeenAtMs: 1,
+      },
+    },
+  };
+
+  const demo = {
+    mt5: {
+      reachable: true,
+      health: {
+        accountMode: "live",
+        connected: true,
+        tradingEnabled: true,
+        terminalTradeAllowed: true,
+        expertTradeAllowed: true,
+      },
+      positions: [],
+      managedPosition: null,
+    },
+    state: { managed: null },
+  };
+
+  const { notifications } = await withMonitor(
+    (monitorApiBase) => runNotifier({
+      events: [],
+      monitorApiBase,
+      label: "runtime-cycle-error-no-false-mt5-recovery",
+      initialState,
+    }),
+    { demo },
+  );
+
+  assert.equal(
+    notifications.some((notification) =>
+      /Kết nối dữ liệu \/ MT5 đã phục hồi/i.test(notification.text)),
+    false,
+    "JavaScript/runtime CYCLE_ERROR must never be classified as MT5 recovery.",
+  );
 });
