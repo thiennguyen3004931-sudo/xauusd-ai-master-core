@@ -1,0 +1,52 @@
+name: Phase7C DISARM for REVERSAL Runtime Repair
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-disarm-reversal-runtime-repair-20261005.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  disarm:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guarded DISARM_ONLY on production
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = '191da69036795d6cd1d7e4ea9680d60f03a426ae'
+          $head = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "DISARM_PRODUCTION_HEAD=$head"
+          if ($head -ne $expected) { throw "Unexpected production HEAD: $head" }
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $mode = [string]$life.mode.mode
+          Write-Host "DISARM_PRE_BOT_MODE=$mode"
+          if ($mode -ne 'PAUSE') { throw "DISARM repair requires BOT_MODE=PAUSE; actual=$mode" }
+
+          $workDir = Join-Path $prod '.runtime'
+          & (Join-Path $prod 'scripts\disarm-phase7c-live-local.ps1') -WorkDir $workDir -Reason 'reversal-runtime-reference-error-repair'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          Start-Sleep -Seconds 2
+          & (Join-Path $prod 'scripts\get-phase7c-live-arm-local.ps1') -WorkDir $workDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          Write-Host "DISARM_POST_STATUS=$([string]$cap.liveArmStatus)"
+          Write-Host "DISARM_POST_ARMED=$([bool]$cap.liveExecutionArmed)"
+          if ([bool]$cap.liveExecutionArmed -or [string]$cap.liveArmStatus -ne 'DISARMED') {
+            throw 'DISARM postcondition failed.'
+          }
+
+          Write-Host "DISARM_ONLY=PASS"
+          Write-Host "MODE_MUTATION=NONE"
+          Write-Host "ORDER_MUTATION=NONE"
+          Write-Host "POSITION_MUTATION=NONE"
+          Write-Host "LIVE_TEST_ORDER=NONE"
