@@ -54,7 +54,7 @@ assert.ok(
   "Trend canonical Daily Recovery transform must preserve the REVERSAL effective-entry-config helper.",
 );
 assert.equal(
-  (transformedTrend.match(/readPhase7CReversalEntryContext\\s*\\(/g) ?? []).length >= 2,
+  (transformedTrend.match(/readPhase7CReversalEntryContext\s*\(/g) ?? []).length >= 2,
   true,
   "Trend transformed runtime must retain REVERSAL context calls together with its definition.",
 );
@@ -63,17 +63,17 @@ const transformedLiveTrend = transformPhase7CTrendCanonicalDailyRecoverySource(
   transformPhase7CTrendLegacySource(trendLegacy),
 );
 assert.equal(
-  (transformedLiveTrend.match(/async\\s+function\\s+readPhase7CReversalEntryContext\\s*\\(/g) ?? []).length,
+  (transformedLiveTrend.match(/async\s+function\s+readPhase7CReversalEntryContext\s*\(/g) ?? []).length,
   1,
   "Full LIVE account + canonical Daily Recovery transform must preserve exactly one REVERSAL context definition.",
 );
 assert.equal(
-  (transformedLiveTrend.match(/function\\s+effectiveTrendEntryConfig\\s*\\(/g) ?? []).length,
+  (transformedLiveTrend.match(/function\s+effectiveTrendEntryConfig\s*\(/g) ?? []).length,
   1,
   "Full LIVE transform must preserve exactly one REVERSAL effective-entry-config helper.",
 );
 assert.ok(
-  (transformedLiveTrend.match(/readPhase7CReversalEntryContext\\s*\\(/g) ?? []).length >= 2,
+  (transformedLiveTrend.match(/readPhase7CReversalEntryContext\s*\(/g) ?? []).length >= 2,
   "Full LIVE transformed Trend runtime must retain REVERSAL calls and definition together.",
 );
 for (const [strategy, transformed] of [["TREND", transformedTrend], ["SIDEWAY", transformedSideway]]) {
