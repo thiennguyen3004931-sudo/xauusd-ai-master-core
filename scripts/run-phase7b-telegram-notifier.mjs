@@ -3,6 +3,7 @@ import {
   DEFAULT_TRANSIENT_MT5_READ_ALERT_THRESHOLD,
   DEFAULT_TRANSIENT_MT5_READ_ALERT_WINDOW_MS,
   evaluateTransientSystemAlertDebounce,
+  isMt5CycleErrorEvent,
 } from "./phase7c-system-alert-debounce.mjs";
 import fs from "node:fs";
 import path from "node:path";
@@ -1636,7 +1637,9 @@ function systemAlertKey(event) {
   const type = String(event?.type ?? "");
 
   if (type === "CYCLE_ERROR") {
-    return "CYCLE_ERROR";
+    return isMt5CycleErrorEvent(event)
+      ? "CYCLE_ERROR"
+      : "CYCLE_ERROR_RUNTIME";
   }
 
   return type;
@@ -1717,6 +1720,22 @@ function markSystemAlert(event) {
 async function reconcileSystemAlerts() {
   state.systemAlerts ??= {};
 
+  const legacyCycleError = state.systemAlerts.CYCLE_ERROR;
+  if (
+    legacyCycleError?.active &&
+    !isMt5CycleErrorEvent({
+      type: "CYCLE_ERROR",
+      message: legacyCycleError.message,
+    })
+  ) {
+    state.systemAlerts.CYCLE_ERROR_RUNTIME = {
+      ...legacyCycleError,
+      type: "CYCLE_ERROR",
+    };
+    delete state.systemAlerts.CYCLE_ERROR;
+    saveState();
+  }
+
   const activeKeys = Object.keys(state.systemAlerts).filter(
     (key) => state.systemAlerts[key]?.active,
   );
@@ -1761,6 +1780,15 @@ async function reconcileSystemAlerts() {
 
   const quietEnough = (key) =>
     now - alertLastSeenMs(key) >= systemRecoveryQuietMs;
+
+  let silentStateChanged = false;
+  if (
+    state.systemAlerts.CYCLE_ERROR_RUNTIME?.active &&
+    quietEnough("CYCLE_ERROR_RUNTIME")
+  ) {
+    delete state.systemAlerts.CYCLE_ERROR_RUNTIME;
+    silentStateChanged = true;
+  }
 
   const recovered = [];
 
@@ -1808,7 +1836,10 @@ async function reconcileSystemAlerts() {
     ]);
   }
 
-  if (recovered.length === 0) return;
+  if (recovered.length === 0) {
+    if (silentStateChanged) saveState();
+    return;
+  }
 
   for (const [key, message] of recovered) {
     await sendHtml(

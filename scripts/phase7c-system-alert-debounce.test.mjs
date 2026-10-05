@@ -3,6 +3,7 @@ import {
   DEFAULT_TRANSIENT_MT5_READ_ALERT_THRESHOLD,
   DEFAULT_TRANSIENT_MT5_READ_ALERT_WINDOW_MS,
   evaluateTransientSystemAlertDebounce,
+  isMt5CycleErrorEvent,
   isTransientMt5ReadTimeoutEvent,
 } from "./phase7c-system-alert-debounce.mjs";
 
@@ -13,6 +14,26 @@ const event = (message) => ({
 
 assert.equal(DEFAULT_TRANSIENT_MT5_READ_ALERT_THRESHOLD, 3);
 assert.equal(DEFAULT_TRANSIENT_MT5_READ_ALERT_WINDOW_MS, 60_000);
+
+assert.equal(
+  isMt5CycleErrorEvent(
+    event("MT5 bridge GET /v1/candles/XAUUSD?timeframe=M15 | timeout=8000ms | attempts=2"),
+  ),
+  true,
+);
+assert.equal(
+  isMt5CycleErrorEvent(
+    event("MT5 bridge is not healthy/connected."),
+  ),
+  true,
+);
+assert.equal(
+  isMt5CycleErrorEvent(
+    event("readPhase7CReversalEntryContext is not defined"),
+  ),
+  false,
+  "JavaScript/runtime errors must not be classified as MT5 cycle errors.",
+);
 
 assert.equal(
   isTransientMt5ReadTimeoutEvent(
@@ -105,3 +126,5 @@ console.log("SYSTEM_ALERT_TRANSIENT_MT5_READ_THIRD_ALERTS=PASS");
 console.log("SYSTEM_ALERT_MUTATION_TIMEOUT_IMMEDIATE=PASS");
 console.log("SYSTEM_ALERT_EXHAUSTED_GET_RETRY_IMMEDIATE=PASS");
 console.log("SYSTEM_ALERT_DEBOUNCE_WINDOW_RESET=PASS");
+
+console.log("SYSTEM_ALERT_RUNTIME_ERROR_NOT_MT5_CLASSIFICATION=PASS");
