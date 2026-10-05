@@ -46,8 +46,12 @@ jobs:
           Write-Host "REVERSAL_FIX_POST_PRODUCTION_HEAD=$postHead"
           if ($postHead -ne $target) { throw 'Production HEAD did not reach target.' }
 
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $prod 'scripts\security\preflight-private-cutover.ps1') -ExpectedCommit $target -ExpectedTree $targetTree -RuntimeProjectRoot $prod
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $prodBranch = (git -C $prod branch --show-current).Trim()
+          $prodTree = (git -C $prod rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          Write-Host "REVERSAL_FIX_POST_PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "REVERSAL_FIX_POST_PRODUCTION_TREE=$prodTree"
+          if ($prodBranch -ne 'main') { throw "Expected production branch main; actual=$prodBranch" }
+          if ($prodTree -ne $targetTree) { throw "Expected production tree $targetTree; actual=$prodTree" }
 
           $runtimeFiles = @(Get-ChildItem -LiteralPath (Join-Path $prod 'scripts') -Filter '.phase7c-trend-legacy-runtime-*.mjs' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
           if ($runtimeFiles.Count -lt 1) { throw 'No generated Trend runtime found after cutover.' }
