@@ -23,7 +23,7 @@ export function transformPhase7CTrendCanonicalDailyRecoverySource(rawSource) {
   source = replaceSection(
     source,
     "async function resolveDailyRecoveryPlan(",
-    "\nfunction latestSignal(",
+    "\nasync function readPhase7CReversalEntryContext(",
     `async function resolveDailyRecoveryPlan(\n  _quote: Quote,\n  _spec: SymbolSpec,\n) {\n  return fetchPhase7CCanonicalDailyRecoveryPlan({\n    strategy: "TREND",\n    symbol,\n    volume: fixedVolume,\n    fetchImpl: globalThis.fetch,\n  });\n}\n`,
     "Trend planner",
   );
