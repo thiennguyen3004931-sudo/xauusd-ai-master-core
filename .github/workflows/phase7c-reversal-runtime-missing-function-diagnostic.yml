@@ -39,6 +39,8 @@ jobs:
 
           $raw = Join-Path $prod 'scripts\run-phase7b-demo-controller.ts'
           $rawText = Get-Content -LiteralPath $raw -Raw
-          Write-Host "DIAG_RAW_CALLS=$(([regex]::Matches($rawText, 'readPhase7CReversalEntryContext\s*\(')).Count)"
-          Write-Host "DIAG_RAW_FUNCTION_DEFS=$(([regex]::Matches($rawText, 'async\s+function\s+readPhase7CReversalEntryContext\s*\(')).Count)"
+          $rawCallCount = ([regex]::Matches($rawText, 'readPhase7CReversalEntryContext\s*\(')).Count
+          $rawDefCount = ([regex]::Matches($rawText, 'async\s+function\s+readPhase7CReversalEntryContext\s*\(')).Count
+          Write-Host "DIAG_RAW_CALLS=$rawCallCount"
+          Write-Host "DIAG_RAW_FUNCTION_DEFS=$rawDefCount"
           Write-Host "DIAG_PRODUCTION_MUTATION=NONE"
