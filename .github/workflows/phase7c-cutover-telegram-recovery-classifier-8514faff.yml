@@ -1,0 +1,88 @@
+name: Phase7C Cutover Telegram Recovery Classifier 8514faff
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-cutover-telegram-recovery-classifier-8514faff.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: 8514fafffea7e7cde6a3bddfbb3cd23474bc20f7
+          fetch-depth: 0
+
+      - name: Guarded production cutover and classifier verification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $current = '96f92643c868c14c4d890f6cc10d7d8a34df26aa'
+          $target = '8514fafffea7e7cde6a3bddfbb3cd23474bc20f7'
+          $targetTree = '0560f8485c9d0f912a076a423515f3d7957e3a9d'
+          $helperBlob = 'd8fb26409df5ddecdf5353ab0fdf42cbd8d3500f'
+
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "TELEGRAM_CLASSIFIER_PRE_PRODUCTION_HEAD=$actual"
+
+          if ($actual -eq $target) {
+            Write-Host 'TELEGRAM_CLASSIFIER_TRANSITION=SKIPPED_ALREADY_TARGET'
+          } elseif ($actual -eq $current) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PWD 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot $prod -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 $helperBlob -ExpectedInitialArm DISARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            throw "UNEXPECTED_PRODUCTION_HEAD expected_current=$current expected_target=$target actual=$actual"
+          }
+
+          $postHead = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodBranch = (git -C $prod branch --show-current).Trim()
+          $prodTree = (git -C $prod rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          Write-Host "TELEGRAM_CLASSIFIER_POST_PRODUCTION_HEAD=$postHead"
+          Write-Host "TELEGRAM_CLASSIFIER_POST_PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "TELEGRAM_CLASSIFIER_POST_PRODUCTION_TREE=$prodTree"
+          if ($postHead -ne $target) { throw 'Production HEAD did not reach target.' }
+          if ($prodBranch -ne 'main') { throw "Expected production branch main; actual=$prodBranch" }
+          if ($prodTree -ne $targetTree) { throw "Expected production tree $targetTree; actual=$prodTree" }
+
+          $notifier = Get-Content -LiteralPath (Join-Path $prod 'scripts\run-phase7b-telegram-notifier.mjs') -Raw
+          $classifier = Get-Content -LiteralPath (Join-Path $prod 'scripts\phase7c-system-alert-debounce.mjs') -Raw
+          if ($notifier -notmatch 'CYCLE_ERROR_RUNTIME') { throw 'Notifier runtime-error bucket missing.' }
+          if ($notifier -notmatch 'isMt5CycleErrorEvent') { throw 'Notifier MT5 classifier integration missing.' }
+          if ($classifier -notmatch 'export function isMt5CycleErrorEvent') { throw 'MT5 cycle-error classifier helper missing.' }
+          Write-Host 'TELEGRAM_CLASSIFIER_SOURCE=PASS'
+
+          $runtimeFiles = @(Get-ChildItem -LiteralPath (Join-Path $prod 'scripts') -Filter '.phase7c-trend-legacy-runtime-*.mjs' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+          if ($runtimeFiles.Count -lt 1) { throw 'No generated Trend runtime found after cutover.' }
+          $latest = $runtimeFiles[0]
+          $runtimeText = Get-Content -LiteralPath $latest.FullName -Raw
+          $reversalDefs = ([regex]::Matches($runtimeText, 'async\s+function\s+readPhase7CReversalEntryContext\s*\(')).Count
+          $configDefs = ([regex]::Matches($runtimeText, 'function\s+effectiveTrendEntryConfig\s*\(')).Count
+          Write-Host "TELEGRAM_CLASSIFIER_REVERSAL_RUNTIME_FILE=$($latest.Name)"
+          Write-Host "TELEGRAM_CLASSIFIER_REVERSAL_FUNCTION_DEFS=$reversalDefs"
+          Write-Host "TELEGRAM_CLASSIFIER_EFFECTIVE_CONFIG_DEFS=$configDefs"
+          if ($reversalDefs -ne 1) { throw "REVERSAL helper regression detected: defs=$reversalDefs" }
+          if ($configDefs -ne 1) { throw "effectiveTrendEntryConfig regression detected: defs=$configDefs" }
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $mode = [string]$life.mode.mode
+          $armStatus = [string]$cap.liveArmStatus
+          $armed = [bool]$cap.liveExecutionArmed
+          Write-Host "TELEGRAM_CLASSIFIER_FINAL_BOT_MODE=$mode"
+          Write-Host "TELEGRAM_CLASSIFIER_FINAL_ARM_STATUS=$armStatus"
+          Write-Host "TELEGRAM_CLASSIFIER_FINAL_ARMED=$armed"
+          if ($mode -ne 'PAUSE') { throw "Expected PAUSE after classifier cutover; actual=$mode" }
+          if ($armed -or $armStatus -ne 'DISARMED') { throw 'Expected DISARMED after classifier cutover.' }
+
+          Write-Host 'TELEGRAM_RECOVERY_CLASSIFIER_PRODUCTION=PASS'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
