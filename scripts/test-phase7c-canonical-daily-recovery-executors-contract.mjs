@@ -43,6 +43,16 @@ assert.ok(
 
 const transformedTrend = transformPhase7CTrendCanonicalDailyRecoverySource(trendLegacy);
 const transformedSideway = transformPhase7CSidewayCanonicalDailyRecoverySource(sidewayLegacy);
+
+assert.ok(
+  transformedTrend.includes("async function readPhase7CReversalEntryContext()"),
+  "Trend canonical Daily Recovery transform must preserve the REVERSAL context reader definition.",
+);
+assert.equal(
+  (transformedTrend.match(/readPhase7CReversalEntryContext\\s*\\(/g) ?? []).length >= 2,
+  true,
+  "Trend transformed runtime must retain REVERSAL context calls together with its definition.",
+);
 for (const [strategy, transformed] of [["TREND", transformedTrend], ["SIDEWAY", transformedSideway]]) {
   assert.ok(
     transformed.includes("fetchPhase7CCanonicalDailyRecoveryPlan"),
