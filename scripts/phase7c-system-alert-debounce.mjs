@@ -1,8 +1,22 @@
 const TRANSIENT_MT5_READ_TIMEOUT =
   /^MT5 bridge GET \S+ \| timeout=\d+ms \| attempts=1$/;
+const MT5_CYCLE_ERROR = /^MT5 bridge\b/;
 
 export const DEFAULT_TRANSIENT_MT5_READ_ALERT_THRESHOLD = 3;
 export const DEFAULT_TRANSIENT_MT5_READ_ALERT_WINDOW_MS = 60_000;
+
+export function isMt5CycleErrorEvent(event) {
+  const type = String(event?.type ?? "");
+  if (type !== "CYCLE_ERROR") return false;
+
+  const message = String(
+    event?.message ??
+      event?.reason ??
+      "",
+  ).trim();
+
+  return MT5_CYCLE_ERROR.test(message);
+}
 
 export function isTransientMt5ReadTimeoutEvent(event) {
   const type = String(event?.type ?? "");
