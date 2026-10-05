@@ -1,0 +1,44 @@
+name: Phase7C Reversal Runtime Missing Function Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-reversal-runtime-missing-function-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect generated production Trend runtime read-only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $head = (git -C $prod rev-parse HEAD).Trim()
+          Write-Host "DIAG_PRODUCTION_HEAD=$head"
+
+          $files = @(Get-ChildItem -LiteralPath (Join-Path $prod 'scripts') -Filter '.phase7c-trend-legacy-runtime-*.mjs' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+          Write-Host "DIAG_RUNTIME_FILE_COUNT=$($files.Count)"
+          foreach ($file in ($files | Select-Object -First 10)) {
+            $text = Get-Content -LiteralPath $file.FullName -Raw
+            $callCount = ([regex]::Matches($text, 'readPhase7CReversalEntryContext\s*\(')).Count
+            $defCount = ([regex]::Matches($text, 'async\s+function\s+readPhase7CReversalEntryContext\s*\(')).Count
+            $declCount = ([regex]::Matches($text, '(?:const|let|var)\s+readPhase7CReversalEntryContext\s*=')).Count
+            Write-Host "DIAG_RUNTIME_FILE=$($file.Name)|LAST_WRITE=$($file.LastWriteTimeUtc.ToString('o'))|CALLS=$callCount|FUNCTION_DEFS=$defCount|DECLS=$declCount"
+            $hits = Select-String -LiteralPath $file.FullName -Pattern 'readPhase7CReversalEntryContext'
+            foreach ($hit in $hits) {
+              Write-Host ("DIAG_HIT_LINE={0}|TEXT={1}" -f $hit.LineNumber, $hit.Line.Trim())
+            }
+          }
+
+          $raw = Join-Path $prod 'scripts\run-phase7b-demo-controller.ts'
+          $rawText = Get-Content -LiteralPath $raw -Raw
+          Write-Host "DIAG_RAW_CALLS=$(([regex]::Matches($rawText, 'readPhase7CReversalEntryContext\s*\(')).Count)"
+          Write-Host "DIAG_RAW_FUNCTION_DEFS=$(([regex]::Matches($rawText, 'async\s+function\s+readPhase7CReversalEntryContext\s*\(')).Count)"
+          Write-Host "DIAG_PRODUCTION_MUTATION=NONE"
