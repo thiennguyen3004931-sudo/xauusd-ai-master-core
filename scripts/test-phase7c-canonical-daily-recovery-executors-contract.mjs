@@ -6,6 +6,7 @@ import {
   transformPhase7CSidewayCanonicalDailyRecoverySource,
   transformPhase7CTrendCanonicalDailyRecoverySource,
 } from "./phase7c-canonical-daily-recovery-source-adapter.mjs";
+import { transformPhase7CTrendLegacySource } from "./phase7c-live-source-adapters.mjs";
 import {
   fetchPhase7CCanonicalDailyRecoveryPlan,
   registerPhase7CCanonicalDailyRecoverySubmission,
@@ -52,6 +53,19 @@ assert.equal(
   (transformedTrend.match(/readPhase7CReversalEntryContext\\s*\\(/g) ?? []).length >= 2,
   true,
   "Trend transformed runtime must retain REVERSAL context calls together with its definition.",
+);
+
+const transformedLiveTrend = transformPhase7CTrendCanonicalDailyRecoverySource(
+  transformPhase7CTrendLegacySource(trendLegacy),
+);
+assert.equal(
+  (transformedLiveTrend.match(/async\\s+function\\s+readPhase7CReversalEntryContext\\s*\\(/g) ?? []).length,
+  1,
+  "Full LIVE account + canonical Daily Recovery transform must preserve exactly one REVERSAL context definition.",
+);
+assert.ok(
+  (transformedLiveTrend.match(/readPhase7CReversalEntryContext\\s*\\(/g) ?? []).length >= 2,
+  "Full LIVE transformed Trend runtime must retain REVERSAL calls and definition together.",
 );
 for (const [strategy, transformed] of [["TREND", transformedTrend], ["SIDEWAY", transformedSideway]]) {
   assert.ok(
