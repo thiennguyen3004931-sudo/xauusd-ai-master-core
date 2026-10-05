@@ -28,7 +28,7 @@ permissions:
   contents: read
 
 env:
-  EXPECTED_PRODUCTION_COMMIT: 96f92643c868c14c4d890f6cc10d7d8a34df26aa
+  EXPECTED_PRODUCTION_COMMIT: 8514fafffea7e7cde6a3bddfbb3cd23474bc20f7
   PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
   API_BASE_URL: http://127.0.0.1:3711
 
