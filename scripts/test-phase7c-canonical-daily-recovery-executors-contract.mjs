@@ -6,6 +6,7 @@ import {
   transformPhase7CSidewayCanonicalDailyRecoverySource,
   transformPhase7CTrendCanonicalDailyRecoverySource,
 } from "./phase7c-canonical-daily-recovery-source-adapter.mjs";
+import { transformPhase7CTrendLegacySource } from "./phase7c-live-source-adapters.mjs";
 import {
   fetchPhase7CCanonicalDailyRecoveryPlan,
   registerPhase7CCanonicalDailyRecoverySubmission,
@@ -43,6 +44,38 @@ assert.ok(
 
 const transformedTrend = transformPhase7CTrendCanonicalDailyRecoverySource(trendLegacy);
 const transformedSideway = transformPhase7CSidewayCanonicalDailyRecoverySource(sidewayLegacy);
+
+assert.ok(
+  transformedTrend.includes("async function readPhase7CReversalEntryContext()"),
+  "Trend canonical Daily Recovery transform must preserve the REVERSAL context reader definition.",
+);
+assert.ok(
+  transformedTrend.includes("function effectiveTrendEntryConfig("),
+  "Trend canonical Daily Recovery transform must preserve the REVERSAL effective-entry-config helper.",
+);
+assert.equal(
+  (transformedTrend.match(/readPhase7CReversalEntryContext\s*\(/g) ?? []).length >= 2,
+  true,
+  "Trend transformed runtime must retain REVERSAL context calls together with its definition.",
+);
+
+const transformedLiveTrend = transformPhase7CTrendCanonicalDailyRecoverySource(
+  transformPhase7CTrendLegacySource(trendLegacy),
+);
+assert.equal(
+  (transformedLiveTrend.match(/async\s+function\s+readPhase7CReversalEntryContext\s*\(/g) ?? []).length,
+  1,
+  "Full LIVE account + canonical Daily Recovery transform must preserve exactly one REVERSAL context definition.",
+);
+assert.equal(
+  (transformedLiveTrend.match(/function\s+effectiveTrendEntryConfig\s*\(/g) ?? []).length,
+  1,
+  "Full LIVE transform must preserve exactly one REVERSAL effective-entry-config helper.",
+);
+assert.ok(
+  (transformedLiveTrend.match(/readPhase7CReversalEntryContext\s*\(/g) ?? []).length >= 2,
+  "Full LIVE transformed Trend runtime must retain REVERSAL calls and definition together.",
+);
 for (const [strategy, transformed] of [["TREND", transformedTrend], ["SIDEWAY", transformedSideway]]) {
   assert.ok(
     transformed.includes("fetchPhase7CCanonicalDailyRecoveryPlan"),
