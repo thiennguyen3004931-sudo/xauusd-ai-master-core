@@ -77,7 +77,8 @@ mustContain(service, 'performanceStrategy', "service");
 mustContain(service, 'entryFunnel: buildEntryFunnel(auditSources)', "service");
 mustContain(service, 'blockedReasons', "service");
 mustContain(service, 'blockReasons', "service");
-mustContain(service, 'ENTRY_SPREAD_BLOCK', "service");
+mustContain(service, 'entryBlockReasonsOf', "service");
+mustContain(service, 'eventName.startsWith("ENTRY_")', "service");
 
 mustContain(correlationService, 'buildPhase7CPerformanceCorrelationBackfill', "correlation service");
 mustContain(correlationService, 'PHASE7C_PERFORMANCE_CORRELATION_SCHEMA_VERSION', "correlation service");
