@@ -3,7 +3,7 @@ export type Phase7CCounterfactualFamily =
   | "FAST_MOVE_GIVEBACK"
   | "RULE_OBSERVATION"
   | "MANAGEMENT_EXIT_POLICY";
-export type Phase7CCounterfactualStrategy = "TREND" | "SIDEWAY";
+export type Phase7CCounterfactualStrategy = "TREND" | "SIDEWAY" | "REVERSAL";
 export type Phase7CCounterfactualSide = "BUY" | "SELL";
 export type Phase7CCounterfactualEntryType = "IMMEDIATE" | "PULLBACK" | "RECOVERY" | "UNKNOWN";
 
