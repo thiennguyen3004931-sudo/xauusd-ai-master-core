@@ -640,7 +640,9 @@ async function formatEvent(event, enrichment) {
             "Regime",
             isSideway
               ? "SIDEWAY"
-              : "TREND",
+              : isReversal
+                ? "REVERSAL"
+                : "TREND",
           ),
           line(
             "🧠",
