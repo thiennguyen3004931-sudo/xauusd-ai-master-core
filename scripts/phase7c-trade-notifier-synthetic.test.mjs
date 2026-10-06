@@ -9,6 +9,28 @@ import { fileURLToPath } from "node:url";
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const notifierPath = path.join(scriptsDir, "run-phase7b-telegram-notifier.mjs");
 
+const reversalLifecycleEvents = [
+  {
+    type: "ENTRY_FILLED",
+    timestamp: "2026-10-05T13:30:00.000Z",
+    entryPolicy: "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND",
+    reversalContext: {
+      direction: "BULLISH",
+      side: "BUY",
+      chochTimestamp: 1791206100000,
+      level: 4138.5,
+    },
+    position: {
+      ticket: "REVERSAL-SYNTHETIC-1",
+      side: "LONG",
+      entry: 4147.27,
+      stopLoss: 4137.07,
+      volume: 0.12,
+    },
+    fvgConfirmedAtEntry: false,
+  },
+];
+
 const lifecycleEvents = [
   {
     type: "ENTRY_FILLED",
@@ -330,6 +352,19 @@ test("LIVE synthetic journal lifecycle uses production notifier with PHASE 7C ·
 
 test("DEMO synthetic journal lifecycle uses production notifier with PHASE 7C · DEMO", () => {
   runLifecycle("DEMO");
+});
+
+test("REVERSAL entry Telegram displays REVERSAL instead of hard-coded TREND", () => {
+  const notifications = runJournal(
+    "LIVE",
+    reversalLifecycleEvents,
+    "reversal-regime-label",
+    "TREND",
+  );
+
+  assert.equal(notifications.length, 1);
+  assert.match(notifications[0].text, /Regime:<\/b> <b>REVERSAL<\/b>/i);
+  assert.doesNotMatch(notifications[0].text, /Regime:<\/b> <b>TREND<\/b>/i);
 });
 
 test("Sideway lifecycle is ENTRY → +6 BE → +10 close one-third → TP2 exit with canonical events", () => {
