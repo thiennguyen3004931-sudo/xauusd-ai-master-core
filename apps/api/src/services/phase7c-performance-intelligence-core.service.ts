@@ -74,6 +74,7 @@ interface ParsedAuditEvent {
   identifiers: AuditIdentifier[];
   passedRules: string[];
   blockedRules: string[];
+  blockReasons: string[];
   entryType: EntryType;
   regime: string | null;
   entryPolicy: string | null;
@@ -266,6 +267,39 @@ function ruleEvidence(raw: RawEvent): { passed: string[]; blocked: string[] } {
   };
 }
 
+function entryBlockReasonsOf(
+  raw: RawEvent,
+  eventName: string,
+  blockedRules: readonly string[],
+): string[] {
+  const reasons = new Set(blockedRules);
+  visitObject(raw, (key, nested) => {
+    const normalizedKey = key.toLowerCase();
+    if (
+      normalizedKey !== "reason" &&
+      normalizedKey !== "reasoncode" &&
+      normalizedKey !== "reason_code" &&
+      normalizedKey !== "recoveryreason" &&
+      normalizedKey !== "recovery_reason"
+    ) {
+      return;
+    }
+    const scalar = normalizeScalar(nested);
+    if (!scalar) return;
+    for (const item of scalar.split(",").map((value) => value.trim()).filter(Boolean)) {
+      reasons.add(item);
+    }
+  });
+  const entryBlockEvent =
+    eventName.startsWith("ENTRY_") &&
+    (eventName.includes("BLOCK") ||
+      eventName.includes("REJECTED") ||
+      eventName.includes("EXPIRED") ||
+      eventName.includes("INVALID"));
+  if (entryBlockEvent && reasons.size === 0) reasons.add(eventName);
+  return [...reasons].sort();
+}
+
 function firstStringField(raw: RawEvent, keys: readonly string[]): string | null {
   const wanted = new Set(keys.map((key) => key.toLowerCase()));
   let found: string | null = null;
@@ -371,6 +405,7 @@ async function parseAuditSource(
         identifiers: identifiersOf(raw, eventName),
         passedRules: rules.passed,
         blockedRules: rules.blocked,
+        blockReasons: entryBlockReasonsOf(raw, eventName, rules.blocked),
         entryType: entryTypeOf(raw, eventName, strategy),
         regime,
         entryPolicy,
@@ -534,20 +569,20 @@ function buildEntryFunnel(
         event.blockedRules.length > 0,
     );
     const evaluated = decisions.filter(
-      (event) => event.passedRules.length > 0 || event.blockedRules.length > 0,
+      (event) => event.passedRules.length > 0 || event.blockReasons.length > 0,
     );
     const blockerCounts = new Map<string, number>();
     for (const event of evaluated) {
-      for (const rule of event.blockedRules) {
-        blockerCounts.set(rule, (blockerCounts.get(rule) ?? 0) + 1);
+      for (const reason of event.blockReasons) {
+        blockerCounts.set(reason, (blockerCounts.get(reason) ?? 0) + 1);
       }
     }
     return {
       strategy,
       observedEntryDecisionEvents: decisions.length,
       ruleEvaluatedEvents: evaluated.length,
-      blockedEvents: evaluated.filter((event) => event.blockedRules.length > 0).length,
-      clearRuleEvents: evaluated.filter((event) => event.blockedRules.length === 0).length,
+      blockedEvents: evaluated.filter((event) => event.blockReasons.length > 0).length,
+      clearRuleEvents: evaluated.filter((event) => event.blockReasons.length === 0).length,
       entrySubmitEvents: decisions.filter((event) => event.eventName === "ENTRY_SUBMIT").length,
       entryFilledEvents: decisions.filter((event) => event.eventName === "ENTRY_FILLED").length,
       blockedReasons: [...blockerCounts.entries()]
@@ -786,6 +821,7 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
 export const __test = {
   addCanonicalEntryConditions,
   buildEntryFunnel,
+  entryBlockReasonsOf,
   entryPolicyOf,
   entryTypeOf,
   identifiersOf,
