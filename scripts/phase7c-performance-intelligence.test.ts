@@ -196,14 +196,29 @@ test("entry funnel captures Sideway event-level block reasons without changing r
   assert.deepEqual(
     __test.entryBlockReasonsOf(
       {
-        entryConditions: {
-          failedConditions: ["rangeEdge", "m5Confirmation"],
+        reason: "ENTRY_STRATEGY_CONDITION_BLOCK: rangeEdge,m5Confirmation",
+        raw: {
+          entryConditions: {
+            failedConditions: ["rangeEdge", "m5Confirmation"],
+          },
+          reason: "rangeEdge,m5Confirmation",
         },
-        reason: "rangeEdge,m5Confirmation",
       },
       "ENTRY_STRATEGY_CONDITION_BLOCK",
       ["m5Confirmation", "rangeEdge"],
     ),
     ["m5Confirmation", "rangeEdge"],
+  );
+  assert.deepEqual(
+    __test.entryBlockReasonsOf(
+      {
+        raw: {
+          structuralStopDistance: 13.97,
+        },
+      },
+      "WAIT_PULLBACK",
+      [],
+    ),
+    ["WAIT_PULLBACK"],
   );
 });
