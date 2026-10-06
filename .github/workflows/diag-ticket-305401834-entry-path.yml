@@ -50,6 +50,18 @@ jobs:
             Write-Host "DIAG_TICKET_MATCH|FILE=$($m.Path)|LINE=$($m.Line)|TEXT=$($m.Text)"
           }
 
+          $eventFile = Join-Path $runtime 'phase7b-live-forward\phase7b-demo-events.jsonl'
+          $signalId = 'phase7b-demo-1791248400000-BUY-ENGULFING'
+          $orderId = 'p7b-rv-pb-1791248400000-BUY'
+          if (Test-Path -LiteralPath $eventFile) {
+            $eventLines = Get-Content -LiteralPath $eventFile -ErrorAction Stop
+            foreach ($line in $eventLines) {
+              if ($line -like "*$signalId*" -or $line -like "*$orderId*") {
+                Write-Host "DIAG_SIGNAL_EVENT=$line"
+              }
+            }
+          }
+
           $trend = Join-Path $runtime 'phase7c-executors\decision-observability\trend-decisions.jsonl'
           if (Test-Path -LiteralPath $trend) {
             $all = Get-Content -LiteralPath $trend -ErrorAction Stop
