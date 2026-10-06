@@ -127,6 +127,7 @@ test("entry funnel keeps SIDEWAY and REVERSAL blocker statistics independent", (
     identifiers: [],
     passedRules,
     blockedRules,
+    blockReasons: blockedRules,
     entryType: "UNKNOWN",
     regime: performanceStrategy === "REVERSAL" ? "REVERSAL" : null,
     entryPolicy: performanceStrategy === "REVERSAL"
@@ -160,4 +161,37 @@ test("entry funnel keeps SIDEWAY and REVERSAL blocker statistics independent", (
   assert.equal(reversal.entrySubmitEvents, 1);
   assert.equal(reversal.entryFilledEvents, 0);
   assert.deepEqual(reversal.blockedReasons[0], { rule: "STRUCTURAL_STOP_DISTANCE", count: 1 });
+});
+
+
+test("entry funnel captures Sideway event-level block reasons without changing rules", () => {
+  assert.deepEqual(
+    __test.entryBlockReasonsOf(
+      { reason: "QUOTE_STALE" },
+      "ENTRY_QUOTE_FRESHNESS_BLOCK",
+      [],
+    ),
+    ["QUOTE_STALE"],
+  );
+  assert.deepEqual(
+    __test.entryBlockReasonsOf(
+      { spread: 2.5, maxSpread: 2 },
+      "ENTRY_SPREAD_BLOCK",
+      [],
+    ),
+    ["ENTRY_SPREAD_BLOCK"],
+  );
+  assert.deepEqual(
+    __test.entryBlockReasonsOf(
+      {
+        entryConditions: {
+          failedConditions: ["rangeEdge", "m5Confirmation"],
+        },
+        reason: "rangeEdge,m5Confirmation",
+      },
+      "ENTRY_STRATEGY_CONDITION_BLOCK",
+      ["m5Confirmation", "rangeEdge"],
+    ),
+    ["m5Confirmation", "rangeEdge"],
+  );
 });
