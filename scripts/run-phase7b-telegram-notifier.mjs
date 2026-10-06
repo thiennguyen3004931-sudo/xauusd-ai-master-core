@@ -821,6 +821,13 @@ async function formatEvent(event, enrichment) {
 
     const isSideway =
       event.journalSource === "SIDEWAY";
+    const entryPolicy = String(event.entryPolicy ?? "").trim().toUpperCase();
+    const isReversal =
+      !isSideway &&
+      (
+        entryPolicy.startsWith("REVERSAL_") ||
+        Boolean(event.reversalContext)
+      );
 
     if (recovery.active) {
       return fullCard(
@@ -834,7 +841,9 @@ async function formatEvent(event, enrichment) {
             "Regime",
             isSideway
               ? "SIDEWAY"
-              : "TREND",
+              : isReversal
+                ? "REVERSAL"
+                : "TREND",
           ),
           line(
             "🎫",
