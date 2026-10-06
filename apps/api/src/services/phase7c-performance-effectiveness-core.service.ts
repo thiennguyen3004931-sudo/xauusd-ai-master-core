@@ -268,7 +268,8 @@ async function effectivenessRow(
   accountMode: "DEMO" | "LIVE",
   symbol: string,
 ): Promise<Phase7CPerformanceEffectivenessRow> {
-  const strategy = trade.strategy as Phase7CPerformanceStrategy;
+  const executionStrategy = trade.strategy as "TREND" | "SIDEWAY";
+  const strategy = trade.attribution.performanceStrategy as Phase7CPerformanceStrategy;
   const exactCorrelation = trade.correlation.verdict === "EXACT";
   const warnings: string[] = [];
 
@@ -276,7 +277,7 @@ async function effectivenessRow(
     ? getPhase7CManagementEvidence({
         runtimeRoot: runtimeRoot(),
         accountMode,
-        strategy,
+        strategy: executionStrategy,
         positionId: trade.positionId,
         openedAt: trade.openedAt,
         closedAt: trade.closedAt,
@@ -386,6 +387,7 @@ export async function getPhase7CPerformanceEffectivenessSnapshot(
     ...snapshot,
     notes: [
       ...snapshot.notes,
+      "TREND, SIDEWAY, and canonical REVERSAL entries are reported as separate performance strategies; REVERSAL keeps the TREND execution journal only for evidence lookup.",
       "M5 excursion data is loaded through the bridge GET-only historical-candles endpoint; unavailable or incomplete windows remain null.",
       "Initial structural risk is not inferred from current accounting history, so production R metrics remain null until exact initial-risk evidence is persisted.",
       "SHADOW_ONLY Fast-Move alternatives are not replayed from M5 OHLC because candle high/low does not prove intrabar price ordering. Ordered bid/ask evidence is required.",
