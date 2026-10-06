@@ -338,7 +338,28 @@ function regimeOf(raw: RawEvent): string | null {
 }
 
 function entryPolicyOf(raw: RawEvent): string | null {
-  return firstStringField(raw, ["entryPolicy", "entry_policy"]);
+  const explicit = firstStringField(raw, ["entryPolicy", "entry_policy"]);
+  if (explicit) return explicit;
+
+  const entryRule = firstStringField(raw, ["entryRule", "entry_rule"]);
+  if ((entryRule ?? "").trim().toUpperCase().startsWith("REVERSAL_")) {
+    return "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND";
+  }
+
+  let reversalContextPresent = false;
+  visitObject(raw, (key, nested) => {
+    if (reversalContextPresent) return;
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey !== "reversalcontext" && normalizedKey !== "reversal_context") return;
+    reversalContextPresent = Boolean(
+      nested &&
+      typeof nested === "object" &&
+      !Array.isArray(nested),
+    );
+  });
+  return reversalContextPresent
+    ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+    : null;
 }
 
 function performanceStrategyOf(
