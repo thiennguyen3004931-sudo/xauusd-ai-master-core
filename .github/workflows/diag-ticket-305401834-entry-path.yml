@@ -1,0 +1,71 @@
+name: Diagnostic Ticket 305401834 Entry Path
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diag-ticket-305401834-entry-path.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect production runtime and ticket 305401834 read-only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $ticket = '305401834'
+
+          $head = (git -C $prod rev-parse HEAD).Trim()
+          $branch = (git -C $prod branch --show-current).Trim()
+          Write-Host "DIAG_PRODUCTION_HEAD=$head"
+          Write-Host "DIAG_PRODUCTION_BRANCH=$branch"
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $positions = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/mt5/positions?symbol=XAUUSD' -Method Get -TimeoutSec 10 -ErrorAction SilentlyContinue
+          Write-Host "DIAG_BOT_MODE=$([string]$life.mode.mode)"
+          Write-Host "DIAG_LIFECYCLE_RUNNING=$([bool]$life.lifecycle.running)"
+          Write-Host "DIAG_LIFECYCLE_READY=$([bool]$life.lifecycle.ready)"
+          Write-Host "DIAG_ARM_STATUS=$([string]$cap.liveArmStatus)"
+          Write-Host "DIAG_ARMED=$([bool]$cap.liveExecutionArmed)"
+          if ($null -ne $positions) { Write-Host ('DIAG_POSITIONS_JSON=' + ($positions | ConvertTo-Json -Depth 10 -Compress)) }
+
+          $runtime = Join-Path $prod '.runtime'
+          $files = @(Get-ChildItem -LiteralPath $runtime -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.json','.jsonl','.log','.txt' })
+          Write-Host "DIAG_RUNTIME_FILES_SCANNED=$($files.Count)"
+          $matches = @()
+          foreach ($file in $files) {
+            $hits = Select-String -LiteralPath $file.FullName -SimpleMatch $ticket -ErrorAction SilentlyContinue
+            foreach ($hit in $hits) {
+              $matches += [pscustomobject]@{ Path=$file.FullName; Line=$hit.LineNumber; Text=$hit.Line.Trim() }
+            }
+          }
+          Write-Host "DIAG_TICKET_MATCH_COUNT=$($matches.Count)"
+          foreach ($m in $matches) {
+            Write-Host "DIAG_TICKET_MATCH|FILE=$($m.Path)|LINE=$($m.Line)|TEXT=$($m.Text)"
+          }
+
+          $trend = Join-Path $runtime 'phase7c-executors\decision-observability\trend-decisions.jsonl'
+          if (Test-Path -LiteralPath $trend) {
+            $all = Get-Content -LiteralPath $trend -ErrorAction Stop
+            $ticketIndexes = @()
+            for ($i=0; $i -lt $all.Count; $i++) { if ($all[$i] -like "*$ticket*") { $ticketIndexes += $i } }
+            foreach ($idx in $ticketIndexes) {
+              $start=[Math]::Max(0,$idx-20); $end=[Math]::Min($all.Count-1,$idx+10)
+              for ($j=$start; $j -le $end; $j++) { Write-Host "DIAG_TREND_CONTEXT|LINE=$($j+1)|TEXT=$($all[$j])" }
+            }
+          }
+
+          Write-Host 'DIAG_PRODUCTION_MUTATION=NONE'
+          Write-Host 'DIAG_MODE_MUTATION=NONE'
+          Write-Host 'DIAG_ARM_MUTATION=NONE'
+          Write-Host 'DIAG_ORDER_MUTATION=NONE'
+          Write-Host 'DIAG_POSITION_MUTATION=NONE'
+          Write-Host 'DIAG_LIVE_TEST_ORDER=NONE'
