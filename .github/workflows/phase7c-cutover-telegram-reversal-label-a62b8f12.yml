@@ -1,0 +1,90 @@
+name: Phase7C Cutover Telegram REVERSAL Label a62b8f12
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-cutover-telegram-reversal-label-a62b8f12.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: a62b8f12df6d6e18bfe6750f73138967d220da2f
+          fetch-depth: 0
+
+      - name: Guarded production cutover and Telegram REVERSAL label verification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $current = '8514fafffea7e7cde6a3bddfbb3cd23474bc20f7'
+          $target = 'a62b8f12df6d6e18bfe6750f73138967d220da2f'
+          $targetTree = '74c0d20888eec7d75ad01d719d36f47231d573a7'
+          $helperBlob = 'd8fb26409df5ddecdf5353ab0fdf42cbd8d3500f'
+
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "REVERSAL_LABEL_PRE_PRODUCTION_HEAD=$actual"
+
+          if ($actual -eq $target) {
+            Write-Host 'REVERSAL_LABEL_TRANSITION=SKIPPED_ALREADY_TARGET'
+          } elseif ($actual -eq $current) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PWD 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot $prod -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 $helperBlob -ExpectedInitialArm ARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            throw "UNEXPECTED_PRODUCTION_HEAD expected_current=$current expected_target=$target actual=$actual"
+          }
+
+          $postHead = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodBranch = (git -C $prod branch --show-current).Trim()
+          $prodTree = (git -C $prod rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          Write-Host "REVERSAL_LABEL_POST_PRODUCTION_HEAD=$postHead"
+          Write-Host "REVERSAL_LABEL_POST_PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "REVERSAL_LABEL_POST_PRODUCTION_TREE=$prodTree"
+          if ($postHead -ne $target) { throw 'Production HEAD did not reach target.' }
+          if ($prodBranch -ne 'main') { throw "Expected production branch main; actual=$prodBranch" }
+          if ($prodTree -ne $targetTree) { throw "Expected production tree $targetTree; actual=$prodTree" }
+
+          $notifier = Get-Content -LiteralPath (Join-Path $prod 'scripts\run-phase7b-telegram-notifier.mjs') -Raw
+          $controller = Get-Content -LiteralPath (Join-Path $prod 'scripts\run-phase7b-demo-controller.ts') -Raw
+          if ($notifier -notmatch 'isReversal \? "REVERSAL" : "TREND"') { throw 'REVERSAL Telegram label logic missing.' }
+          if ($controller -notmatch 'REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND') { throw 'REVERSAL entry policy journal missing.' }
+          if ($controller -notmatch 'reversalContext: signal\.reversalContext') { throw 'REVERSAL context journal missing.' }
+          Write-Host 'REVERSAL_LABEL_SOURCE=PASS'
+
+          $runtimeFiles = @(Get-ChildItem -LiteralPath (Join-Path $prod 'scripts') -Filter '.phase7c-trend-legacy-runtime-*.mjs' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+          if ($runtimeFiles.Count -lt 1) { throw 'No generated Trend runtime found after cutover.' }
+          $latest = $runtimeFiles[0]
+          $runtimeText = Get-Content -LiteralPath $latest.FullName -Raw
+          $reversalDefs = ([regex]::Matches($runtimeText, 'async\s+function\s+readPhase7CReversalEntryContext\s*\(')).Count
+          $configDefs = ([regex]::Matches($runtimeText, 'function\s+effectiveTrendEntryConfig\s*\(')).Count
+          Write-Host "REVERSAL_LABEL_RUNTIME_FILE=$($latest.Name)"
+          Write-Host "REVERSAL_LABEL_REVERSAL_FUNCTION_DEFS=$reversalDefs"
+          Write-Host "REVERSAL_LABEL_EFFECTIVE_CONFIG_DEFS=$configDefs"
+          if ($reversalDefs -ne 1) { throw "REVERSAL helper regression detected: defs=$reversalDefs" }
+          if ($configDefs -ne 1) { throw "effectiveTrendEntryConfig regression detected: defs=$configDefs" }
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $mode = [string]$life.mode.mode
+          $armStatus = [string]$cap.liveArmStatus
+          $armed = [bool]$cap.liveExecutionArmed
+          Write-Host "REVERSAL_LABEL_FINAL_BOT_MODE=$mode"
+          Write-Host "REVERSAL_LABEL_FINAL_ARM_STATUS=$armStatus"
+          Write-Host "REVERSAL_LABEL_FINAL_ARMED=$armed"
+          if ($mode -ne 'PAUSE') { throw "Expected PAUSE during observability cutover; actual=$mode" }
+          if (-not $armed -or $armStatus -ne 'ARMED') { throw 'Expected ARM to remain ARMED during PAUSE observability cutover.' }
+
+          Write-Host 'TELEGRAM_REVERSAL_LABEL_PRODUCTION=PASS'
+          Write-Host 'MODE_MUTATION=NONE'
+          Write-Host 'ARM_MUTATION=NONE'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
