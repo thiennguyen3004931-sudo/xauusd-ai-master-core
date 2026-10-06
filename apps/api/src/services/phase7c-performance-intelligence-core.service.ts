@@ -273,7 +273,12 @@ function entryBlockReasonsOf(
   blockedRules: readonly string[],
 ): string[] {
   const reasons = new Set(blockedRules);
-  visitObject(raw, (key, nested) => {
+  const rawPayload =
+    raw.raw && typeof raw.raw === "object" && !Array.isArray(raw.raw)
+      ? (raw.raw as RawEvent)
+      : raw;
+
+  visitObject(rawPayload, (key, nested) => {
     const normalizedKey = key.toLowerCase();
     if (
       normalizedKey !== "reason" &&
@@ -290,13 +295,21 @@ function entryBlockReasonsOf(
       reasons.add(item);
     }
   });
+
   const entryBlockEvent =
     eventName.startsWith("ENTRY_") &&
     (eventName.includes("BLOCK") ||
       eventName.includes("REJECTED") ||
       eventName.includes("EXPIRED") ||
-      eventName.includes("INVALID"));
-  if (entryBlockEvent && reasons.size === 0) reasons.add(eventName);
+      eventName.includes("INVALID") ||
+      eventName.includes("WAIT"));
+  const pullbackWaitEvent =
+    eventName === "WAIT_PULLBACK" ||
+    eventName === "PULLBACK_STILL_TOO_WIDE";
+
+  if ((entryBlockEvent || pullbackWaitEvent) && reasons.size === 0) {
+    reasons.add(eventName);
+  }
   return [...reasons].sort();
 }
 
