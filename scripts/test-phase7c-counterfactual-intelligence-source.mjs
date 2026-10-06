@@ -42,6 +42,7 @@ assert.match(route, /router\.get\("\/"/);
 assert.doesNotMatch(route, /router\.(post|put|patch|delete)\s*\(/i);
 
 assert.match(types, /phase7c-counterfactual-intelligence-v1/);
+assert.match(types, /"REVERSAL"/);
 assert.match(types, /readOnly:\s*true/);
 assert.match(types, /shadowOnly:\s*true/);
 assert.match(types, /autoApply:\s*false/);
