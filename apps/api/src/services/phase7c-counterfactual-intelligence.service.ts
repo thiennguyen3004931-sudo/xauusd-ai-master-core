@@ -359,10 +359,11 @@ function phase7CRuntimeRoot(): string {
 export async function runtimeFastMoveEvidenceProvider(
   row: Phase7CPerformanceEffectivenessRow,
 ): Promise<Phase7CFastMoveReplayEvidenceResult> {
+  const executionStrategy = row.strategy === "REVERSAL" ? "TREND" : row.strategy;
   const observed = getPhase7COrderedExitSideEvidence({
     runtimeRoot: phase7CRuntimeRoot(),
     accountMode: row.accountMode,
-    strategy: row.strategy,
+    strategy: executionStrategy,
     positionId: row.positionId,
     side: row.side,
     openedAt: row.openedAt,
