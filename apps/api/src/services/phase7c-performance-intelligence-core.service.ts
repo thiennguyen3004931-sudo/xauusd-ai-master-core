@@ -378,14 +378,11 @@ function entryPolicyOf(raw: RawEvent): string | null {
 function performanceStrategyOf(
   executionStrategy: Strategy,
   entryPolicy: string | null,
-  regime: string | null = null,
+  _regime: string | null = null,
 ): PerformanceStrategy {
   if (executionStrategy !== "TREND") return executionStrategy;
   const policy = (entryPolicy ?? "").trim().toUpperCase();
-  const marketRegime = (regime ?? "").trim().toUpperCase();
-  return policy.startsWith("REVERSAL_") || marketRegime === "REVERSAL"
-    ? "REVERSAL"
-    : "TREND";
+  return policy.startsWith("REVERSAL_") ? "REVERSAL" : "TREND";
 }
 
 function eventIdOf(raw: RawEvent, strategy: Strategy, index: number, eventName: string): string {
@@ -844,7 +841,7 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
       "Trade attribution is fail-closed and follows explicit POSITION/ORDER/SIGNAL identifiers only; no timestamp or price proximity matching is used.",
       "AMBIGUOUS and UNMATCHED trades are excluded from rule and entry-type profitability aggregates.",
       "Historical trades without persisted rule/regime identity links remain unattributed; P2 does not backfill by inference.",
-      "Performance Intelligence v2 separates canonical REVERSAL entries from TREND profitability while preserving TREND as the execution-journal source.",
+      "Performance Intelligence v2 separates canonical REVERSAL entries from TREND profitability only when entry-policy/context evidence proves REVERSAL; market regime alone never re-labels an entry strategy.",
       "Entry funnel counts are descriptive event counts from persisted decision evidence: evaluated, blocked/clear, submit, fill. They never relax or retune entry rules.",
       "Decision-block counts are descriptive only; blocked rules are not assigned hypothetical PnL.",
       "MFE/MAE is not reported until a canonical persisted price-path source is available.",
