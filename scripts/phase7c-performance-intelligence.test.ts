@@ -84,3 +84,80 @@ test("untrusted generic ticket is not accepted outside entry fill/recovery event
   );
   assert.equal(identifiers.some((item) => item.token === "POSITION:999"), false);
 });
+
+
+test("Performance Intelligence v2 separates REVERSAL from TREND execution source", () => {
+  assert.equal(
+    __test.performanceStrategyOf(
+      "TREND",
+      "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND",
+      "REVERSAL",
+    ),
+    "REVERSAL",
+  );
+  assert.equal(__test.performanceStrategyOf("TREND", "TREND_CONTINUATION", "TRENDING"), "TREND");
+  assert.equal(__test.performanceStrategyOf("SIDEWAY", null, "RANGING"), "SIDEWAY");
+  assert.equal(
+    __test.entryPolicyOf({
+      lifecycle: { entryPolicy: "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND" },
+    }),
+    "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND",
+  );
+});
+
+test("entry funnel keeps SIDEWAY and REVERSAL blocker statistics independent", () => {
+  const source = (strategy: "TREND" | "SIDEWAY", events: unknown[]) => ({
+    strategy,
+    relativePath: strategy.toLowerCase() + "-decisions.jsonl",
+    available: true,
+    parsedRows: events.length,
+    malformedRows: 0,
+    events,
+  });
+  const event = (
+    eventName: string,
+    performanceStrategy: "TREND" | "SIDEWAY" | "REVERSAL",
+    blockedRules: string[] = [],
+    passedRules: string[] = [],
+  ) => ({
+    raw: {},
+    index: 0,
+    eventId: eventName + ":" + performanceStrategy,
+    eventName,
+    identifiers: [],
+    passedRules,
+    blockedRules,
+    entryType: "UNKNOWN",
+    regime: performanceStrategy === "REVERSAL" ? "REVERSAL" : null,
+    entryPolicy: performanceStrategy === "REVERSAL"
+      ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+      : null,
+    performanceStrategy,
+  });
+
+  const funnel = __test.buildEntryFunnel([
+    source("SIDEWAY", [
+      event("ENTRY_WAIT", "SIDEWAY", ["SIDEWAY_ZONE"], ["PATTERN_M15"]),
+      event("ENTRY_SUBMIT", "SIDEWAY", [], ["PATTERN_M15", "STRUCTURE"]),
+      event("ENTRY_FILLED", "SIDEWAY"),
+    ]),
+    source("TREND", [
+      event("ENTRY_WAIT", "REVERSAL", ["STRUCTURAL_STOP_DISTANCE"], ["PATTERN_M15"]),
+      event("ENTRY_SUBMIT", "REVERSAL", [], ["PATTERN_M15", "VALID_STRUCTURE"]),
+    ]),
+  ] as never);
+
+  const sideway = funnel.find((item) => item.strategy === "SIDEWAY");
+  assert.ok(sideway);
+  assert.equal(sideway.blockedEvents, 1);
+  assert.equal(sideway.entrySubmitEvents, 1);
+  assert.equal(sideway.entryFilledEvents, 1);
+  assert.deepEqual(sideway.blockedReasons[0], { rule: "SIDEWAY_ZONE", count: 1 });
+
+  const reversal = funnel.find((item) => item.strategy === "REVERSAL");
+  assert.ok(reversal);
+  assert.equal(reversal.blockedEvents, 1);
+  assert.equal(reversal.entrySubmitEvents, 1);
+  assert.equal(reversal.entryFilledEvents, 0);
+  assert.deepEqual(reversal.blockedReasons[0], { rule: "STRUCTURAL_STOP_DISTANCE", count: 1 });
+});
