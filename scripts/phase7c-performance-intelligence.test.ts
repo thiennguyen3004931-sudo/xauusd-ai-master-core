@@ -96,6 +96,7 @@ test("Performance Intelligence v2 separates REVERSAL from TREND execution source
     "REVERSAL",
   );
   assert.equal(__test.performanceStrategyOf("TREND", "TREND_CONTINUATION", "TRENDING"), "TREND");
+  assert.equal(__test.performanceStrategyOf("TREND", null, "REVERSAL"), "TREND");
   assert.equal(__test.performanceStrategyOf("SIDEWAY", null, "RANGING"), "SIDEWAY");
   assert.equal(
     __test.entryPolicyOf({
