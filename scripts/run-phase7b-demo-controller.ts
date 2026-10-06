@@ -1170,6 +1170,10 @@ async function submitTrendEntry(
   journal("ENTRY_FILLED", {
     signalId: signal.id,
     entryState,
+    entryPolicy: signal.reversalContext
+      ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+      : "TREND_CONTINUATION",
+    reversalContext: signal.reversalContext,
     structuralStopPrice: signal.patternExtreme,
     stopLoss,
     position: opened,
