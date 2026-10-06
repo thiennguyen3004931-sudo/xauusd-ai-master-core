@@ -103,6 +103,18 @@ test("Performance Intelligence v2 separates REVERSAL from TREND execution source
     }),
     "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND",
   );
+  assert.equal(
+    __test.entryPolicyOf({
+      entryRule: "REVERSAL_CHOCH_DIRECTION_PLUS_PATTERN_PLUS_VALID_STRUCTURE",
+    }),
+    "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND",
+  );
+  assert.equal(
+    __test.entryPolicyOf({
+      reversalContext: { side: "BUY", chochTimestamp: 123 },
+    }),
+    "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND",
+  );
 });
 
 test("entry funnel keeps SIDEWAY and REVERSAL blocker statistics independent", () => {
