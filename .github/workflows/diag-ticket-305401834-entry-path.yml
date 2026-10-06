@@ -29,13 +29,11 @@ jobs:
 
           $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
           $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
-          $positions = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/mt5/positions?symbol=XAUUSD' -Method Get -TimeoutSec 10 -ErrorAction SilentlyContinue
           Write-Host "DIAG_BOT_MODE=$([string]$life.mode.mode)"
           Write-Host "DIAG_LIFECYCLE_RUNNING=$([bool]$life.lifecycle.running)"
           Write-Host "DIAG_LIFECYCLE_READY=$([bool]$life.lifecycle.ready)"
           Write-Host "DIAG_ARM_STATUS=$([string]$cap.liveArmStatus)"
           Write-Host "DIAG_ARMED=$([bool]$cap.liveExecutionArmed)"
-          if ($null -ne $positions) { Write-Host ('DIAG_POSITIONS_JSON=' + ($positions | ConvertTo-Json -Depth 10 -Compress)) }
 
           $runtime = Join-Path $prod '.runtime'
           $files = @(Get-ChildItem -LiteralPath $runtime -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.json','.jsonl','.log','.txt' })
