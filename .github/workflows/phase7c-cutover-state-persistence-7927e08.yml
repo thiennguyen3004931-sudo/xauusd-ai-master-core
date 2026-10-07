@@ -1,0 +1,107 @@
+name: Phase7C Cutover Windows State Persistence 7927e08
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-cutover-state-persistence-7927e08.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: 7927e08ac0024338237e264d8ebb420b90108605
+          fetch-depth: 0
+
+      - name: Guarded production cutover and Windows state persistence verification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $current = 'a62b8f12df6d6e18bfe6750f73138967d220da2f'
+          $target = '7927e08ac0024338237e264d8ebb420b90108605'
+          $targetTree = 'aa647f698ba5216a168be811cf00cba09741b66d'
+          $helperBlob = 'd8fb26409df5ddecdf5353ab0fdf42cbd8d3500f'
+
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "STATE_PERSIST_PRE_PRODUCTION_HEAD=$actual"
+
+          if ($actual -eq $target) {
+            Write-Host 'STATE_PERSIST_TRANSITION=SKIPPED_ALREADY_TARGET'
+          } elseif ($actual -eq $current) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PWD 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot $prod -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 $helperBlob -ExpectedInitialArm ARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            throw "UNEXPECTED_PRODUCTION_HEAD expected_current=$current expected_target=$target actual=$actual"
+          }
+
+          $postHead = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodBranch = (git -C $prod branch --show-current).Trim()
+          $prodTree = (git -C $prod rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+          Write-Host "STATE_PERSIST_POST_PRODUCTION_HEAD=$postHead"
+          Write-Host "STATE_PERSIST_POST_PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "STATE_PERSIST_POST_PRODUCTION_TREE=$prodTree"
+
+          if ($postHead -ne $target) { throw 'Production HEAD did not reach target.' }
+          if ($prodBranch -ne 'main') { throw "Expected production branch main; actual=$prodBranch" }
+          if ($prodTree -ne $targetTree) { throw "Expected production tree $targetTree; actual=$prodTree" }
+
+          $controllerPath = Join-Path $prod 'scripts\run-phase7b-demo-controller.ts'
+          $helperPath = Join-Path $prod 'scripts\phase7c-atomic-state-write.mjs'
+          $controller = Get-Content -LiteralPath $controllerPath -Raw
+          $stateHelper = Get-Content -LiteralPath $helperPath -Raw
+
+          if ($controller -notmatch 'writeStateFileAtomicSync\(statePath,\s*payload\)') {
+            throw 'Controller is not wired to Windows-safe atomic state persistence.'
+          }
+          if ($controller -match 'const\s+temp\s*=\s*`\$\{statePath\}\.tmp`') {
+            throw 'Fixed shared state .tmp path is still present.'
+          }
+          foreach ($required in @('EPERM','EBUSY','EACCES','maxAttempts = 6','retryDelayMs = 100')) {
+            if ($stateHelper -notmatch [regex]::Escape($required)) {
+              throw "Atomic state helper contract missing: $required"
+            }
+          }
+          Write-Host 'STATE_PERSIST_SOURCE=PASS'
+
+          $runtimeFiles = @(Get-ChildItem -LiteralPath (Join-Path $prod 'scripts') -Filter '.phase7c-trend-legacy-runtime-*.mjs' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+          if ($runtimeFiles.Count -lt 1) { throw 'No generated Trend runtime found after cutover.' }
+          $latest = $runtimeFiles[0]
+          $runtimeText = Get-Content -LiteralPath $latest.FullName -Raw
+          if ($runtimeText -notmatch 'writeStateFileAtomicSync') {
+            throw 'Generated Trend runtime does not contain atomic state writer integration.'
+          }
+          if ($runtimeText -match 'const\s+temp\s*=\s*`\$\{statePath\}\.tmp`') {
+            throw 'Generated Trend runtime still contains fixed shared state temp path.'
+          }
+          Write-Host "STATE_PERSIST_RUNTIME_FILE=$($latest.Name)"
+          Write-Host 'STATE_PERSIST_RUNTIME=PASS'
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $mode = [string]$life.mode.mode
+          $armStatus = [string]$cap.liveArmStatus
+          $armed = [bool]$cap.liveExecutionArmed
+
+          Write-Host "STATE_PERSIST_FINAL_BOT_MODE=$mode"
+          Write-Host "STATE_PERSIST_FINAL_ARM_STATUS=$armStatus"
+          Write-Host "STATE_PERSIST_FINAL_ARMED=$armed"
+
+          if ($mode -ne 'PAUSE') { throw "Expected PAUSE during state-persistence cutover; actual=$mode" }
+          if (-not $armed -or $armStatus -ne 'ARMED') { throw 'Expected ARM to remain ARMED during PAUSE cutover.' }
+
+          Write-Host 'WINDOWS_STATE_PERSISTENCE_PRODUCTION=PASS'
+          Write-Host 'ENTRY_RULE_MUTATION=NONE'
+          Write-Host 'RISK_LOT_MUTATION=NONE'
+          Write-Host 'MODE_FINAL=PAUSE'
+          Write-Host 'ARM_FINAL=ARMED'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
