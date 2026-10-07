@@ -1,0 +1,78 @@
+name: Phase7C Hosted Validate Sideway M5 One-Bar df571a6f
+
+on:
+  push:
+    branches:
+      - ops/validate-sideway-m5-onebar-df571a6f-hosted
+    paths:
+      - '.github/workflows/phase7c-hosted-validate-sideway-m5-onebar-df571a6f.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: df571a6ff4ca3a0192b7faed941d5d66e55c4f3c
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Candidate identity
+        shell: bash
+        run: |
+          actual="$(git rev-parse HEAD)"
+          echo "SIDEWAY_M5_ONEBAR_CANDIDATE_HEAD=$actual"
+          test "$actual" = "df571a6ff4ca3a0192b7faed941d5d66e55c4f3c"
+
+      - name: Parse Sideway controller
+        shell: bash
+        run: node --check scripts/run-phase7c-sideway-controller.mjs
+
+      - name: Sideway logic unit tests
+        shell: bash
+        run: node --test scripts/phase7c-sideway-logic.test.mjs
+
+      - name: Sideway strategy-entry source contract
+        shell: bash
+        run: node scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs
+
+      - name: LIVE source adapter regression
+        shell: bash
+        run: node --test scripts/phase7c-live-source-adapters-crlf.test.mjs
+
+      - name: Diff safety contract
+        shell: bash
+        run: |
+          base="4f09e3a8bd159e207a0effa38bf4a735bb9b3fa3"
+          target="df571a6ff4ca3a0192b7faed941d5d66e55c4f3c"
+          mapfile -t files < <(git diff --name-only "$base..$target")
+          printf 'SIDEWAY_M5_ONEBAR_CHANGED_FILES=%s\n' "$(IFS=,; echo "${files[*]}")"
+          test "${#files[@]}" -eq 3
+          for file in "${files[@]}"; do
+            case "$file" in
+              scripts/phase7c-sideway-logic.mjs|scripts/phase7c-sideway-logic.test.mjs|scripts/run-phase7c-sideway-controller.mjs) ;;
+              *) echo "Unexpected changed file: $file"; exit 1 ;;
+            esac
+          done
+          grep -F 'const m5ConfirmationCarryBars = 1;' scripts/run-phase7c-sideway-controller.mjs
+          grep -F 'detectM5ConfirmationWithinBars(m5, side, m5ConfirmationCarryBars)' scripts/run-phase7c-sideway-controller.mjs
+          grep -F 'passed: Boolean(confirmation)' scripts/run-phase7c-sideway-controller.mjs
+          grep -F 'confirmationAgeBars: confirmation.ageBars ?? 0' scripts/run-phase7c-sideway-controller.mjs
+          echo 'SIDEWAY_M5_ONEBAR_VALIDATION=PASS'
+          echo 'SIDEWAY_M5_ONEBAR_RISK_LOT_MUTATION=NONE'
+          echo 'SIDEWAY_M5_ONEBAR_MODE_ARM_MUTATION=NONE'
+          echo 'SIDEWAY_M5_ONEBAR_ORDER_POSITION_MUTATION=NONE'
+          echo 'SIDEWAY_M5_ONEBAR_LIVE_TEST_ORDER=NONE'
