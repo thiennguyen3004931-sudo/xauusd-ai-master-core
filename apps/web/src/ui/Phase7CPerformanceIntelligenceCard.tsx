@@ -43,6 +43,7 @@ export function Phase7CPerformanceIntelligenceCard() {
   );
   const recentTrades = snapshot?.trades.slice(-8).reverse() ?? [];
   const topRules = snapshot?.rules.slice(0, 6) ?? [];
+  const entryFunnel = snapshot?.entryFunnel ?? [];
 
   return (
     <Card variant="outlined">
@@ -56,7 +57,7 @@ export function Phase7CPerformanceIntelligenceCard() {
           >
             <Box>
               <Stack direction="row" spacing={1} alignItems="center">
-                <Typography variant="h6">Performance Intelligence</Typography>
+                <Typography variant="h6">Performance Intelligence v2</Typography>
                 <Chip size="small" label="READ ONLY" variant="outlined" />
               </Stack>
               <Typography variant="body2" color="text.secondary">
@@ -140,6 +141,28 @@ export function Phase7CPerformanceIntelligenceCard() {
                   </Box>
 
                   <Box>
+                    <Typography variant="subtitle2" gutterBottom>Entry funnel / blocked reasons</Typography>
+                    <Stack spacing={0.75}>
+                      {entryFunnel.map((item) => (
+                        <Stack
+                          key={item.strategy}
+                          direction={{ xs: "column", md: "row" }}
+                          spacing={1}
+                          justifyContent="space-between"
+                        >
+                          <Typography variant="body2" fontWeight={600}>{item.strategy}</Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            decision {item.observedEntryDecisionEvents} · evaluated {item.ruleEvaluatedEvents} · blocked {item.blockedEvents} · clear {item.clearRuleEvents} · submit {item.entrySubmitEvents} · fill {item.entryFilledEvents}
+                            {item.blockedReasons.length > 0
+                              ? ` · top block ${item.blockedReasons.slice(0, 3).map((reason) => `${reason.rule}(${reason.count})`).join(", ")}`
+                              : ""}
+                          </Typography>
+                        </Stack>
+                      ))}
+                    </Stack>
+                  </Box>
+
+                  <Box>
                     <Typography variant="subtitle2" gutterBottom>Top persisted rule evidence</Typography>
                     {topRules.length === 0 ? (
                       <Typography variant="body2" color="text.secondary">Chưa có rule evidence đủ điều kiện EXACT.</Typography>
@@ -205,7 +228,7 @@ export function Phase7CPerformanceIntelligenceCard() {
                           >
                             <Box>
                               <Typography variant="body2" fontWeight={600}>
-                                {trade.strategy} · {trade.side} · position {trade.positionId}
+                                {trade.attribution.performanceStrategy} · {trade.side} · position {trade.positionId}
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
                                 {new Date(trade.closedAt).toLocaleString("vi-VN")} · {trade.attribution.entryType} · {trade.attribution.regime ?? "regime N/A"}

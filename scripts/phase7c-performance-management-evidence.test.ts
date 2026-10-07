@@ -43,6 +43,21 @@ try {
   assert.equal(trend.source.malformedRows, 0);
   assert.match(trend.source.journalPath, /phase7b-live-forward\/phase7b-demo-events\.jsonl$/);
 
+  const reversal = getPhase7CManagementEvidence({
+    runtimeRoot: root,
+    accountMode: "LIVE",
+    strategy: "REVERSAL",
+    positionId: "101",
+    openedAt: 1_000,
+    closedAt: 2_000,
+  });
+  assert.equal(reversal.evidence, "EXACT");
+  assert.deepEqual(
+    reversal.events.map((event) => event.family),
+    trend.events.map((event) => event.family),
+  );
+  assert.equal(reversal.source.journalPath, trend.source.journalPath);
+
   const sidewayJournal = path.join(root, "phase7c-sideway-live-forward", "phase7c-sideway-events.jsonl");
   writeJsonl(sidewayJournal, [
     {

@@ -44,6 +44,7 @@ assert.match(api, /\/api\/v1\/phase7c\/performance-effectiveness/);
 assert.doesNotMatch(api, /method:\s*"(POST|PUT|PATCH|DELETE)"/);
 
 assert.match(types, /phase7c-performance-effectiveness-v1/);
+assert.match(types, /"REVERSAL"/);
 assert.match(types, /readOnly:\s*true/);
 assert.match(types, /autoRetune:\s*false/);
 assert.match(types, /liveTestOrder:\s*false/);
@@ -55,6 +56,7 @@ assert.match(card, /Hiện chi tiết/);
 assert.match(card, /Ẩn chi tiết/);
 assert.match(card, /TREND \+10 \/ giveback 10/);
 assert.match(card, /SIDEWAY \+10 \/ giveback 10/);
+assert.match(card, /REVERSAL expectancy/);
 assert.doesNotMatch(card, /TREND \+10 \/ giveback 6/);
 assert.doesNotMatch(card, /SIDEWAY \+10 \/ giveback 4/);
 assert.doesNotMatch(card, /\b(Lưu|Áp dụng|Apply|Retune|Tự tối ưu)\b/i);
@@ -74,6 +76,8 @@ assert.match(service, /armMutation:\s*false/);
 assert.match(service, /autoRetune:\s*false/);
 assert.match(service, /liveTestOrder:\s*false/);
 assert.match(service, /givebackPrice:\s*10/);
+assert.match(service, /performanceStrategy/);
+assert.match(service, /executionStrategy/);
 assert.doesNotMatch(service, /givebackPrice:\s*strategy\s*===\s*"TREND"\s*\?\s*6\s*:\s*4/);
 assert.doesNotMatch(service, /fetch\([^\n]+\{[^}]*method:\s*"(POST|PUT|PATCH|DELETE)"/is);
 

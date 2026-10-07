@@ -84,3 +84,142 @@ test("untrusted generic ticket is not accepted outside entry fill/recovery event
   );
   assert.equal(identifiers.some((item) => item.token === "POSITION:999"), false);
 });
+
+
+test("Performance Intelligence v2 separates REVERSAL from TREND execution source", () => {
+  assert.equal(
+    __test.performanceStrategyOf(
+      "TREND",
+      "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND",
+      "REVERSAL",
+    ),
+    "REVERSAL",
+  );
+  assert.equal(__test.performanceStrategyOf("TREND", "TREND_CONTINUATION", "TRENDING"), "TREND");
+  assert.equal(__test.performanceStrategyOf("TREND", null, "REVERSAL"), "TREND");
+  assert.equal(__test.performanceStrategyOf("SIDEWAY", null, "RANGING"), "SIDEWAY");
+  assert.equal(
+    __test.entryPolicyOf({
+      lifecycle: { entryPolicy: "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND" },
+    }),
+    "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND",
+  );
+  assert.equal(
+    __test.entryPolicyOf({
+      entryRule: "REVERSAL_CHOCH_DIRECTION_PLUS_PATTERN_PLUS_VALID_STRUCTURE",
+    }),
+    "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND",
+  );
+  assert.equal(
+    __test.entryPolicyOf({
+      reversalContext: { side: "BUY", chochTimestamp: 123 },
+    }),
+    "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND",
+  );
+});
+
+test("entry funnel keeps SIDEWAY and REVERSAL blocker statistics independent", () => {
+  const source = (strategy: "TREND" | "SIDEWAY", events: unknown[]) => ({
+    strategy,
+    relativePath: strategy.toLowerCase() + "-decisions.jsonl",
+    available: true,
+    parsedRows: events.length,
+    malformedRows: 0,
+    events,
+  });
+  const event = (
+    eventName: string,
+    performanceStrategy: "TREND" | "SIDEWAY" | "REVERSAL",
+    blockedRules: string[] = [],
+    passedRules: string[] = [],
+  ) => ({
+    raw: {},
+    index: 0,
+    eventId: eventName + ":" + performanceStrategy,
+    eventName,
+    identifiers: [],
+    passedRules,
+    blockedRules,
+    blockReasons: blockedRules,
+    entryType: "UNKNOWN",
+    regime: performanceStrategy === "REVERSAL" ? "REVERSAL" : null,
+    entryPolicy: performanceStrategy === "REVERSAL"
+      ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+      : null,
+    performanceStrategy,
+  });
+
+  const funnel = __test.buildEntryFunnel([
+    source("SIDEWAY", [
+      event("ENTRY_WAIT", "SIDEWAY", ["SIDEWAY_ZONE"], ["PATTERN_M15"]),
+      event("ENTRY_SUBMIT", "SIDEWAY", [], ["PATTERN_M15", "STRUCTURE"]),
+      event("ENTRY_FILLED", "SIDEWAY"),
+    ]),
+    source("TREND", [
+      event("ENTRY_WAIT", "REVERSAL", ["STRUCTURAL_STOP_DISTANCE"], ["PATTERN_M15"]),
+      event("ENTRY_SUBMIT", "REVERSAL", [], ["PATTERN_M15", "VALID_STRUCTURE"]),
+    ]),
+  ] as never);
+
+  const sideway = funnel.find((item) => item.strategy === "SIDEWAY");
+  assert.ok(sideway);
+  assert.equal(sideway.blockedEvents, 1);
+  assert.equal(sideway.entrySubmitEvents, 1);
+  assert.equal(sideway.entryFilledEvents, 1);
+  assert.deepEqual(sideway.blockedReasons[0], { rule: "SIDEWAY_ZONE", count: 1 });
+
+  const reversal = funnel.find((item) => item.strategy === "REVERSAL");
+  assert.ok(reversal);
+  assert.equal(reversal.blockedEvents, 1);
+  assert.equal(reversal.entrySubmitEvents, 1);
+  assert.equal(reversal.entryFilledEvents, 0);
+  assert.deepEqual(reversal.blockedReasons[0], { rule: "STRUCTURAL_STOP_DISTANCE", count: 1 });
+});
+
+
+test("entry funnel captures Sideway event-level block reasons without changing rules", () => {
+  assert.deepEqual(
+    __test.entryBlockReasonsOf(
+      { reason: "QUOTE_STALE" },
+      "ENTRY_QUOTE_FRESHNESS_BLOCK",
+      [],
+    ),
+    ["QUOTE_STALE"],
+  );
+  assert.deepEqual(
+    __test.entryBlockReasonsOf(
+      { spread: 2.5, maxSpread: 2 },
+      "ENTRY_SPREAD_BLOCK",
+      [],
+    ),
+    ["ENTRY_SPREAD_BLOCK"],
+  );
+  assert.deepEqual(
+    __test.entryBlockReasonsOf(
+      {
+        reason: "ENTRY_STRATEGY_CONDITION_BLOCK: rangeEdge,m5Confirmation",
+        raw: {
+          entryConditions: {
+            failedConditions: ["rangeEdge", "m5Confirmation"],
+          },
+          reason: "rangeEdge,m5Confirmation",
+        },
+      },
+      "ENTRY_STRATEGY_CONDITION_BLOCK",
+      ["m5Confirmation", "rangeEdge"],
+    ),
+    ["m5Confirmation", "rangeEdge"],
+  );
+  assert.deepEqual(
+    __test.entryBlockReasonsOf(
+      {
+        raw: {
+          structuralStopDistance: 13.97,
+        },
+      },
+      "WAIT_PULLBACK",
+      [],
+    ),
+    ["WAIT_PULLBACK"],
+  );
+});

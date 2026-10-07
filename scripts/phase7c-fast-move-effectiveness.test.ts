@@ -41,6 +41,20 @@ assert.equal(trendBuy.safety.orderMutation, false);
 assert.equal(trendBuy.safety.positionMutation, false);
 assert.equal(trendBuy.safety.autoApply, false);
 
+const reversalBuy = evaluatePhase7CFastMoveEffectiveness({
+  strategy: "REVERSAL",
+  side: "BUY",
+  entry: 100,
+  prices: buyPath,
+  sampleSize: 30,
+});
+assert.deepEqual(reversalBuy.current.contract, trendBuy.current.contract);
+assert.deepEqual(
+  reversalBuy.shadow.map((row) => row.givebackPrice),
+  trendBuy.shadow.map((row) => row.givebackPrice),
+);
+assert.equal(reversalBuy.sample.recommendationEligible, true);
+
 const sellPath = [
   { timestamp: 1, price: 100 },
   { timestamp: 2, price: 94 },

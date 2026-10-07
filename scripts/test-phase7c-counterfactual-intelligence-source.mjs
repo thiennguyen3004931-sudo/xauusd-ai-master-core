@@ -35,12 +35,14 @@ assert.doesNotMatch(evaluator, /fetch\s*\(/);
 assert.match(service, /FAST_MOVE_SHADOW_GIVEBACK_GRID\s*=\s*\[4, 6, 8, 12\]/);
 assert.match(service, /M5 OHLC is not treated as ordered intrabar evidence/);
 assert.match(service, /not a recommendation/);
+assert.match(service, /row\.strategy === "REVERSAL" \? "TREND" : row\.strategy/);
 assert.doesNotMatch(service, /autoRetune:\s*true/);
 
 assert.match(route, /router\.get\("\/"/);
 assert.doesNotMatch(route, /router\.(post|put|patch|delete)\s*\(/i);
 
 assert.match(types, /phase7c-counterfactual-intelligence-v1/);
+assert.match(types, /"REVERSAL"/);
 assert.match(types, /readOnly:\s*true/);
 assert.match(types, /shadowOnly:\s*true/);
 assert.match(types, /autoApply:\s*false/);

@@ -1,4 +1,4 @@
-export type Phase7CPerformanceStrategy = "TREND" | "SIDEWAY";
+export type Phase7CPerformanceStrategy = "TREND" | "SIDEWAY" | "REVERSAL";
 export type Phase7CPerformanceSide = "BUY" | "SELL";
 export type Phase7CPerformanceEntryType = "IMMEDIATE" | "PULLBACK" | "RECOVERY" | "UNKNOWN";
 export type Phase7CPerformanceCorrelationVerdict = "EXACT" | "AMBIGUOUS" | "UNMATCHED";
