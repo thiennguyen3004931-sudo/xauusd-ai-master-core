@@ -33,6 +33,7 @@ export function Phase7CPerformanceEffectivenessCard() {
   const snapshot = query.data;
   const trend = snapshot?.aggregates.strategy.find((item) => item.key === "TREND");
   const sideway = snapshot?.aggregates.strategy.find((item) => item.key === "SIDEWAY");
+  const reversal = snapshot?.aggregates.strategy.find((item) => item.key === "REVERSAL");
   const fastMove = snapshot?.aggregates.fastMove;
   const excursion = snapshot?.aggregates.excursion;
 
@@ -95,6 +96,11 @@ export function Phase7CPerformanceEffectivenessCard() {
                   <Typography variant="caption" color="text.secondary">SIDEWAY expectancy</Typography>
                   <Typography variant="h6">{sideway ? signed(sideway.expectancy) : "N/A"}</Typography>
                   <Typography variant="caption">n={sideway?.sampleSize ?? 0}</Typography>
+                </Box>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="caption" color="text.secondary">REVERSAL expectancy</Typography>
+                  <Typography variant="h6">{reversal ? signed(reversal.expectancy) : "N/A"}</Typography>
+                  <Typography variant="caption">n={reversal?.sampleSize ?? 0}</Typography>
                 </Box>
                 <Box sx={{ flex: 1 }}>
                   <Typography variant="caption" color="text.secondary">Fast-Move trigger</Typography>

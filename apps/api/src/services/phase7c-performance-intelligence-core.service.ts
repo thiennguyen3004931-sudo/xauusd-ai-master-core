@@ -7,6 +7,7 @@ import {
 } from "./mt5-performance.service";
 
 type Strategy = "TREND" | "SIDEWAY";
+type PerformanceStrategy = Strategy | "REVERSAL";
 type CorrelationVerdict = "EXACT" | "AMBIGUOUS" | "UNMATCHED";
 type EntryType = "IMMEDIATE" | "PULLBACK" | "RECOVERY" | "UNKNOWN";
 type IdentifierKind = "POSITION" | "ORDER" | "SIGNAL";
@@ -73,8 +74,11 @@ interface ParsedAuditEvent {
   identifiers: AuditIdentifier[];
   passedRules: string[];
   blockedRules: string[];
+  blockReasons: string[];
   entryType: EntryType;
   regime: string | null;
+  entryPolicy: string | null;
+  performanceStrategy: PerformanceStrategy;
 }
 
 interface ParsedAuditSource {
@@ -95,6 +99,8 @@ export interface Phase7CPerformanceCorrelation {
 export interface Phase7CPerformanceAttribution {
   entryType: EntryType;
   regime: string | null;
+  entryPolicy: string | null;
+  performanceStrategy: PerformanceStrategy;
   passedRules: string[];
   blockedRules: string[];
   decisionEventIds: string[];
@@ -108,7 +114,7 @@ export interface Phase7CPerformanceIntelligenceTrade extends Mt5PerformanceTrade
 
 export interface Phase7CPerformanceRuleAggregate {
   rule: string;
-  strategy: Strategy;
+  strategy: PerformanceStrategy;
   sampleSize: number;
   wins: number;
   losses: number;
@@ -261,6 +267,52 @@ function ruleEvidence(raw: RawEvent): { passed: string[]; blocked: string[] } {
   };
 }
 
+function entryBlockReasonsOf(
+  raw: RawEvent,
+  eventName: string,
+  blockedRules: readonly string[],
+): string[] {
+  const reasons = new Set(blockedRules);
+  const rawPayload =
+    raw.raw && typeof raw.raw === "object" && !Array.isArray(raw.raw)
+      ? (raw.raw as RawEvent)
+      : raw;
+
+  visitObject(rawPayload, (key, nested) => {
+    const normalizedKey = key.toLowerCase();
+    if (
+      normalizedKey !== "reason" &&
+      normalizedKey !== "reasoncode" &&
+      normalizedKey !== "reason_code" &&
+      normalizedKey !== "recoveryreason" &&
+      normalizedKey !== "recovery_reason"
+    ) {
+      return;
+    }
+    const scalar = normalizeScalar(nested);
+    if (!scalar) return;
+    for (const item of scalar.split(",").map((value) => value.trim()).filter(Boolean)) {
+      reasons.add(item);
+    }
+  });
+
+  const entryBlockEvent =
+    eventName.startsWith("ENTRY_") &&
+    (eventName.includes("BLOCK") ||
+      eventName.includes("REJECTED") ||
+      eventName.includes("EXPIRED") ||
+      eventName.includes("INVALID") ||
+      eventName.includes("WAIT"));
+  const pullbackWaitEvent =
+    eventName === "WAIT_PULLBACK" ||
+    eventName === "PULLBACK_STILL_TOO_WIDE";
+
+  if ((entryBlockEvent || pullbackWaitEvent) && reasons.size === 0) {
+    reasons.add(eventName);
+  }
+  return [...reasons].sort();
+}
+
 function firstStringField(raw: RawEvent, keys: readonly string[]): string | null {
   const wanted = new Set(keys.map((key) => key.toLowerCase()));
   let found: string | null = null;
@@ -296,6 +348,41 @@ function entryTypeOf(raw: RawEvent, eventName: string, strategy: Strategy): Entr
 
 function regimeOf(raw: RawEvent): string | null {
   return firstStringField(raw, ["regime", "marketRegime", "market_regime"]);
+}
+
+function entryPolicyOf(raw: RawEvent): string | null {
+  const explicit = firstStringField(raw, ["entryPolicy", "entry_policy"]);
+  if (explicit) return explicit;
+
+  const entryRule = firstStringField(raw, ["entryRule", "entry_rule"]);
+  if ((entryRule ?? "").trim().toUpperCase().startsWith("REVERSAL_")) {
+    return "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND";
+  }
+
+  let reversalContextPresent = false;
+  visitObject(raw, (key, nested) => {
+    if (reversalContextPresent) return;
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey !== "reversalcontext" && normalizedKey !== "reversal_context") return;
+    reversalContextPresent = Boolean(
+      nested &&
+      typeof nested === "object" &&
+      !Array.isArray(nested),
+    );
+  });
+  return reversalContextPresent
+    ? "REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"
+    : null;
+}
+
+function performanceStrategyOf(
+  executionStrategy: Strategy,
+  entryPolicy: string | null,
+  _regime: string | null = null,
+): PerformanceStrategy {
+  if (executionStrategy !== "TREND") return executionStrategy;
+  const policy = (entryPolicy ?? "").trim().toUpperCase();
+  return policy.startsWith("REVERSAL_") ? "REVERSAL" : "TREND";
 }
 
 function eventIdOf(raw: RawEvent, strategy: Strategy, index: number, eventName: string): string {
@@ -339,6 +426,8 @@ async function parseAuditSource(
       const raw = parsed as RawEvent;
       const eventName = eventNameOf(raw);
       const rules = ruleEvidence(raw);
+      const regime = regimeOf(raw);
+      const entryPolicy = entryPolicyOf(raw);
       events.push({
         raw,
         index: eventIndex,
@@ -347,8 +436,11 @@ async function parseAuditSource(
         identifiers: identifiersOf(raw, eventName),
         passedRules: rules.passed,
         blockedRules: rules.blocked,
+        blockReasons: entryBlockReasonsOf(raw, eventName, rules.blocked),
         entryType: entryTypeOf(raw, eventName, strategy),
-        regime: regimeOf(raw),
+        regime,
+        entryPolicy,
+        performanceStrategy: performanceStrategyOf(strategy, entryPolicy, regime),
       });
     } catch {
       malformedRows += 1;
@@ -461,6 +553,76 @@ function chooseRegime(events: ParsedAuditEvent[]): string | null {
   return [...values][0] ?? null;
 }
 
+function chooseEntryPolicy(events: ParsedAuditEvent[]): string | null {
+  const values = [...new Set(
+    events.map((event) => event.entryPolicy).filter((value): value is string => Boolean(value)),
+  )];
+  const reversal = values.find((value) => value.toUpperCase().startsWith("REVERSAL_"));
+  if (reversal) return reversal;
+  return values.length === 1 ? values[0]! : null;
+}
+
+function choosePerformanceStrategy(
+  executionStrategy: Strategy,
+  events: ParsedAuditEvent[],
+): PerformanceStrategy {
+  const explicit = events.find((event) => event.performanceStrategy === "REVERSAL");
+  if (explicit) return "REVERSAL";
+  return performanceStrategyOf(
+    executionStrategy,
+    chooseEntryPolicy(events),
+    chooseRegime(events),
+  );
+}
+
+export interface Phase7CPerformanceEntryFunnelBucket {
+  strategy: PerformanceStrategy;
+  observedEntryDecisionEvents: number;
+  ruleEvaluatedEvents: number;
+  blockedEvents: number;
+  clearRuleEvents: number;
+  entrySubmitEvents: number;
+  entryFilledEvents: number;
+  blockedReasons: Array<{ rule: string; count: number }>;
+}
+
+function buildEntryFunnel(
+  auditSources: readonly ParsedAuditSource[],
+): Phase7CPerformanceEntryFunnelBucket[] {
+  const strategies: readonly PerformanceStrategy[] = ["TREND", "SIDEWAY", "REVERSAL"];
+  const allEvents = auditSources.flatMap((source) => source.events);
+  return strategies.map((strategy) => {
+    const strategyEvents = allEvents.filter((event) => event.performanceStrategy === strategy);
+    const decisions = strategyEvents.filter(
+      (event) =>
+        event.eventName.includes("ENTRY") ||
+        event.passedRules.length > 0 ||
+        event.blockedRules.length > 0,
+    );
+    const evaluated = decisions.filter(
+      (event) => event.passedRules.length > 0 || event.blockReasons.length > 0,
+    );
+    const blockerCounts = new Map<string, number>();
+    for (const event of evaluated) {
+      for (const reason of event.blockReasons) {
+        blockerCounts.set(reason, (blockerCounts.get(reason) ?? 0) + 1);
+      }
+    }
+    return {
+      strategy,
+      observedEntryDecisionEvents: decisions.length,
+      ruleEvaluatedEvents: evaluated.length,
+      blockedEvents: evaluated.filter((event) => event.blockReasons.length > 0).length,
+      clearRuleEvents: evaluated.filter((event) => event.blockReasons.length === 0).length,
+      entrySubmitEvents: decisions.filter((event) => event.eventName === "ENTRY_SUBMIT").length,
+      entryFilledEvents: decisions.filter((event) => event.eventName === "ENTRY_FILLED").length,
+      blockedReasons: [...blockerCounts.entries()]
+        .map(([rule, count]) => ({ rule, count }))
+        .sort((left, right) => right.count - left.count || left.rule.localeCompare(right.rule)),
+    };
+  });
+}
+
 function aggregateRules(
   trades: readonly Phase7CPerformanceIntelligenceTrade[],
   exactCoveragePercent: number,
@@ -474,7 +636,7 @@ function aggregateRules(
       continue;
     }
     for (const rule of trade.attribution.passedRules) {
-      const key = `${trade.strategy}\u0000${rule}`;
+      const key = `${trade.attribution.performanceStrategy}\u0000${rule}`;
       const rows = groups.get(key) ?? [];
       rows.push(trade);
       groups.set(key, rows);
@@ -483,7 +645,7 @@ function aggregateRules(
 
   return [...groups.entries()]
     .map(([key, rows]) => {
-      const [strategy, rule] = key.split("\u0000") as [Strategy, string];
+      const [strategy, rule] = key.split("\u0000") as [PerformanceStrategy, string];
       const wins = rows.filter((row) => row.netPnl > 0);
       const losses = rows.filter((row) => row.netPnl < 0);
       const grossProfit = wins.reduce((sum, row) => sum + row.netPnl, 0);
@@ -594,6 +756,8 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
       attribution: {
         entryType: chooseEntryType(attributedEvents),
         regime: chooseRegime(attributedEvents),
+        entryPolicy: chooseEntryPolicy(attributedEvents),
+        performanceStrategy: choosePerformanceStrategy(strategy, attributedEvents),
         passedRules: [...new Set(attributedEvents.flatMap((event) => event.passedRules))].sort(),
         blockedRules: [...new Set(attributedEvents.flatMap((event) => event.blockedRules))].sort(),
         decisionEventIds: attributedEvents.map((event) => event.eventId).slice(0, 100),
@@ -614,14 +778,14 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
   for (const source of auditSources) {
     for (const event of source.events) {
       for (const rule of event.blockedRules) {
-        const key = `${source.strategy}\u0000${rule}`;
+        const key = `${event.performanceStrategy}\u0000${rule}`;
         blockCounts.set(key, (blockCounts.get(key) ?? 0) + 1);
       }
     }
   }
 
   return {
-    version: 1,
+    version: 2,
     source: "PHASE7C_PERFORMANCE_INTELLIGENCE" as const,
     generatedAt: performance.generatedAt,
     symbol: performance.symbol,
@@ -659,9 +823,10 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
     trades,
     rules: aggregateRules(trades, correlationCoveragePercent),
     entryTypes: aggregateEntryTypes(trades),
+    entryFunnel: buildEntryFunnel(auditSources),
     decisionBlocks: [...blockCounts.entries()]
       .map(([key, count]) => {
-        const [strategy, rule] = key.split("\u0000") as [Strategy, string];
+        const [strategy, rule] = key.split("\u0000") as [PerformanceStrategy, string];
         return { strategy, rule, count };
       })
       .sort((a, b) => b.count - a.count || a.rule.localeCompare(b.rule)),
@@ -676,6 +841,8 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
       "Trade attribution is fail-closed and follows explicit POSITION/ORDER/SIGNAL identifiers only; no timestamp or price proximity matching is used.",
       "AMBIGUOUS and UNMATCHED trades are excluded from rule and entry-type profitability aggregates.",
       "Historical trades without persisted rule/regime identity links remain unattributed; P2 does not backfill by inference.",
+      "Performance Intelligence v2 separates canonical REVERSAL entries from TREND profitability only when entry-policy/context evidence proves REVERSAL; market regime alone never re-labels an entry strategy.",
+      "Entry funnel counts are descriptive event counts from persisted decision evidence: evaluated, blocked/clear, submit, fill. They never relax or retune entry rules.",
       "Decision-block counts are descriptive only; blocked rules are not assigned hypothetical PnL.",
       "MFE/MAE is not reported until a canonical persisted price-path source is available.",
     ],
@@ -684,8 +851,12 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
 
 export const __test = {
   addCanonicalEntryConditions,
+  buildEntryFunnel,
+  entryBlockReasonsOf,
+  entryPolicyOf,
   entryTypeOf,
   identifiersOf,
   parseAuditSource,
+  performanceStrategyOf,
   ruleEvidence,
 };

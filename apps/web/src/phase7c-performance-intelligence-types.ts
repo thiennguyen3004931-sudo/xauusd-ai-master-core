@@ -1,12 +1,13 @@
 export type Phase7CPerformanceCorrelationVerdict = "EXACT" | "AMBIGUOUS" | "UNMATCHED";
-export type Phase7CPerformanceStrategy = "TREND" | "SIDEWAY";
+export type Phase7CExecutionStrategy = "TREND" | "SIDEWAY";
+export type Phase7CPerformanceStrategy = Phase7CExecutionStrategy | "REVERSAL";
 export type Phase7CPerformanceEntryType = "IMMEDIATE" | "PULLBACK" | "RECOVERY" | "UNKNOWN";
 
 export interface Phase7CPerformanceIntelligenceTrade {
   id: string;
   symbol: string;
   side: "BUY" | "SELL";
-  strategy: Phase7CPerformanceStrategy;
+  strategy: Phase7CExecutionStrategy;
   openedAt: number;
   closedAt: number;
   volume: number;
@@ -20,6 +21,8 @@ export interface Phase7CPerformanceIntelligenceTrade {
   attribution: {
     entryType: Phase7CPerformanceEntryType;
     regime: string | null;
+    entryPolicy: string | null;
+    performanceStrategy: Phase7CPerformanceStrategy;
     passedRules: string[];
     blockedRules: string[];
     decisionEventIds: string[];
@@ -27,7 +30,7 @@ export interface Phase7CPerformanceIntelligenceTrade {
 }
 
 export interface Phase7CPerformanceIntelligenceSnapshot {
-  version: 1;
+  version: 2;
   source: "PHASE7C_PERFORMANCE_INTELLIGENCE";
   generatedAt: number;
   symbol: string;
@@ -59,7 +62,7 @@ export interface Phase7CPerformanceIntelligenceSnapshot {
     regimeEvidenceTrades: number;
   };
   auditSources: Array<{
-    strategy: Phase7CPerformanceStrategy;
+    strategy: Phase7CExecutionStrategy;
     relativePath: string;
     available: boolean;
     parsedRows: number;
@@ -86,6 +89,16 @@ export interface Phase7CPerformanceIntelligenceSnapshot {
     winRatePercent: number;
     profitFactor: number | null;
   }>;
+  entryFunnel: Array<{
+    strategy: Phase7CPerformanceStrategy;
+    observedEntryDecisionEvents: number;
+    ruleEvaluatedEvents: number;
+    blockedEvents: number;
+    clearRuleEvents: number;
+    entrySubmitEvents: number;
+    entryFilledEvents: number;
+    blockedReasons: Array<{ rule: string; count: number }>;
+  }>;
   decisionBlocks: Array<{
     strategy: Phase7CPerformanceStrategy;
     rule: string;
@@ -102,7 +115,7 @@ export interface Phase7CPerformanceCorrelationRow {
   trade: {
     performanceTradeId: string;
     positionId: string;
-    strategy: Phase7CPerformanceStrategy;
+    strategy: Phase7CExecutionStrategy;
     side: "BUY" | "SELL";
     volume: number;
     openedAt: number;
@@ -118,6 +131,8 @@ export interface Phase7CPerformanceCorrelationRow {
   attribution: {
     entryType: Phase7CPerformanceEntryType;
     regime: string | null;
+    entryPolicy?: string | null;
+    performanceStrategy?: Phase7CPerformanceStrategy;
     passedRules: string[];
     blockedRules: string[];
     decisionEventIds: string[];

@@ -53,7 +53,7 @@ export interface Phase7CManagementEvidenceResult {
 }
 
 function journalRelativePath(accountMode: AccountMode, strategy: Phase7CPerformanceStrategy): string {
-  if (strategy === "TREND") {
+  if (strategy === "TREND" || strategy === "REVERSAL") {
     const directory = accountMode === "LIVE" ? "phase7b-live-forward" : "phase7b-demo-forward";
     return path.join(directory, "phase7b-demo-events.jsonl");
   }

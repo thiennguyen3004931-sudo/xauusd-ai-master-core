@@ -10,11 +10,13 @@ const ACTIVATION_PRICE = 10;
 const CURRENT_GIVEBACK: Record<Phase7CPerformanceStrategy, number> = {
   TREND: 10,
   SIDEWAY: 10,
+  REVERSAL: 10,
 };
 
 const SHADOW_GIVEBACK: Record<Phase7CPerformanceStrategy, readonly number[]> = {
   TREND: [4, 5, 7, 8],
   SIDEWAY: [3, 5, 6],
+  REVERSAL: [4, 5, 7, 8],
 };
 
 export interface Phase7CFastMovePriceSample {

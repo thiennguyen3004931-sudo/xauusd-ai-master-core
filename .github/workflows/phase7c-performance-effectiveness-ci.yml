@@ -4,6 +4,11 @@ on:
   pull_request:
     paths:
       - "apps/api/src/contracts/phase7c-performance-effectiveness.schema.ts"
+      - "apps/api/src/services/phase7c-performance-intelligence-core.service.ts"
+      - "apps/web/src/phase7c-performance-intelligence-types.ts"
+      - "apps/web/src/ui/Phase7CPerformanceIntelligenceCard.tsx"
+      - "scripts/phase7c-performance-intelligence.test.ts"
+      - "scripts/test-phase7c-performance-intelligence-source.mjs"
       - "apps/api/src/services/phase7c-performance-management-evidence.service.ts"
       - "apps/api/src/services/phase7c-performance-excursion.service.ts"
       - "apps/api/src/services/phase7c-fast-move-effectiveness.service.ts"
@@ -59,6 +64,9 @@ jobs:
 
       - name: P3 effectiveness source contract
         run: node scripts/test-phase7c-performance-effectiveness-source.mjs
+
+      - name: P2 Performance Intelligence v2 source contract
+        run: node scripts/test-phase7c-performance-intelligence-source.mjs
 
       - name: P3 production acceptance verifier source contract
         shell: pwsh

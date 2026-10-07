@@ -129,6 +129,32 @@ const rows: Phase7CPerformanceEffectivenessRow[] = [
     },
   }),
   row({
+    tradeKey: "r1",
+    positionId: "5",
+    strategy: "REVERSAL",
+    netPnl: 7,
+    entryType: "PULLBACK",
+    regime: "REVERSAL",
+    rules: { passed: ["REVERSAL_CHOCH_PATTERN_STRUCTURE_NO_SUPERTREND"], blocked: [] },
+    excursion: {
+      evidence: "UNAVAILABLE",
+      initialRiskPrice: null,
+      mfePrice: null,
+      maePrice: null,
+      mfeR: null,
+      maeR: null,
+      realizedR: null,
+      peakToExitGivebackPrice: null,
+    },
+    management: { evidence: "UNMATCHED", events: [] },
+    quality: {
+      exactCorrelation: true,
+      completeExcursionEvidence: false,
+      exactManagementEvidence: false,
+      warnings: ["MANAGEMENT_UNMATCHED"],
+    },
+  }),
+  row({
     tradeKey: "ambiguous",
     positionId: "4",
     strategy: "TREND",
@@ -151,11 +177,11 @@ const snapshot = buildPhase7CPerformanceEffectivenessSnapshotFromRows({
 assert.equal(snapshot.generatedAt, 9_999);
 assert.equal(snapshot.readOnly, true);
 assert.deepEqual(snapshot.summary, {
-  totalRows: 4,
-  exactRows: 3,
+  totalRows: 5,
+  exactRows: 4,
   excursionQualifiedRows: 2,
   managementQualifiedRows: 3,
-  evidenceCoveragePercent: 75,
+  evidenceCoveragePercent: 80,
 });
 
 const trend = snapshot.aggregates.strategy.find((bucket) => bucket.key === "TREND");
@@ -171,6 +197,12 @@ assert.ok(sideway);
 assert.equal(sideway.sampleSize, 1);
 assert.equal(sideway.netPnl, 6);
 assert.equal(sideway.expectancy, 6);
+
+const reversal = snapshot.aggregates.strategy.find((bucket) => bucket.key === "REVERSAL");
+assert.ok(reversal);
+assert.equal(reversal.sampleSize, 1);
+assert.equal(reversal.netPnl, 7);
+assert.equal(reversal.expectancy, 7);
 
 const ruleA = snapshot.aggregates.rule.find((bucket) => bucket.key === "RULE_A");
 assert.ok(ruleA);
@@ -196,7 +228,7 @@ assert.equal(fastMoveAssociation.sampleSize, 2);
 assert.equal(fastMoveAssociation.netPnl, 16);
 assert.equal(fastMoveAssociation.expectancy, 8);
 assert.deepEqual(snapshot.aggregates.fastMove, {
-  exactSampleSize: 3,
+  exactSampleSize: 4,
   triggeredRows: 2,
   handoffRows: 1,
   averageLockedProfitPrice: 5,
