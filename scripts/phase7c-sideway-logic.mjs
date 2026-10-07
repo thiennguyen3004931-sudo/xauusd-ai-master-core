@@ -88,6 +88,19 @@ export function detectM5ConfirmationWithinBars(bars, side, carryBars = 0) {
   for (let ageBars = 0; ageBars <= normalizedCarryBars; ageBars += 1) {
     const currentIndex = bars.length - 1 - ageBars;
     if (currentIndex < 1) break;
+    const candidateCloseTime = Number(bars[currentIndex]?.closeTime);
+    if (
+      ageBars > 0 &&
+      (
+        !Number.isFinite(evaluationCloseTime) ||
+        !Number.isFinite(candidateCloseTime) ||
+        evaluationCloseTime <= candidateCloseTime ||
+        evaluationCloseTime - candidateCloseTime > ageBars * 5 * 60_000 + 1_000
+      )
+    ) {
+      continue;
+    }
+
     const candidate = detectM5Confirmation(
       [bars[currentIndex - 1], bars[currentIndex]],
       side,
