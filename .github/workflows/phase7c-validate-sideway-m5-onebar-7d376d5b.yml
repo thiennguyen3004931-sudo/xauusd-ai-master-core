@@ -1,0 +1,87 @@
+name: Phase7C Validate Sideway M5 One-Bar 7d376d5b
+
+on:
+  push:
+    branches:
+      - ops/validate-sideway-m5-onebar-7d376d5b
+    paths:
+      - '.github/workflows/phase7c-validate-sideway-m5-onebar-7d376d5b.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@v4
+        with:
+          ref: 7d376d5bb7f14317e048326a359e2f2b0d2edf7a
+          fetch-depth: 0
+
+      - name: Candidate identity
+        shell: powershell
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "SIDEWAY_M5_ONEBAR_CANDIDATE_HEAD=$actual"
+          if ($actual -ne '7d376d5bb7f14317e048326a359e2f2b0d2edf7a') { throw "Candidate head mismatch: $actual" }
+
+      - name: Parse Sideway controller
+        shell: powershell
+        run: |
+          node --check .\scripts\run-phase7c-sideway-controller.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Sideway logic unit tests
+        shell: powershell
+        run: |
+          node --test .\scripts\phase7c-sideway-logic.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Sideway strategy-entry source contract
+        shell: powershell
+        run: |
+          node .\scripts\test-phase7c-sideway-strategy-entry-conditions-contract.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: LIVE source adapter regression
+        shell: powershell
+        run: |
+          node --test .\scripts\phase7c-live-source-adapters-crlf.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Diff safety contract
+        shell: powershell
+        run: |
+          $base = '4f09e3a8bd159e207a0effa38bf4a735bb9b3fa3'
+          $target = '7d376d5bb7f14317e048326a359e2f2b0d2edf7a'
+          $files = @(git diff --name-only "$base..$target")
+          Write-Host "SIDEWAY_M5_ONEBAR_CHANGED_FILES=$($files -join ',')"
+          $allowed = @(
+            'scripts/phase7c-sideway-logic.mjs',
+            'scripts/phase7c-sideway-logic.test.mjs',
+            'scripts/run-phase7c-sideway-controller.mjs'
+          )
+          foreach ($file in $files) {
+            if ($allowed -notcontains $file) { throw "Unexpected changed file: $file" }
+          }
+          if ($files.Count -ne 3) { throw "Expected exactly 3 changed files; actual=$($files.Count)" }
+
+          $source = Get-Content -LiteralPath '.\scripts\run-phase7c-sideway-controller.mjs' -Raw
+          foreach ($required in @(
+            'const m5ConfirmationCarryBars = 1;',
+            'detectM5ConfirmationWithinBars(m5, side, m5ConfirmationCarryBars)',
+            'passed: Boolean(confirmation)',
+            'confirmationAgeBars: confirmation.ageBars ?? 0'
+          )) {
+            if ($source -notmatch [regex]::Escape($required)) { throw "Missing one-bar source contract: $required" }
+          }
+
+          Write-Host 'SIDEWAY_M5_ONEBAR_STRATEGY_CHANGE=M5_CONFIRMATION_VALIDITY_ONLY'
+          Write-Host 'SIDEWAY_M5_ONEBAR_RISK_LOT_MUTATION=NONE'
+          Write-Host 'SIDEWAY_M5_ONEBAR_MODE_ARM_MUTATION=NONE'
+          Write-Host 'SIDEWAY_M5_ONEBAR_ORDER_POSITION_MUTATION=NONE'
+          Write-Host 'SIDEWAY_M5_ONEBAR_LIVE_TEST_ORDER=NONE'
+          Write-Host 'SIDEWAY_M5_ONEBAR_VALIDATION=PASS'
