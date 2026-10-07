@@ -67,6 +67,16 @@ test("M5 confirmation can remain valid for exactly one later M5 bar", () => {
   assert.equal(detectM5ConfirmationWithinBars(bars, "SELL", 1), null);
 });
 
+test("M5 confirmation carry fails closed across a stale M5 time gap", () => {
+  const bars = [
+    { open: 2392.0, high: 2393.0, low: 2391.8, close: 2392.6, closeTime: 300_000 },
+    { open: 2392.4, high: 2393.2, low: 2390.6, close: 2393.0, closeTime: 600_000 },
+    { open: 2393.0, high: 2393.4, low: 2392.7, close: 2393.1, closeTime: 1_800_000 },
+  ];
+
+  assert.equal(detectM5ConfirmationWithinBars(bars, "BUY", 1), null);
+});
+
 test("M5 confirmation does not leak beyond configured carry bars", () => {
   const bars = [
     { open: 2392.0, high: 2393.0, low: 2391.8, close: 2392.6, closeTime: 300_000 },
