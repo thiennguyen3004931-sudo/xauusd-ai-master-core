@@ -68,6 +68,7 @@ export function evaluateTimestampFreshness(timestamp, {
 
 export function validateAutoLotSnapshot(payload, {
   accountLogin,
+  accountMode,
   brokerSymbol,
   riskPercent,
   maxLot,
@@ -81,8 +82,23 @@ export function validateAutoLotSnapshot(payload, {
   if (payload?.safety?.executionMutation !== false || payload?.safety?.phase7bFixedVolumeUnchanged !== true) {
     return { accepted: false, reason: "AUTO_LOT_SAFETY_ASSERTION_FAILED" };
   }
-  if (String(payload?.account?.mode ?? "").toLowerCase() !== "demo") {
-    return { accepted: false, reason: "AUTO_LOT_ACCOUNT_NOT_DEMO" };
+  const expectedAccountMode = String(accountMode ?? "").trim().toLowerCase();
+  const actualAccountMode = String(payload?.account?.mode ?? "").trim().toLowerCase();
+  if (expectedAccountMode !== "demo" && expectedAccountMode !== "real") {
+    return {
+      accepted: false,
+      reason: "AUTO_LOT_EXPECTED_ACCOUNT_MODE_INVALID",
+      expectedAccountMode,
+      actualAccountMode,
+    };
+  }
+  if (actualAccountMode !== expectedAccountMode) {
+    return {
+      accepted: false,
+      reason: "AUTO_LOT_ACCOUNT_MODE_MISMATCH",
+      expectedAccountMode,
+      actualAccountMode,
+    };
   }
 
   const expectedLogin = Number(accountLogin);
