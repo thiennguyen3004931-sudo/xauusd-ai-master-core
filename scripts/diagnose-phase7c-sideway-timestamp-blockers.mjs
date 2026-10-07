@@ -10,6 +10,8 @@ const sevenDaysAgo = now - 7 * 24 * 60 * 60_000;
 const oneDayAgo = now - 24 * 60 * 60_000;
 
 const rows = [];
+const schemaSamples = [];
+
 const input = fs.createReadStream(file, { encoding: "utf8" });
 const lines = readline.createInterface({ input, crlfDelay: Infinity });
 
@@ -52,14 +54,55 @@ for await (const line of lines) {
   const timestamp = finite(parsed?.timestamp);
   if (timestamp === null || timestamp < sevenDaysAgo || timestamp > now) continue;
 
-  const matches = collectTimestampReasons(parsed?.raw ?? {});
+  const event = String(parsed?.event ?? "UNKNOWN");
+  const topReason = String(parsed?.reason ?? "");
+  const topReasonCode = String(parsed?.reasonCode ?? "");
+  const raw = parsed?.raw ?? {};
+
+  const matches = collectTimestampReasons(raw);
+  const textHaystack = `${topReason} ${topReasonCode} ${JSON.stringify(raw)}`;
+  const textualReasons = [];
+  if (textHaystack.includes("TIMESTAMP_STALE")) textualReasons.push("TIMESTAMP_STALE");
+  if (textHaystack.includes("TIMESTAMP_TOO_FAR_IN_FUTURE")) textualReasons.push("TIMESTAMP_TOO_FAR_IN_FUTURE");
+
+  if (textualReasons.length && schemaSamples.length < 30) {
+    schemaSamples.push({
+      timestamp,
+      timestampIso: new Date(timestamp).toISOString(),
+      event,
+      reason: topReason,
+      reasonCode: topReasonCode,
+      raw,
+    });
+  }
+
   for (const match of matches) {
     rows.push({
       timestamp,
       timestampIso: new Date(timestamp).toISOString(),
-      event: String(parsed?.event ?? "UNKNOWN"),
+      event,
+      source: "STRUCTURED_RAW",
       ...match,
     });
+  }
+
+  if (matches.length === 0) {
+    for (const reason of textualReasons) {
+      rows.push({
+        timestamp,
+        timestampIso: new Date(timestamp).toISOString(),
+        event,
+        source: "TEXT_FALLBACK",
+        path: "normalized-row",
+        reason,
+        ageMs: finite(raw?.ageMs),
+        rawAgeMs: finite(raw?.rawAgeMs),
+        clockOffsetMs: finite(raw?.clockOffsetMs),
+        quoteTimestamp: finite(raw?.quoteTimestamp),
+        closeTime: finite(raw?.closeTime),
+        normalizedTimestamp: finite(raw?.normalizedTimestamp),
+      });
+    }
   }
 }
 
@@ -99,6 +142,7 @@ const summary = [...groups.entries()].map(([key, list]) => {
 console.log(`SIDEWAY_TIMESTAMP_DIAG_NOW=${new Date(now).toISOString()}`);
 console.log(`SIDEWAY_TIMESTAMP_DIAG_ROWS_7D=${rows.length}`);
 console.log(`SIDEWAY_TIMESTAMP_DIAG_ROWS_24H=${rows.filter((row)=>row.timestamp >= oneDayAgo).length}`);
+console.log(`SIDEWAY_TIMESTAMP_DIAG_SCHEMA_SAMPLES=${schemaSamples.length}`);
 
 for (let i = 0; i < summary.length; i += 1) {
   const item = summary[i];
@@ -112,6 +156,13 @@ for (let i = 0; i < recent.length; i += 1) {
   const row = recent[i];
   console.log(
     `SIDEWAY_TIMESTAMP_RECENT_${i+1}=${row.timestampIso}|EVENT=${row.event}|PATH=${row.path}|REASON=${row.reason}|AGE_MS=${row.ageMs}|RAW_AGE_MS=${row.rawAgeMs}|OFFSET_MS=${row.clockOffsetMs}|QUOTE_TS=${row.quoteTimestamp}|CLOSE_TIME=${row.closeTime}|NORMALIZED_TS=${row.normalizedTimestamp}`
+  );
+}
+
+for (let i = 0; i < schemaSamples.length; i += 1) {
+  const sample = schemaSamples[i];
+  console.log(
+    `SIDEWAY_TIMESTAMP_SCHEMA_${i+1}=${sample.timestampIso}|EVENT=${sample.event}|REASON=${sample.reason}|REASON_CODE=${sample.reasonCode}|RAW=${JSON.stringify(sample.raw)}`
   );
 }
 
