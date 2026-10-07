@@ -5,6 +5,11 @@ import path from "node:path";
 import test from "node:test";
 import { writeStateFileAtomicSync } from "./phase7c-atomic-state-write.mjs";
 
+const controllerSource = fs.readFileSync(
+  path.join(process.cwd(), "scripts", "run-phase7b-demo-controller.ts"),
+  "utf8",
+);
+
 test("atomic state writer replaces an existing canonical state without deleting it first", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "p7c-state-write-"));
   const target = path.join(dir, "phase7b-demo-state.json");
@@ -126,4 +131,26 @@ test("atomic state writer does not retry non-transient rename failures", () => {
     (error) => error?.code === "ENOENT",
   );
   assert.equal(attempts, 1);
+});
+
+
+test("Trend/REVERSAL controller uses the atomic state writer instead of a fixed .tmp rename", () => {
+  assert.match(
+    controllerSource,
+    /import\s*\{\s*writeStateFileAtomicSync\s*\}\s*from\s*["']\.\/phase7c-atomic-state-write\.mjs["']/,
+  );
+  assert.match(
+    controllerSource,
+    /function\s+saveState\(\):\s*void\s*\{[\s\S]*?writeStateFileAtomicSync\(statePath,\s*payload\)/,
+  );
+  assert.doesNotMatch(
+    controllerSource,
+    /const\s+temp\s*=\s*\`\$\{statePath\}\.tmp\`/,
+    "fixed shared phase7b-demo-state.json.tmp path must not return",
+  );
+  assert.doesNotMatch(
+    controllerSource,
+    /fs\.renameSync\(temp,\s*statePath\)/,
+    "controller must delegate Windows rename recovery to the atomic helper",
+  );
 });
