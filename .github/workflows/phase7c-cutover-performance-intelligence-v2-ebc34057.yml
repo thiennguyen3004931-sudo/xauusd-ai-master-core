@@ -1,0 +1,141 @@
+name: Phase7C Cutover Performance Intelligence v2 ebc34057
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-cutover-performance-intelligence-v2-ebc34057.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: ebc34057bfed451a77619768c02b9314deaa21d7
+          fetch-depth: 0
+
+      - name: Guarded production cutover and Performance Intelligence v2 verification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $current = '7927e08ac0024338237e264d8ebb420b90108605'
+          $target = 'ebc34057bfed451a77619768c02b9314deaa21d7'
+          $targetTree = 'f7ec528f15f7d5192a32f1765eeb0a0ace308c7b'
+          $helperBlob = 'd8fb26409df5ddecdf5353ab0fdf42cbd8d3500f'
+
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "P2V2_PRE_PRODUCTION_HEAD=$actual"
+
+          if ($actual -eq $target) {
+            Write-Host 'P2V2_TRANSITION=SKIPPED_ALREADY_TARGET'
+          } elseif ($actual -eq $current) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PWD 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot $prod -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 $helperBlob -ExpectedInitialArm ARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            throw "UNEXPECTED_PRODUCTION_HEAD expected_current=$current expected_target=$target actual=$actual"
+          }
+
+          $postHead = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodBranch = (git -C $prod branch --show-current).Trim()
+          $prodTree = (git -C $prod rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+
+          Write-Host "P2V2_POST_PRODUCTION_HEAD=$postHead"
+          Write-Host "P2V2_POST_PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "P2V2_POST_PRODUCTION_TREE=$prodTree"
+
+          if ($postHead -ne $target) { throw 'Production HEAD did not reach target.' }
+          if ($prodBranch -ne 'main') { throw "Expected production branch main; actual=$prodBranch" }
+          if ($prodTree -ne $targetTree) { throw "Expected production tree $targetTree; actual=$prodTree" }
+
+          $source = Get-Content -LiteralPath (Join-Path $prod 'apps\api\src\services\phase7c-performance-intelligence-core.service.ts') -Raw
+          $webTypes = Get-Content -LiteralPath (Join-Path $prod 'apps\web\src\phase7c-performance-intelligence-types.ts') -Raw
+          $webCard = Get-Content -LiteralPath (Join-Path $prod 'apps\web\src\ui\Phase7CPerformanceIntelligenceCard.tsx') -Raw
+
+          foreach ($required in @(
+            'version: 2',
+            'PerformanceStrategy = Strategy | "REVERSAL"',
+            'entryFunnel: buildEntryFunnel(auditSources)',
+            'blockedReasons',
+            'autoRetune: false'
+          )) {
+            if ($source -notmatch [regex]::Escape($required)) {
+              throw "P2 v2 source contract missing: $required"
+            }
+          }
+          if ($webTypes -notmatch 'Phase7CPerformanceStrategy = Phase7CExecutionStrategy \| "REVERSAL"') {
+            throw 'Web types do not expose REVERSAL performance strategy.'
+          }
+          if ($webCard -notmatch 'Performance Intelligence v2') {
+            throw 'Performance Intelligence v2 UI marker missing.'
+          }
+          if ($webCard -notmatch 'Entry funnel / blocked reasons') {
+            throw 'Entry funnel UI marker missing.'
+          }
+          Write-Host 'P2V2_SOURCE=PASS'
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $snapshot = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/performance-intelligence?days=90&symbol=XAUUSD' -Method Get -TimeoutSec 120
+
+          $mode = [string]$life.mode.mode
+          $armStatus = [string]$cap.liveArmStatus
+          $armed = [bool]$cap.liveExecutionArmed
+
+          Write-Host "P2V2_FINAL_BOT_MODE=$mode"
+          Write-Host "P2V2_FINAL_ARM_STATUS=$armStatus"
+          Write-Host "P2V2_FINAL_ARMED=$armed"
+
+          if ($mode -ne 'PAUSE') { throw "Expected PAUSE during P2 v2 cutover; actual=$mode" }
+          if (-not $armed -or $armStatus -ne 'ARMED') { throw 'Expected ARM to remain ARMED during PAUSE cutover.' }
+
+          if ([int]$snapshot.version -ne 2) { throw "Expected Performance Intelligence version 2; actual=$($snapshot.version)" }
+          if ([string]$snapshot.source -ne 'PHASE7C_PERFORMANCE_INTELLIGENCE') { throw "Unexpected P2 source=$($snapshot.source)" }
+          if (-not [bool]$snapshot.safety.readOnly) { throw 'P2 v2 must remain read-only.' }
+
+          foreach ($flag in @(
+            'strategyMutation',
+            'riskMutation',
+            'orderMutation',
+            'positionMutation',
+            'modeMutation',
+            'armMutation',
+            'autoRetune'
+          )) {
+            if ([bool]$snapshot.safety.$flag) { throw "P2 v2 unsafe flag enabled: $flag" }
+          }
+
+          $funnel = @($snapshot.entryFunnel)
+          if ($funnel.Count -ne 3) { throw "Expected exactly 3 entry funnel buckets; actual=$($funnel.Count)" }
+          $strategies = @($funnel | ForEach-Object { [string]$_.strategy } | Sort-Object -Unique)
+          foreach ($expected in @('TREND','SIDEWAY','REVERSAL')) {
+            if ($expected -notin $strategies) { throw "Missing entry funnel strategy: $expected" }
+          }
+
+          Write-Host "P2V2_ENTRY_FUNNEL_STRATEGIES=$($strategies -join ',')"
+          foreach ($bucket in $funnel) {
+            Write-Host ("P2V2_FUNNEL_{0}=observed:{1}|evaluated:{2}|blocked:{3}|clear:{4}|submit:{5}|filled:{6}" -f
+              $bucket.strategy,
+              $bucket.observedEntryDecisionEvents,
+              $bucket.ruleEvaluatedEvents,
+              $bucket.blockedEvents,
+              $bucket.clearRuleEvents,
+              $bucket.entrySubmitEvents,
+              $bucket.entryFilledEvents)
+          }
+
+          Write-Host 'PERFORMANCE_INTELLIGENCE_V2_PRODUCTION=PASS'
+          Write-Host 'ENTRY_RULE_MUTATION=NONE'
+          Write-Host 'RISK_LOT_MUTATION=NONE'
+          Write-Host 'MODE_FINAL=PAUSE'
+          Write-Host 'ARM_FINAL=ARMED'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
+          Write-Host 'AUTO_RETUNE=FALSE'
