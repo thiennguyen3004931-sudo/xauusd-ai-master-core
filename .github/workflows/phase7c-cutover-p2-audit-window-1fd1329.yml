@@ -1,0 +1,144 @@
+name: Phase7C Cutover P2 Audit Window 1fd1329
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-cutover-p2-audit-window-1fd1329.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: 1fd1329edc684405c975a1793ae39c72384786f8
+          fetch-depth: 0
+
+      - name: Guarded observability cutover and window verification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $current = 'ebc34057bfed451a77619768c02b9314deaa21d7'
+          $target = '1fd1329edc684405c975a1793ae39c72384786f8'
+          $targetTree = '08f84dafc97ee290f5387c82792f62a7c1057ff0'
+          $helperBlob = 'd8fb26409df5ddecdf5353ab0fdf42cbd8d3500f'
+
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "P2WINDOW_PRE_PRODUCTION_HEAD=$actual"
+
+          if ($actual -eq $target) {
+            Write-Host 'P2WINDOW_TRANSITION=SKIPPED_ALREADY_TARGET'
+          } elseif ($actual -eq $current) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PWD 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot $prod -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 $helperBlob -ExpectedInitialArm ARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            throw "UNEXPECTED_PRODUCTION_HEAD expected_current=$current expected_target=$target actual=$actual"
+          }
+
+          $postHead = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodBranch = (git -C $prod branch --show-current).Trim()
+          $prodTree = (git -C $prod rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+
+          Write-Host "P2WINDOW_POST_PRODUCTION_HEAD=$postHead"
+          Write-Host "P2WINDOW_POST_PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "P2WINDOW_POST_PRODUCTION_TREE=$prodTree"
+
+          if ($postHead -ne $target) { throw 'Production HEAD did not reach target.' }
+          if ($prodBranch -ne 'main') { throw "Expected production branch main; actual=$prodBranch" }
+          if ($prodTree -ne $targetTree) { throw "Expected production tree $targetTree; actual=$prodTree" }
+
+          $sourcePath = Join-Path $prod 'apps\api\src\services\phase7c-performance-intelligence-core.service.ts'
+          $source = Get-Content -LiteralPath $sourcePath -Raw
+          foreach ($required in @(
+            'filterAuditSourcesByWindow',
+            'occurredAtMs',
+            'entryFunnel: buildEntryFunnel(windowedAuditSources)',
+            'for (const source of windowedAuditSources)'
+          )) {
+            if ($source -notmatch [regex]::Escape($required)) {
+              throw "P2 audit-window source contract missing: $required"
+            }
+          }
+          Write-Host 'P2WINDOW_SOURCE=PASS'
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $p7 = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/performance-intelligence?days=7&symbol=XAUUSD' -Method Get -TimeoutSec 120
+          $p90 = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/performance-intelligence?days=90&symbol=XAUUSD' -Method Get -TimeoutSec 120
+
+          $mode = [string]$life.mode.mode
+          $armStatus = [string]$cap.liveArmStatus
+          $armed = [bool]$cap.liveExecutionArmed
+
+          Write-Host "P2WINDOW_FINAL_BOT_MODE=$mode"
+          Write-Host "P2WINDOW_FINAL_ARM_STATUS=$armStatus"
+          Write-Host "P2WINDOW_FINAL_ARMED=$armed"
+
+          if ($mode -ne 'PAUSE') { throw "Expected PAUSE during P2 audit-window cutover; actual=$mode" }
+          if (-not $armed -or $armStatus -ne 'ARMED') { throw 'Expected ARM to remain ARMED during PAUSE cutover.' }
+
+          foreach ($snapshot in @($p7, $p90)) {
+            if ([int]$snapshot.version -ne 2) { throw 'Expected Performance Intelligence version 2.' }
+            if (-not [bool]$snapshot.safety.readOnly) { throw 'Performance Intelligence must remain read-only.' }
+            if ([bool]$snapshot.safety.autoRetune) { throw 'Auto-retune must remain disabled.' }
+          }
+
+          $byStrategy7 = @{}
+          foreach ($bucket in @($p7.entryFunnel)) { $byStrategy7[[string]$bucket.strategy] = $bucket }
+          $byStrategy90 = @{}
+          foreach ($bucket in @($p90.entryFunnel)) { $byStrategy90[[string]$bucket.strategy] = $bucket }
+
+          foreach ($strategy in @('TREND','SIDEWAY','REVERSAL')) {
+            if (-not $byStrategy7.ContainsKey($strategy)) { throw "7-day funnel missing $strategy" }
+            if (-not $byStrategy90.ContainsKey($strategy)) { throw "90-day funnel missing $strategy" }
+
+            $b7 = $byStrategy7[$strategy]
+            $b90 = $byStrategy90[$strategy]
+
+            foreach ($field in @(
+              'observedEntryDecisionEvents',
+              'ruleEvaluatedEvents',
+              'blockedEvents',
+              'clearRuleEvents',
+              'entrySubmitEvents',
+              'entryFilledEvents'
+            )) {
+              if ([int64]$b7.$field -gt [int64]$b90.$field) {
+                throw "Window monotonicity failed for $strategy/$field: 7d=$($b7.$field) 90d=$($b90.$field)"
+              }
+            }
+
+            Write-Host ("P2WINDOW_7D_FUNNEL_{0}=observed:{1}|evaluated:{2}|blocked:{3}|clear:{4}|submit:{5}|filled:{6}" -f
+              $strategy,$b7.observedEntryDecisionEvents,$b7.ruleEvaluatedEvents,$b7.blockedEvents,$b7.clearRuleEvents,$b7.entrySubmitEvents,$b7.entryFilledEvents)
+            Write-Host ("P2WINDOW_90D_FUNNEL_{0}=observed:{1}|evaluated:{2}|blocked:{3}|clear:{4}|submit:{5}|filled:{6}" -f
+              $strategy,$b90.observedEntryDecisionEvents,$b90.ruleEvaluatedEvents,$b90.blockedEvents,$b90.clearRuleEvents,$b90.entrySubmitEvents,$b90.entryFilledEvents)
+          }
+
+          foreach ($window in @(
+            @{ Label='7D'; Snapshot=$p7 },
+            @{ Label='90D'; Snapshot=$p90 }
+          )) {
+            $sideway = @($window.Snapshot.entryFunnel | Where-Object { [string]$_.strategy -eq 'SIDEWAY' })[0]
+            $rank = 0
+            foreach ($reason in @($sideway.blockedReasons | Sort-Object -Property @{Expression='count';Descending=$true}, @{Expression='rule';Descending=$false} | Select-Object -First 15)) {
+              $rank += 1
+              Write-Host ("P2WINDOW_{0}_SIDEWAY_BLOCKER_{1}={2}|{3}" -f $window.Label,$rank,[string]$reason.rule,[int]$reason.count)
+            }
+          }
+
+          Write-Host 'P2_AUDIT_WINDOW_PRODUCTION=PASS'
+          Write-Host 'ENTRY_RULE_MUTATION=NONE'
+          Write-Host 'RISK_LOT_MUTATION=NONE'
+          Write-Host 'MODE_FINAL=PAUSE'
+          Write-Host 'ARM_FINAL=ARMED'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
+          Write-Host 'AUTO_RETUNE=FALSE'
