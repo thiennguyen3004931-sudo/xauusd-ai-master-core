@@ -1,11 +1,11 @@
-name: Phase7C Validate Sideway M5 One-Bar 7d376d5b
+name: Phase7C Validate Sideway M5 One-Bar df571a6f
 
 on:
   push:
     branches:
-      - ops/validate-sideway-m5-onebar-7d376d5b
+      - ops/validate-sideway-m5-onebar-df571a6f
     paths:
-      - '.github/workflows/phase7c-validate-sideway-m5-onebar-7d376d5b.yml'
+      - '.github/workflows/phase7c-validate-sideway-m5-onebar-df571a6f.yml'
 
 permissions:
   contents: read
@@ -18,7 +18,7 @@ jobs:
       - name: Checkout exact candidate head
         uses: actions/checkout@v4
         with:
-          ref: 7d376d5bb7f14317e048326a359e2f2b0d2edf7a
+          ref: df571a6ff4ca3a0192b7faed941d5d66e55c4f3c
           fetch-depth: 0
 
       - name: Candidate identity
@@ -26,7 +26,7 @@ jobs:
         run: |
           $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
           Write-Host "SIDEWAY_M5_ONEBAR_CANDIDATE_HEAD=$actual"
-          if ($actual -ne '7d376d5bb7f14317e048326a359e2f2b0d2edf7a') { throw "Candidate head mismatch: $actual" }
+          if ($actual -ne 'df571a6ff4ca3a0192b7faed941d5d66e55c4f3c') { throw "Candidate head mismatch: $actual" }
 
       - name: Parse Sideway controller
         shell: powershell
@@ -56,7 +56,7 @@ jobs:
         shell: powershell
         run: |
           $base = '4f09e3a8bd159e207a0effa38bf4a735bb9b3fa3'
-          $target = '7d376d5bb7f14317e048326a359e2f2b0d2edf7a'
+          $target = 'df571a6ff4ca3a0192b7faed941d5d66e55c4f3c'
           $files = @(git diff --name-only "$base..$target")
           Write-Host "SIDEWAY_M5_ONEBAR_CHANGED_FILES=$($files -join ',')"
           $allowed = @(
