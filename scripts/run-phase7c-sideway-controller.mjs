@@ -551,6 +551,7 @@ async function cycle() {
   );
   const autoLotValidation = validateAutoLotSnapshot(autoLot, {
     accountLogin: Number(health.accountLogin),
+    accountMode: String(health.accountMode ?? "").toLowerCase(),
     brokerSymbol: String(spec.brokerSymbol ?? ""),
     riskPercent,
     maxLot,
