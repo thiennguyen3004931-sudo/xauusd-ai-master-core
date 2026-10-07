@@ -111,7 +111,7 @@ jobs:
               'entryFilledEvents'
             )) {
               if ([int64]$b7.$field -gt [int64]$b90.$field) {
-                throw "Window monotonicity failed for $strategy/$field: 7d=$($b7.$field) 90d=$($b90.$field)"
+                throw ("Window monotonicity failed for {0}/{1}: 7d={2} 90d={3}" -f $strategy, $field, $b7.$field, $b90.$field)
               }
             }
 
