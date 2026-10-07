@@ -1,0 +1,118 @@
+name: Phase7C Cutover Sideway LIVE Auto Lot 4f09e3a8
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-cutover-sideway-live-auto-lot-4f09e3a8.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: 4f09e3a8bd159e207a0effa38bf4a735bb9b3fa3
+          fetch-depth: 0
+
+      - name: Guarded Sideway LIVE auto-lot cutover
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $current = '1fd1329edc684405c975a1793ae39c72384786f8'
+          $target = '4f09e3a8bd159e207a0effa38bf4a735bb9b3fa3'
+          $targetTree = 'e2885d4b8bd0c7203d6bdefa72f7e8504dae2a33'
+          $helperBlob = 'd8fb26409df5ddecdf5353ab0fdf42cbd8d3500f'
+
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "SIDEWAY_AUTOLOT_PRE_PRODUCTION_HEAD=$actual"
+
+          if ($actual -eq $target) {
+            Write-Host 'SIDEWAY_AUTOLOT_TRANSITION=SKIPPED_ALREADY_TARGET'
+          } elseif ($actual -eq $current) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PWD 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot $prod -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 $helperBlob -ExpectedInitialArm ARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            throw "UNEXPECTED_PRODUCTION_HEAD expected_current=$current expected_target=$target actual=$actual"
+          }
+
+          $postHead = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodBranch = (git -C $prod branch --show-current).Trim()
+          $prodTree = (git -C $prod rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+
+          Write-Host "SIDEWAY_AUTOLOT_POST_PRODUCTION_HEAD=$postHead"
+          Write-Host "SIDEWAY_AUTOLOT_POST_PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "SIDEWAY_AUTOLOT_POST_PRODUCTION_TREE=$prodTree"
+
+          if ($postHead -ne $target) { throw 'Production HEAD did not reach target.' }
+          if ($prodBranch -ne 'main') { throw "Expected production branch main; actual=$prodBranch" }
+          if ($prodTree -ne $targetTree) { throw "Expected production tree $targetTree; actual=$prodTree" }
+
+          $guardPath = Join-Path $prod 'scripts\phase7c-sideway-execution-guards.mjs'
+          $controllerPath = Join-Path $prod 'scripts\run-phase7c-sideway-controller.mjs'
+          $testsPath = Join-Path $prod 'scripts\phase7c-sideway-execution-guards.test.mjs'
+
+          $guardSource = Get-Content -LiteralPath $guardPath -Raw
+          $controllerSource = Get-Content -LiteralPath $controllerPath -Raw
+          $testSource = Get-Content -LiteralPath $testsPath -Raw
+
+          foreach ($required in @(
+            'const expectedAccountMode = String(accountMode ?? "").trim().toLowerCase();',
+            'const actualAccountMode = String(payload?.account?.mode ?? "").trim().toLowerCase();',
+            'AUTO_LOT_EXPECTED_ACCOUNT_MODE_INVALID',
+            'AUTO_LOT_ACCOUNT_MODE_MISMATCH'
+          )) {
+            if ($guardSource -notmatch [regex]::Escape($required)) {
+              throw "Sideway auto-lot guard source contract missing: $required"
+            }
+          }
+
+          if ($controllerSource -notmatch [regex]::Escape('accountMode: String(health.accountMode ?? "").toLowerCase(),')) {
+            throw 'Sideway controller does not pass active account mode to Auto Lot validation.'
+          }
+
+          foreach ($required in @(
+            'auto lot snapshot accepts LIVE only when preview account mode matches the active LIVE controller',
+            'AUTO_LOT_ACCOUNT_MODE_MISMATCH'
+          )) {
+            if ($testSource -notmatch [regex]::Escape($required)) {
+              throw "Sideway auto-lot regression contract missing: $required"
+            }
+          }
+
+          Write-Host 'SIDEWAY_AUTOLOT_SOURCE_CONTRACT=PASS'
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $p7 = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/performance-intelligence?days=7&symbol=XAUUSD' -Method Get -TimeoutSec 120
+
+          $mode = [string]$life.mode.mode
+          $armStatus = [string]$cap.liveArmStatus
+          $armed = [bool]$cap.liveExecutionArmed
+
+          Write-Host "SIDEWAY_AUTOLOT_FINAL_BOT_MODE=$mode"
+          Write-Host "SIDEWAY_AUTOLOT_FINAL_ARM_STATUS=$armStatus"
+          Write-Host "SIDEWAY_AUTOLOT_FINAL_ARMED=$armed"
+
+          if ($mode -ne 'PAUSE') { throw "Expected PAUSE during Sideway auto-lot cutover; actual=$mode" }
+          if (-not $armed -or $armStatus -ne 'ARMED') { throw 'Expected ARM to remain ARMED during PAUSE cutover.' }
+          if (-not [bool]$p7.safety.readOnly) { throw 'Performance Intelligence must remain read-only.' }
+          if ([bool]$p7.safety.autoRetune) { throw 'Auto-retune must remain disabled.' }
+
+          Write-Host 'SIDEWAY_LIVE_AUTO_LOT_PRODUCTION=PASS'
+          Write-Host 'SIDEWAY_STRATEGY_RULE_MUTATION=NONE'
+          Write-Host 'M5_CONFIRMATION_MUTATION=NONE'
+          Write-Host 'RANGE_EDGE_MUTATION=NONE'
+          Write-Host 'RISK_LOT_POLICY_RELAXATION=NONE'
+          Write-Host 'MODE_FINAL=PAUSE'
+          Write-Host 'ARM_FINAL=ARMED'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
+          Write-Host 'AUTO_RETUNE=FALSE'
