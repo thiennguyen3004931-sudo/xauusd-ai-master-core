@@ -11,6 +11,7 @@ import {
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
 import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
 import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
+import { writeStateFileAtomicSync } from "./phase7c-atomic-state-write.mjs";
 import {
   buildFixedTpSnapshot,
   isFixedTpTriggered,
@@ -2667,9 +2668,13 @@ function loadState(file: string): BotState {
 }
 
 function saveState(): void {
-  const temp = `${statePath}.tmp`;
-  fs.writeFileSync(temp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-  fs.renameSync(temp, statePath);
+  const payload = `${JSON.stringify(state, null, 2)}\n`;
+  const result = writeStateFileAtomicSync(statePath, payload);
+  if (result.recoveredFromTransientRename) {
+    console.warn(
+      `PHASE7B_DEMO_STATE_RENAME_RECOVERED=YES|ATTEMPTS=${result.attempts}|FILE=${statePath}`,
+    );
+  }
 }
 
 function journal(type: string, data: Record<string, unknown>): void {
