@@ -10,7 +10,7 @@ import {
 import {
   buildSidewayPlan,
   chooseRangeSide,
-  detectM5Confirmation,
+  detectM5ConfirmationWithinBars,
   estimateVolumePoc,
   matchPendingEntryPosition,
   normalizeVolume,
@@ -66,6 +66,7 @@ if (
 const minRegimeConfidence = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_MIN_REGIME_CONFIDENCE, 60, 0, 100);
 const regimeCandleCount = clampInteger(process.env.ZIQ_PHASE7C_REGIME_CANDLE_COUNT, 320, 220, 1000);
 const m5CandleCount = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_M5_COUNT, 120, 30, 500);
+const m5ConfirmationCarryBars = 1;
 const armed = truthy(process.env.ZIQ_PHASE7C_SIDEWAY_ARMED);
 const once = truthy(process.env.ZIQ_PHASE7C_SIDEWAY_ONCE);
 const workDir = process.env.ZIQ_PHASE7C_SIDEWAY_WORK_DIR?.trim() || path.resolve(".runtime", "phase7c-sideway");
@@ -387,7 +388,9 @@ async function cycle() {
   const side = regime?.supplyDemandRange
     ? chooseRangeSide(regime.supplyDemandRange, Number(quote.bid), Number(quote.ask))
     : null;
-  const confirmation = side ? detectM5Confirmation(m5, side) : null;
+  const confirmation = side
+    ? detectM5ConfirmationWithinBars(m5, side, m5ConfirmationCarryBars)
+    : null;
   const strategyEntryConfig = readStrategyEntryConfigSnapshot();
   const entryConditions = strategyEntryConfig.valid && strategyEntryConfig.state
     ? evaluateStrategyEntryConditions({
@@ -404,7 +407,7 @@ async function cycle() {
           supplyDemandRange: { passed: Boolean(regime?.supplyDemandRange), observed: regime?.supplyDemandRange ?? null },
           rangeEdge: { passed: side !== null, observed: side },
           m5Confirmation: {
-            passed: Boolean(confirmation && Number(confirmation.closeTime) === closeTime),
+            passed: Boolean(confirmation),
             observed: confirmation?.pattern ?? null,
           },
         },
@@ -427,6 +430,7 @@ async function cycle() {
   journal("ENTRY_STRATEGY_CONDITIONS_PASS", {
     closeTime,
     side,
+    confirmation,
     entryConditions,
   });
 
@@ -485,7 +489,7 @@ async function cycle() {
           supplyDemandRange: { passed: Boolean(freshRegime?.supplyDemandRange), observed: freshRegime?.supplyDemandRange ?? null },
           rangeEdge: { passed: finalSide !== null, observed: finalSide },
           m5Confirmation: {
-            passed: Boolean(confirmation && Number(confirmation.closeTime) === closeTime),
+            passed: Boolean(confirmation),
             observed: confirmation?.pattern ?? null,
           },
         },
@@ -602,6 +606,8 @@ async function cycle() {
     closeTime,
     side,
     confirmation: confirmation.pattern,
+    confirmationCloseTime: confirmation.closeTime,
+    confirmationAgeBars: confirmation.ageBars ?? 0,
     volume,
     riskPercent,
     rawLot: autoLot?.preview?.rawLot ?? null,

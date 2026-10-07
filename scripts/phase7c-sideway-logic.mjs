@@ -80,6 +80,42 @@ export function detectM5Confirmation(bars, side) {
   return null;
 }
 
+export function detectM5ConfirmationWithinBars(bars, side, carryBars = 0) {
+  if (!Array.isArray(bars) || bars.length < 2) return null;
+  const normalizedCarryBars = Math.max(0, Math.min(2, Math.trunc(Number(carryBars) || 0)));
+  const evaluationCloseTime = Number(bars.at(-1)?.closeTime);
+
+  for (let ageBars = 0; ageBars <= normalizedCarryBars; ageBars += 1) {
+    const currentIndex = bars.length - 1 - ageBars;
+    if (currentIndex < 1) break;
+    const candidateCloseTime = Number(bars[currentIndex]?.closeTime);
+    if (
+      ageBars > 0 &&
+      (
+        !Number.isFinite(evaluationCloseTime) ||
+        !Number.isFinite(candidateCloseTime) ||
+        evaluationCloseTime <= candidateCloseTime ||
+        evaluationCloseTime - candidateCloseTime > ageBars * 5 * 60_000 + 1_000
+      )
+    ) {
+      continue;
+    }
+
+    const candidate = detectM5Confirmation(
+      [bars[currentIndex - 1], bars[currentIndex]],
+      side,
+    );
+    if (candidate) {
+      return {
+        ...candidate,
+        ageBars,
+        evaluationCloseTime,
+      };
+    }
+  }
+  return null;
+}
+
 export function estimateVolumePoc(bars, lower, upper, binCount = 24) {
   if (!Array.isArray(bars) || !Number.isFinite(lower) || !Number.isFinite(upper) || upper <= lower) return null;
   const count = Math.max(8, Math.min(64, Math.trunc(binCount)));

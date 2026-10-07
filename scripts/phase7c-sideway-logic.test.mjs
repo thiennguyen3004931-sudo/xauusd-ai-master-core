@@ -4,6 +4,7 @@ import {
   buildSidewayPlan,
   chooseRangeSide,
   detectM5Confirmation,
+  detectM5ConfirmationWithinBars,
   estimateVolumePoc,
   matchPendingEntryPosition,
   oneThirdPartialVolume,
@@ -46,6 +47,48 @@ test("M5 confirmation detects bullish rejection and bearish engulfing", () => {
     { open: 2408.0, high: 2408.3, low: 2406.0, close: 2406.2, closeTime: 4 },
   ];
   assert.equal(detectM5Confirmation(bearish, "SELL")?.pattern, "BEARISH_ENGULFING");
+});
+
+test("M5 confirmation can remain valid for exactly one later M5 bar", () => {
+  const bars = [
+    { open: 2392.0, high: 2393.0, low: 2391.8, close: 2392.6, closeTime: 300_000 },
+    { open: 2392.4, high: 2393.2, low: 2390.6, close: 2393.0, closeTime: 600_000 },
+    { open: 2393.0, high: 2393.4, low: 2392.7, close: 2393.1, closeTime: 900_000 },
+  ];
+
+  assert.equal(detectM5Confirmation(bars, "BUY"), null);
+  assert.equal(detectM5ConfirmationWithinBars(bars, "BUY", 0), null);
+
+  const carried = detectM5ConfirmationWithinBars(bars, "BUY", 1);
+  assert.equal(carried?.pattern, "BULLISH_REJECTION");
+  assert.equal(carried?.closeTime, 600_000);
+  assert.equal(carried?.evaluationCloseTime, 900_000);
+  assert.equal(carried?.ageBars, 1);
+  assert.equal(detectM5ConfirmationWithinBars(bars, "SELL", 1), null);
+});
+
+test("M5 confirmation carry fails closed across a stale M5 time gap", () => {
+  const bars = [
+    { open: 2392.0, high: 2393.0, low: 2391.8, close: 2392.6, closeTime: 300_000 },
+    { open: 2392.4, high: 2393.2, low: 2390.6, close: 2393.0, closeTime: 600_000 },
+    { open: 2393.0, high: 2393.4, low: 2392.7, close: 2393.1, closeTime: 1_800_000 },
+  ];
+
+  assert.equal(detectM5ConfirmationWithinBars(bars, "BUY", 1), null);
+});
+
+test("M5 confirmation does not leak beyond configured carry bars", () => {
+  const bars = [
+    { open: 2392.0, high: 2393.0, low: 2391.8, close: 2392.6, closeTime: 300_000 },
+    { open: 2392.4, high: 2393.2, low: 2390.6, close: 2393.0, closeTime: 600_000 },
+    { open: 2393.0, high: 2393.4, low: 2392.7, close: 2393.1, closeTime: 900_000 },
+    { open: 2393.1, high: 2393.5, low: 2392.8, close: 2393.2, closeTime: 1_200_000 },
+  ];
+
+  assert.equal(detectM5ConfirmationWithinBars(bars, "BUY", 1), null);
+  const twoBarCarry = detectM5ConfirmationWithinBars(bars, "BUY", 2);
+  assert.equal(twoBarCarry?.pattern, "BULLISH_REJECTION");
+  assert.equal(twoBarCarry?.ageBars, 2);
 });
 
 test("volume POC stays inside the range", () => {
