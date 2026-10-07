@@ -35,7 +35,7 @@ jobs:
           Write-Host "SIDEWAY_TIMESTAMP_MODE=$([string]$life.mode.mode)"
           Write-Host "SIDEWAY_TIMESTAMP_ARM=$([string]$cap.liveArmStatus)"
 
-          $audit = Join-Path $prod '.runtime\phase7c-executors\decision-observability\sideway-decisions.jsonl'
+          $audit = Join-Path $prod '.runtime\phase7c-executors\decision-observability\live\sideway-decisions.jsonl'
           node .\scripts\diagnose-phase7c-sideway-timestamp-blockers.mjs $audit
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
