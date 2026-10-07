@@ -1,0 +1,71 @@
+name: Phase7C Read-Only Entry Funnel Blockers ebc34057
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-readonly-entry-funnel-blockers-ebc34057.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 8
+    steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@v4
+
+      - name: Read-only Performance Intelligence v2 blocker snapshot
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = 'ebc34057bfed451a77619768c02b9314deaa21d7'
+
+          $prodHead = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "P2V2_DIAG_PRODUCTION_HEAD=$prodHead"
+          if ($prodHead -ne $expected) {
+            throw "Production head mismatch. expected=$expected actual=$prodHead"
+          }
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $p2 = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/performance-intelligence?days=90&symbol=XAUUSD' -Method Get -TimeoutSec 120
+
+          Write-Host "P2V2_DIAG_MODE=$([string]$life.mode.mode)"
+          Write-Host "P2V2_DIAG_ARM=$([string]$cap.liveArmStatus)"
+          Write-Host "P2V2_DIAG_VERSION=$([int]$p2.version)"
+          Write-Host "P2V2_DIAG_READ_ONLY=$([bool]$p2.safety.readOnly)"
+          Write-Host "P2V2_DIAG_AUTO_RETUNE=$([bool]$p2.safety.autoRetune)"
+
+          if ([int]$p2.version -ne 2) { throw 'Performance Intelligence v2 is not active.' }
+          if (-not [bool]$p2.safety.readOnly) { throw 'Performance Intelligence must remain read-only.' }
+          if ([bool]$p2.safety.autoRetune) { throw 'Auto-retune must remain disabled.' }
+
+          foreach ($bucket in @($p2.entryFunnel)) {
+            $strategy = [string]$bucket.strategy
+            Write-Host ("P2V2_DIAG_FUNNEL_{0}=observed:{1}|evaluated:{2}|blocked:{3}|clear:{4}|submit:{5}|filled:{6}" -f
+              $strategy,
+              $bucket.observedEntryDecisionEvents,
+              $bucket.ruleEvaluatedEvents,
+              $bucket.blockedEvents,
+              $bucket.clearRuleEvents,
+              $bucket.entrySubmitEvents,
+              $bucket.entryFilledEvents)
+
+            $rank = 0
+            foreach ($reason in @($bucket.blockedReasons | Sort-Object -Property @{Expression='count';Descending=$true}, @{Expression='rule';Descending=$false} | Select-Object -First 20)) {
+              $rank += 1
+              Write-Host ("P2V2_DIAG_BLOCKER_{0}_{1}={2}|{3}" -f $strategy,$rank,[string]$reason.rule,[int]$reason.count)
+            }
+          }
+
+          Write-Host 'P2V2_DIAG_HTTP_METHODS=GET_ONLY'
+          Write-Host 'P2V2_DIAG_MODE_MUTATION=NONE'
+          Write-Host 'P2V2_DIAG_ARM_MUTATION=NONE'
+          Write-Host 'P2V2_DIAG_ORDER_MUTATION=NONE'
+          Write-Host 'P2V2_DIAG_POSITION_MUTATION=NONE'
+          Write-Host 'P2V2_DIAG_LIVE_TEST_ORDER=NONE'
+          Write-Host 'P2V2_DIAG_STATUS=PASS'
