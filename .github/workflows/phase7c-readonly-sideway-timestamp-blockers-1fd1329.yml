@@ -1,0 +1,48 @@
+name: Phase7C Read-Only Sideway Timestamp Blocker Diagnostic 1fd1329
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/diagnose-phase7c-sideway-timestamp-blockers.mjs'
+      - '.github/workflows/phase7c-readonly-sideway-timestamp-blockers-1fd1329.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 8
+    steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@v4
+
+      - name: Verify production source and run read-only diagnostic
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = '1fd1329edc684405c975a1793ae39c72384786f8'
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "SIDEWAY_TIMESTAMP_PRODUCTION_HEAD=$actual"
+          if ($actual -ne $expected) {
+            throw ("Production head mismatch. expected={0} actual={1}" -f $expected, $actual)
+          }
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          Write-Host "SIDEWAY_TIMESTAMP_MODE=$([string]$life.mode.mode)"
+          Write-Host "SIDEWAY_TIMESTAMP_ARM=$([string]$cap.liveArmStatus)"
+
+          $audit = Join-Path $prod '.runtime\phase7c-executors\decision-observability\sideway-decisions.jsonl'
+          node .\scripts\diagnose-phase7c-sideway-timestamp-blockers.mjs $audit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          Write-Host 'SIDEWAY_TIMESTAMP_HTTP_METHODS=GET_ONLY_FOR_LIFECYCLE_AND_CAPABILITY'
+          Write-Host 'SIDEWAY_TIMESTAMP_FILE_ACCESS=READ_ONLY'
+          Write-Host 'SIDEWAY_TIMESTAMP_MODE_MUTATION=NONE'
+          Write-Host 'SIDEWAY_TIMESTAMP_ARM_MUTATION=NONE'
+          Write-Host 'SIDEWAY_TIMESTAMP_ORDER_MUTATION=NONE'
+          Write-Host 'SIDEWAY_TIMESTAMP_POSITION_MUTATION=NONE'
+          Write-Host 'SIDEWAY_TIMESTAMP_LIVE_TEST_ORDER=NONE'
