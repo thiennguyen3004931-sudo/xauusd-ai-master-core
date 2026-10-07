@@ -1,0 +1,110 @@
+name: Phase7C Cutover Sideway M5 One-Bar 147249bd
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-cutover-sideway-m5-onebar-147249bd.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: 147249bdd600fcd8ac5d93076bc946808e9f0275
+          fetch-depth: 0
+
+      - name: Guarded Sideway M5 one-bar production cutover
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $current = '4f09e3a8bd159e207a0effa38bf4a735bb9b3fa3'
+          $target = '147249bdd600fcd8ac5d93076bc946808e9f0275'
+          $targetTree = '74525f0533308fbe4dbf4f047df20f45d3e0cd2e'
+          $helperBlob = 'd8fb26409df5ddecdf5353ab0fdf42cbd8d3500f'
+
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "SIDEWAY_M5_ONEBAR_PRE_PRODUCTION_HEAD=$actual"
+
+          if ($actual -eq $target) {
+            Write-Host 'SIDEWAY_M5_ONEBAR_TRANSITION=SKIPPED_ALREADY_TARGET'
+          } elseif ($actual -eq $current) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PWD 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot $prod -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 $helperBlob -ExpectedInitialArm ARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            throw "UNEXPECTED_PRODUCTION_HEAD expected_current=$current expected_target=$target actual=$actual"
+          }
+
+          $postHead = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodBranch = (git -C $prod branch --show-current).Trim()
+          $prodTree = (git -C $prod rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+
+          Write-Host "SIDEWAY_M5_ONEBAR_POST_PRODUCTION_HEAD=$postHead"
+          Write-Host "SIDEWAY_M5_ONEBAR_POST_PRODUCTION_BRANCH=$prodBranch"
+          Write-Host "SIDEWAY_M5_ONEBAR_POST_PRODUCTION_TREE=$prodTree"
+
+          if ($postHead -ne $target) { throw 'Production HEAD did not reach target.' }
+          if ($prodBranch -ne 'main') { throw "Expected production branch main; actual=$prodBranch" }
+          if ($prodTree -ne $targetTree) { throw "Expected production tree $targetTree; actual=$prodTree" }
+
+          $logicPath = Join-Path $prod 'scripts\phase7c-sideway-logic.mjs'
+          $controllerPath = Join-Path $prod 'scripts\run-phase7c-sideway-controller.mjs'
+          $logic = Get-Content -LiteralPath $logicPath -Raw
+          $controller = Get-Content -LiteralPath $controllerPath -Raw
+
+          foreach ($required in @(
+            'export function detectM5ConfirmationWithinBars',
+            'evaluationCloseTime - candidateCloseTime > ageBars * 5 * 60_000 + 1_000'
+          )) {
+            if ($logic -notmatch [regex]::Escape($required)) {
+              throw "Sideway M5 one-bar logic contract missing: $required"
+            }
+          }
+
+          foreach ($required in @(
+            'const m5ConfirmationCarryBars = 1;',
+            'detectM5ConfirmationWithinBars(m5, side, m5ConfirmationCarryBars)',
+            'passed: Boolean(confirmation)',
+            'confirmationAgeBars: confirmation.ageBars ?? 0'
+          )) {
+            if ($controller -notmatch [regex]::Escape($required)) {
+              throw "Sideway M5 one-bar controller contract missing: $required"
+            }
+          }
+
+          Write-Host 'SIDEWAY_M5_ONEBAR_SOURCE_CONTRACT=PASS'
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $p7 = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/performance-intelligence?days=7&symbol=XAUUSD' -Method Get -TimeoutSec 120
+
+          $mode = [string]$life.mode.mode
+          $armStatus = [string]$cap.liveArmStatus
+          $armed = [bool]$cap.liveExecutionArmed
+
+          Write-Host "SIDEWAY_M5_ONEBAR_FINAL_BOT_MODE=$mode"
+          Write-Host "SIDEWAY_M5_ONEBAR_FINAL_ARM_STATUS=$armStatus"
+          Write-Host "SIDEWAY_M5_ONEBAR_FINAL_ARMED=$armed"
+
+          if ($mode -ne 'PAUSE') { throw "Expected PAUSE during Sideway M5 cutover; actual=$mode" }
+          if (-not $armed -or $armStatus -ne 'ARMED') { throw 'Expected ARM to remain ARMED during PAUSE cutover.' }
+          if (-not [bool]$p7.safety.readOnly) { throw 'Performance Intelligence must remain read-only.' }
+          if ([bool]$p7.safety.autoRetune) { throw 'Auto-retune must remain disabled.' }
+
+          Write-Host 'SIDEWAY_M5_ONEBAR_PRODUCTION=PASS'
+          Write-Host 'SIDEWAY_M5_VALIDITY_CHANGE=ONE_LATER_BAR_ONLY'
+          Write-Host 'SIDEWAY_M5_STALE_GAP_FAIL_CLOSED=TRUE'
+          Write-Host 'RISK_LOT_MUTATION=NONE'
+          Write-Host 'MODE_FINAL=PAUSE'
+          Write-Host 'ARM_FINAL=ARMED'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
+          Write-Host 'AUTO_RETUNE=FALSE'
