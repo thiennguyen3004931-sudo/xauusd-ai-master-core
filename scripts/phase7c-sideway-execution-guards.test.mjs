@@ -91,6 +91,7 @@ test("auto lot snapshot must match the same demo account, broker, risk and stop"
   const now = 1_700_000_000_000;
   const expected = {
     accountLogin: 123456,
+    accountMode: "demo",
     brokerSymbol: "XAUUSDm",
     riskPercent: 0.25,
     maxLot: 0.03,
@@ -104,15 +105,50 @@ test("auto lot snapshot must match the same demo account, broker, risk and stop"
   assert.equal(accepted.recommendedLot, 0.03);
 
   assert.equal(validateAutoLotSnapshot({ ...validPayload(now), account: { login: 999999, mode: "demo" } }, expected).reason, "AUTO_LOT_ACCOUNT_LOGIN_MISMATCH");
+  assert.equal(
+    validateAutoLotSnapshot({ ...validPayload(now), account: { login: 123456, mode: "real" } }, expected).reason,
+    "AUTO_LOT_ACCOUNT_MODE_MISMATCH",
+  );
   assert.equal(validateAutoLotSnapshot({ ...validPayload(now), broker: { symbol: "XAUUSD.pro" } }, expected).reason, "AUTO_LOT_BROKER_SYMBOL_MISMATCH");
   assert.equal(validateAutoLotSnapshot({ ...validPayload(now), configuration: { riskPercent: 0.5, maxLot: 0.03 } }, expected).reason, "AUTO_LOT_RISK_PERCENT_MISMATCH");
   assert.equal(validateAutoLotSnapshot({ ...validPayload(now), preview: { ...validPayload(now).preview, stopDistance: 5 } }, expected).reason, "AUTO_LOT_STOP_DISTANCE_MISMATCH");
+});
+
+test("auto lot snapshot accepts LIVE only when preview account mode matches the active LIVE controller", () => {
+  const now = 1_700_000_000_000;
+  const payload = {
+    ...validPayload(now),
+    account: {
+      login: 123456,
+      mode: "real",
+    },
+  };
+  const expected = {
+    accountLogin: 123456,
+    accountMode: "real",
+    brokerSymbol: "XAUUSDm",
+    riskPercent: 0.25,
+    maxLot: 0.03,
+    stopDistance: 4.25,
+    now,
+    maxAgeMs: 10_000,
+  };
+
+  const accepted = validateAutoLotSnapshot(payload, expected);
+  assert.equal(accepted.accepted, true);
+  assert.equal(accepted.recommendedLot, 0.03);
+
+  assert.equal(
+    validateAutoLotSnapshot({ ...payload, account: { login: 123456, mode: "demo" } }, expected).reason,
+    "AUTO_LOT_ACCOUNT_MODE_MISMATCH",
+  );
 });
 
 test("auto lot snapshot fails closed on stale or unsafe payloads", () => {
   const now = 1_700_000_000_000;
   const expected = {
     accountLogin: 123456,
+    accountMode: "demo",
     brokerSymbol: "XAUUSDm",
     riskPercent: 0.25,
     maxLot: 0.03,
