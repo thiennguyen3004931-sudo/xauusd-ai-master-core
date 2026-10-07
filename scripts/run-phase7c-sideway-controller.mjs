@@ -10,7 +10,6 @@ import {
 import {
   buildSidewayPlan,
   chooseRangeSide,
-  detectM5Confirmation,
   detectM5ConfirmationWithinBars,
   estimateVolumePoc,
   matchPendingEntryPosition,
