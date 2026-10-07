@@ -141,6 +141,12 @@ jobs:
       - name: Trend management path regression
         run: node scripts/test-phase7c-trend-management-path-regression.mjs
 
+      - name: Windows-safe atomic state persistence regression
+        run: node --test scripts/phase7c-atomic-state-write.test.mjs
+
+      - name: Atomic state helper syntax
+        run: node --check scripts/phase7c-atomic-state-write.mjs
+
       - name: REVERSAL CHOCH direction entry contract
         run: node --test scripts/test-phase7c-reversal-entry-contract.mjs
 
