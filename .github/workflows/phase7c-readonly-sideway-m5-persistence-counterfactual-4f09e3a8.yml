@@ -1,0 +1,49 @@
+name: Phase7C Read-Only Sideway M5 Persistence Counterfactual 4f09e3a8
+
+on:
+  push:
+    branches:
+      - ops/sideway-m5-persistence-counterfactual-4f09e3a8
+    paths:
+      - 'scripts/diagnose-phase7c-sideway-m5-persistence-counterfactual.mjs'
+      - '.github/workflows/phase7c-readonly-sideway-m5-persistence-counterfactual-4f09e3a8.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 8
+    steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@v4
+
+      - name: Run read-only Sideway M5 persistence counterfactual
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = '4f09e3a8bd159e207a0effa38bf4a735bb9b3fa3'
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "SIDEWAY_M5CF_PRODUCTION_HEAD=$actual"
+          if ($actual -ne $expected) { throw ("Production head mismatch. expected={0} actual={1}" -f $expected,$actual) }
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          Write-Host "SIDEWAY_M5CF_MODE=$([string]$life.mode.mode)"
+          Write-Host "SIDEWAY_M5CF_ARM=$([string]$cap.liveArmStatus)"
+
+          $audit = Join-Path $prod '.runtime\phase7c-executors\decision-observability\live\sideway-decisions.jsonl'
+          if (-not (Test-Path -LiteralPath $audit)) { throw "Sideway audit file missing: $audit" }
+
+          node .\scripts\diagnose-phase7c-sideway-m5-persistence-counterfactual.mjs $audit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          Write-Host 'SIDEWAY_M5CF_HTTP_METHODS=GET_ONLY_FOR_LIFECYCLE_AND_CAPABILITY'
+          Write-Host 'SIDEWAY_M5CF_FILE_ACCESS=READ_ONLY'
+          Write-Host 'SIDEWAY_M5CF_MODE_MUTATION=NONE'
+          Write-Host 'SIDEWAY_M5CF_ARM_MUTATION=NONE'
+          Write-Host 'SIDEWAY_M5CF_ORDER_MUTATION=NONE'
+          Write-Host 'SIDEWAY_M5CF_POSITION_MUTATION=NONE'
+          Write-Host 'SIDEWAY_M5CF_LIVE_TEST_ORDER=NONE'
