@@ -71,6 +71,7 @@ interface ParsedAuditEvent {
   index: number;
   eventId: string;
   eventName: string;
+  occurredAtMs: number | null;
   identifiers: AuditIdentifier[];
   passedRules: string[];
   blockedRules: string[];
@@ -392,6 +393,43 @@ function eventIdOf(raw: RawEvent, strategy: Strategy, index: number, eventName: 
   return `${strategy}:${timestamp ?? "NA"}:${eventName}:${index}`;
 }
 
+function auditEventTimestampMsOf(raw: RawEvent): number | null {
+  for (const key of ["timestamp", "createdAt", "created_at", "at", "time"] as const) {
+    const value = raw[key];
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return value < 100_000_000_000 ? value * 1000 : value;
+    }
+    if (typeof value !== "string" || !value.trim()) continue;
+    const text = value.trim();
+    const numeric = Number(text);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric < 100_000_000_000 ? numeric * 1000 : numeric;
+    }
+    const parsed = Date.parse(text);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function filterAuditSourcesByWindow(
+  sources: readonly ParsedAuditSource[],
+  days: number,
+  endAtMs = Date.now(),
+): ParsedAuditSource[] {
+  const normalizedDays = Math.max(1, Number(days) || 1);
+  const end = Number(endAtMs);
+  const start = end - normalizedDays * 24 * 60 * 60_000;
+  return sources.map((source) => ({
+    ...source,
+    events: source.events.filter(
+      (event) =>
+        event.occurredAtMs !== null &&
+        event.occurredAtMs >= start &&
+        event.occurredAtMs <= end,
+    ),
+  }));
+}
+
 function relativeRuntimePath(absolutePath: string): string {
   return path.relative(runtimeRoot(), absolutePath).split(path.sep).join("/");
 }
@@ -433,6 +471,7 @@ async function parseAuditSource(
         index: eventIndex,
         eventId: eventIdOf(raw, strategy, eventIndex, eventName),
         eventName,
+        occurredAtMs: auditEventTimestampMsOf(raw),
         identifiers: identifiersOf(raw, eventName),
         passedRules: rules.passed,
         blockedRules: rules.blocked,
@@ -697,6 +736,12 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
       parseAuditSource(source.strategy, auditRoot, source.fileName),
     ),
   );
+  const auditWindowEndAtMs = Date.now();
+  const windowedAuditSources = filterAuditSourcesByWindow(
+    auditSources,
+    performance.days,
+    auditWindowEndAtMs,
+  );
   const systemTrades = performance.trades.filter(
     (trade) => trade.ownership === "SYSTEM" && (trade.strategy === "TREND" || trade.strategy === "SIDEWAY"),
   );
@@ -775,7 +820,7 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
   const regimeEvidenceTrades = exactTrades.filter((trade) => trade.attribution.regime !== null);
 
   const blockCounts = new Map<string, number>();
-  for (const source of auditSources) {
+  for (const source of windowedAuditSources) {
     for (const event of source.events) {
       for (const rule of event.blockedRules) {
         const key = `${event.performanceStrategy}\u0000${rule}`;
@@ -823,7 +868,7 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
     trades,
     rules: aggregateRules(trades, correlationCoveragePercent),
     entryTypes: aggregateEntryTypes(trades),
-    entryFunnel: buildEntryFunnel(auditSources),
+    entryFunnel: buildEntryFunnel(windowedAuditSources),
     decisionBlocks: [...blockCounts.entries()]
       .map(([key, count]) => {
         const [strategy, rule] = key.split("\u0000") as [PerformanceStrategy, string];
@@ -851,7 +896,9 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
 
 export const __test = {
   addCanonicalEntryConditions,
+  auditEventTimestampMsOf,
   buildEntryFunnel,
+  filterAuditSourcesByWindow,
   entryBlockReasonsOf,
   entryPolicyOf,
   entryTypeOf,

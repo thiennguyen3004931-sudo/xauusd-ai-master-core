@@ -223,3 +223,60 @@ test("entry funnel captures Sideway event-level block reasons without changing r
     ["WAIT_PULLBACK"],
   );
 });
+
+
+test("audit event timestamp normalization supports milliseconds, seconds, and ISO", () => {
+  const epochMs = 1_700_000_000_000;
+  assert.equal(__test.auditEventTimestampMsOf({ timestamp: epochMs }), epochMs);
+  assert.equal(__test.auditEventTimestampMsOf({ timestamp: epochMs / 1000 }), epochMs);
+  assert.equal(
+    __test.auditEventTimestampMsOf({ timestamp: "2023-11-14T22:13:20.000Z" }),
+    1_700_000_000_000,
+  );
+  assert.equal(__test.auditEventTimestampMsOf({ reason: "no timestamp" }), null);
+});
+
+test("Performance Intelligence audit funnel respects the requested days window", () => {
+  const endAtMs = 1_700_000_000_000;
+  const withinWindow = endAtMs - 2 * 24 * 60 * 60_000;
+  const outsideWindow = endAtMs - 10 * 24 * 60 * 60_000;
+
+  const event = (occurredAtMs: number, reason: string) => ({
+    raw: { timestamp: occurredAtMs, reason },
+    index: 0,
+    eventId: reason,
+    eventName: "ENTRY_WAIT",
+    occurredAtMs,
+    identifiers: [],
+    passedRules: [],
+    blockedRules: [reason],
+    blockReasons: [reason],
+    entryType: "UNKNOWN",
+    regime: "RANGING",
+    entryPolicy: null,
+    performanceStrategy: "SIDEWAY",
+  });
+
+  const sources = [{
+    strategy: "SIDEWAY",
+    relativePath: "sideway-decisions.jsonl",
+    available: true,
+    parsedRows: 3,
+    malformedRows: 0,
+    events: [
+      event(withinWindow, "CURRENT_BLOCKER"),
+      event(outsideWindow, "HISTORICAL_BLOCKER"),
+      { ...event(withinWindow, "MISSING_TIMESTAMP"), occurredAtMs: null },
+    ],
+  }];
+
+  const windowed = __test.filterAuditSourcesByWindow(sources as never, 7, endAtMs);
+  assert.equal(windowed[0]?.events.length, 1);
+  assert.equal(windowed[0]?.events[0]?.blockReasons[0], "CURRENT_BLOCKER");
+
+  const funnel = __test.buildEntryFunnel(windowed as never);
+  const sideway = funnel.find((item) => item.strategy === "SIDEWAY");
+  assert.ok(sideway);
+  assert.equal(sideway.blockedEvents, 1);
+  assert.deepEqual(sideway.blockedReasons, [{ rule: "CURRENT_BLOCKER", count: 1 }]);
+});
