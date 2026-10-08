@@ -1,0 +1,87 @@
+name: Phase7C Read-Only Sideway M5 One-Bar Live Shadow 147249bd
+
+on:
+  push:
+    branches:
+      - ops/sideway-m5-onebar-live-shadow-147249bd
+    paths:
+      - 'scripts/diagnose-phase7c-sideway-live-shadow-onebar.mjs'
+      - '.github/workflows/phase7c-readonly-sideway-m5-onebar-live-shadow-147249bd.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  shadow:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 8
+    steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@v4
+
+      - name: Run GET-only Sideway live shadow
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = '147249bdd600fcd8ac5d93076bc946808e9f0275'
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "SIDEWAY_SHADOW_PRODUCTION_HEAD=$actual"
+          if ($actual -ne $expected) { throw "Production head mismatch. expected=$expected actual=$actual" }
+
+          $accountPath = Join-Path $prod '.runtime\phase7c-account-mode.json'
+          $lib = Join-Path $prod 'scripts\lib\phase7c-account-mode.ps1'
+          . $lib
+
+          $accountState = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+          $envFile = [string]$accountState.envFile
+          if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $prod $envFile }
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+          $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $att = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation/' -Method Get -TimeoutSec 10
+          $regime = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/live-regime?symbol=XAUUSD&count=320' -Method Get -TimeoutSec 12
+          $quote = Invoke-RestMethod -Uri "$bridgeBase/v1/quotes/XAUUSD" -Headers $headers -Method Get -TimeoutSec 10
+          $candles = Invoke-RestMethod -Uri "$bridgeBase/v1/candles/XAUUSD?timeframe=M5&count=8" -Headers $headers -Method Get -TimeoutSec 10
+          $positions = @(Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $headers -Method Get -TimeoutSec 10)
+          $orders = @(Invoke-RestMethod -Uri "$bridgeBase/v1/orders?symbol=XAUUSD" -Headers $headers -Method Get -TimeoutSec 10)
+
+          $mode = [string]$life.mode.mode
+          $arm = [string]$cap.liveArmStatus
+          $attOverall = [string]$att.overall
+          $attCommit = [string]$att.deployment.sourceCommit
+
+          Write-Host "SIDEWAY_SHADOW_BOT_MODE=$mode"
+          Write-Host "SIDEWAY_SHADOW_ARM=$arm"
+          Write-Host "SIDEWAY_SHADOW_RUNTIME_SOURCE_OVERALL=$attOverall"
+          Write-Host "SIDEWAY_SHADOW_RUNTIME_SOURCE_COMMIT=$attCommit"
+          Write-Host "SIDEWAY_SHADOW_POSITION_COUNT=$($positions.Count)"
+          Write-Host "SIDEWAY_SHADOW_PENDING_ORDER_COUNT=$($orders.Count)"
+
+          if ($mode -ne 'PAUSE') { throw "Shadow diagnostic requires PAUSE; actual=$mode" }
+          if ($arm -ne 'ARMED') { throw "Shadow diagnostic requires ARMED; actual=$arm" }
+          if ($positions.Count -ne 0) { throw "Shadow diagnostic requires zero positions." }
+          if ($orders.Count -ne 0) { throw "Shadow diagnostic requires zero pending orders." }
+          if ($attOverall -ne 'EXACT_MATCH') { throw "Runtime source attestation not exact: $attOverall" }
+          if ($attCommit.ToLowerInvariant() -ne $expected) { throw "Runtime source commit mismatch: $attCommit" }
+
+          $regimePath = Join-Path $env:RUNNER_TEMP 'sideway-shadow-regime.json'
+          $quotePath = Join-Path $env:RUNNER_TEMP 'sideway-shadow-quote.json'
+          $candlesPath = Join-Path $env:RUNNER_TEMP 'sideway-shadow-candles.json'
+          $regime | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $regimePath -Encoding UTF8
+          $quote | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $quotePath -Encoding UTF8
+          $candles | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $candlesPath -Encoding UTF8
+
+          node .\scripts\diagnose-phase7c-sideway-live-shadow-onebar.mjs $regimePath $quotePath $candlesPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          Write-Host 'SIDEWAY_SHADOW_HTTP_METHODS=GET_ONLY'
+          Write-Host 'SIDEWAY_SHADOW_PRODUCTION_FILE_MUTATION=NONE'
+          Write-Host 'SIDEWAY_SHADOW_MODE_MUTATION=NONE'
+          Write-Host 'SIDEWAY_SHADOW_ARM_MUTATION=NONE'
+          Write-Host 'SIDEWAY_SHADOW_ORDER_MUTATION=NONE'
+          Write-Host 'SIDEWAY_SHADOW_POSITION_MUTATION=NONE'
+          Write-Host 'SIDEWAY_SHADOW_LIVE_TEST_ORDER=NONE'
