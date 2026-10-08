@@ -1,0 +1,198 @@
+name: Phase7C Read-Only Sideway One-Bar Outcome Audit
+
+on:
+  push:
+    branches:
+      - ops/sideway-onebar-candidate-quality-audit-8fa57d37
+    paths:
+      - '.github/workflows/phase7c-readonly-sideway-onebar-outcome-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  outcome:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+    steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@v4
+
+      - name: Measure one-bar candidates with historical candles
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = '8fa57d37ab9232ff913041bc97f151e71de26beb'
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "ONEBAR_OUTCOME_PRODUCTION_HEAD=$actual"
+          if ($actual -ne $expected) { throw "Production HEAD mismatch: $actual" }
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $att = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation/' -Method Get -TimeoutSec 10
+          $mode = [string]$life.mode.mode
+          $arm = [string]$cap.liveArmStatus
+          $attOverall = [string]$att.overall
+          $attCommit = [string]$att.deployment.sourceCommit
+          Write-Host "ONEBAR_OUTCOME_MODE=$mode"
+          Write-Host "ONEBAR_OUTCOME_ARM=$arm"
+          Write-Host "ONEBAR_OUTCOME_ATTESTATION=$attOverall"
+          Write-Host "ONEBAR_OUTCOME_ATTESTED_COMMIT=$attCommit"
+          if ($mode -ne 'PAUSE') { throw "Diagnostic requires PAUSE; actual=$mode" }
+          if ($arm -ne 'ARMED') { throw "Diagnostic requires ARMED; actual=$arm" }
+          if ($attOverall -ne 'EXACT_MATCH' -or $attCommit.ToLowerInvariant() -ne $expected) {
+            throw 'Runtime source attestation mismatch.'
+          }
+
+          $accountPath = Join-Path $prod '.runtime\phase7c-account-mode.json'
+          $lib = Join-Path $prod 'scripts\lib\phase7c-account-mode.ps1'
+          . $lib
+          $accountState = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+          $envFile = [string]$accountState.envFile
+          if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $prod $envFile }
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+          $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+
+          $cases = @(
+            [pscustomobject]@{ Id='SEP10'; SourceClose=[int64]1789030500000; EvalClose=[int64]1789030800000; Side='BUY'; ExpectedPattern='BULLISH_ENGULFING' },
+            [pscustomobject]@{ Id='SEP14'; SourceClose=[int64]1789353300000; EvalClose=[int64]1789353600000; Side='BUY'; ExpectedPattern='BULLISH_REJECTION' },
+            [pscustomobject]@{ Id='OCT05'; SourceClose=[int64]1791208200000; EvalClose=[int64]1791208500000; Side='BUY'; ExpectedPattern='BULLISH_REJECTION' }
+          )
+
+          $auditPath = Join-Path $prod '.runtime\phase7c-executors\decision-observability\live\sideway-decisions.jsonl'
+          if (-not (Test-Path -LiteralPath $auditPath)) { throw "Missing Sideway audit: $auditPath" }
+
+          $wanted = @{}
+          foreach ($case in $cases) {
+            $wanted[[string]$case.SourceClose] = $true
+            $wanted[[string]$case.EvalClose] = $true
+          }
+          $rowsByClose = @{}
+          $closeRegex = '"closeTime":(' + (($wanted.Keys | Sort-Object) -join '|') + ')'
+          foreach ($line in Get-Content -LiteralPath $auditPath) {
+            if ($line -notmatch $closeRegex) { continue }
+            $closeKey = [string]$Matches[1]
+            try { $o = $line | ConvertFrom-Json -Depth 80 } catch { continue }
+            if (-not $rowsByClose.ContainsKey($closeKey)) {
+              $rowsByClose[$closeKey] = New-Object 'System.Collections.Generic.List[object]'
+            }
+            $rowsByClose[$closeKey].Add($o)
+          }
+
+          function Get-M5ObservedPattern([object]$row) {
+            if ($null -eq $row -or $null -eq $row.entryConditions) { return $null }
+            foreach ($c in @($row.entryConditions.conditions)) {
+              if ([string]$c.id -eq 'm5Confirmation') { return [string]$c.observed }
+            }
+            return $null
+          }
+
+          function Get-ConditionStatus([object]$row, [string]$id) {
+            if ($null -eq $row -or $null -eq $row.entryConditions) { return 'MISSING' }
+            foreach ($c in @($row.entryConditions.conditions)) {
+              if ([string]$c.id -eq $id) { return [string]$c.status }
+            }
+            return 'MISSING'
+          }
+
+          function Get-FirstTouch([object[]]$bars, [double]$entry, [double]$up, [double]$down) {
+            foreach ($bar in $bars) {
+              $hitUp = [double]$bar.high -ge ($entry + $up)
+              $hitDown = [double]$bar.low -le ($entry - $down)
+              if ($hitUp -and $hitDown) { return "AMBIGUOUS_SAME_M1@$([string]$bar.openTime)" }
+              if ($hitUp) { return "UP_FIRST@$([string]$bar.openTime)" }
+              if ($hitDown) { return "DOWN_FIRST@$([string]$bar.openTime)" }
+            }
+            return 'NONE'
+          }
+
+          foreach ($case in $cases) {
+            $sourceRows = @($rowsByClose[[string]$case.SourceClose])
+            $evalRows = @($rowsByClose[[string]$case.EvalClose])
+
+            $sourcePass = @($sourceRows | Where-Object { $_.event -eq 'ENTRY_STRATEGY_CONDITIONS_PASS' } | Select-Object -First 1)
+            $sourcePlanBlock = @($sourceRows | Where-Object { $_.event -eq 'ENTRY_PLAN_BLOCK' -or $_.event -eq 'ENTRY_FINAL_PLAN_BLOCK' } | Select-Object -First 1)
+            $sourceAutoLotBlock = @($sourceRows | Where-Object { $_.event -eq 'ENTRY_AUTO_LOT_BLOCK' } | Select-Object -First 1)
+            $evalBlock = @($evalRows | Where-Object { $_.event -eq 'ENTRY_STRATEGY_CONDITION_BLOCK' -and [string]$_.reason -match 'm5Confirmation' } | Select-Object -First 1)
+
+            $sourcePattern = if ($sourcePass.Count) { Get-M5ObservedPattern $sourcePass[0] } else { $null }
+            $sourcePlanReason = if ($sourcePlanBlock.Count) { [string]$sourcePlanBlock[0].raw.plan.reason } else { '' }
+            $sourceStopLoss = if ($sourcePlanBlock.Count -and $null -ne $sourcePlanBlock[0].raw.plan.structuralStopLoss) { [double]$sourcePlanBlock[0].raw.plan.structuralStopLoss } else { [double]::NaN }
+            $sourceStopDistance = if ($sourcePlanBlock.Count -and $null -ne $sourcePlanBlock[0].raw.plan.structuralStopDistance) { [double]$sourcePlanBlock[0].raw.plan.structuralStopDistance } else { [double]::NaN }
+            $sourceAutoReason = if ($sourceAutoLotBlock.Count) {
+              if ($null -ne $sourceAutoLotBlock[0].raw.validation.reason) { [string]$sourceAutoLotBlock[0].raw.validation.reason }
+              elseif ($null -ne $sourceAutoLotBlock[0].raw.validation.reasonCode) { [string]$sourceAutoLotBlock[0].raw.validation.reasonCode }
+              else { [string]$sourceAutoLotBlock[0].reason }
+            } else { '' }
+
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_SOURCE_PASS_COUNT=$($sourcePass.Count)"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_SOURCE_PATTERN=$sourcePattern"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_EXPECTED_PATTERN=$($case.ExpectedPattern)"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_SOURCE_PLAN_REASON=$sourcePlanReason"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_SOURCE_STOP_LOSS=$sourceStopLoss"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_SOURCE_STOP_DISTANCE=$sourceStopDistance"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_SOURCE_AUTOLOT_REASON=$sourceAutoReason"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_EVAL_M5_BLOCK_COUNT=$($evalBlock.Count)"
+
+            if ($evalBlock.Count) {
+              foreach ($id in @('rangingRegime','recommendedModeSideway','minimumRegimeConfidence','supplyDemandRange','rangeEdge','m5Confirmation')) {
+                Write-Host "ONEBAR_OUTCOME_$($case.Id)_EVAL_$($id.ToUpperInvariant())=$(Get-ConditionStatus $evalBlock[0] $id)"
+              }
+            }
+
+            $fromMs = $case.EvalClose
+            $toMs = $case.EvalClose + 120*60*1000
+            $uri = "$bridgeBase/v1/history/candles/XAUUSD?fromMs=$fromMs&toMs=$toMs&timeframe=M1"
+            $bars = @(Invoke-RestMethod -Uri $uri -Headers $headers -Method Get -TimeoutSec 30)
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_M1_BAR_COUNT=$($bars.Count)"
+            if ($bars.Count -lt 1) {
+              Write-Host "ONEBAR_OUTCOME_$($case.Id)_RESULT=NO_HISTORY"
+              continue
+            }
+
+            $entryBar = @($bars | Where-Object { [int64]$_.openTime -ge $case.EvalClose } | Sort-Object { [int64]$_.openTime } | Select-Object -First 1)
+            if (-not $entryBar.Count) {
+              Write-Host "ONEBAR_OUTCOME_$($case.Id)_RESULT=NO_ENTRY_PROXY"
+              continue
+            }
+            $entry = [double]$entryBar[0].open
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_ENTRY_PROXY_M1_OPEN=$entry"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_ENTRY_PROXY_M1_HIGH=$([double]$entryBar[0].high)"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_ENTRY_PROXY_M1_LOW=$([double]$entryBar[0].low)"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_ENTRY_PROXY_M1_CLOSE=$([double]$entryBar[0].close)"
+
+            if (-not [double]::IsNaN($sourceStopLoss) -and $case.Side -eq 'BUY') {
+              $carryStopDistance = $entry - $sourceStopLoss
+              Write-Host "ONEBAR_OUTCOME_$($case.Id)_CARRY_STOP_DISTANCE_VS_SOURCE_SL=$([Math]::Round($carryStopDistance,5))"
+              Write-Host "ONEBAR_OUTCOME_$($case.Id)_CARRY_STOP_6_10_PASS=$($carryStopDistance -ge 6 -and $carryStopDistance -le 10)"
+            }
+
+            foreach ($minutes in @(30,60,120)) {
+              $end = $case.EvalClose + $minutes*60*1000
+              $window = @($bars | Where-Object { [int64]$_.openTime -ge $case.EvalClose -and [int64]$_.openTime -lt $end })
+              if (-not $window.Count) { continue }
+              $maxHigh = [double](($window | Measure-Object -Property high -Maximum).Maximum)
+              $minLow = [double](($window | Measure-Object -Property low -Minimum).Minimum)
+              $mfe = if ($case.Side -eq 'BUY') { $maxHigh - $entry } else { $entry - $minLow }
+              $mae = if ($case.Side -eq 'BUY') { $entry - $minLow } else { $maxHigh - $entry }
+              Write-Host "ONEBAR_OUTCOME_$($case.Id)_$($minutes)M_MFE=$([Math]::Round($mfe,5))"
+              Write-Host "ONEBAR_OUTCOME_$($case.Id)_$($minutes)M_MAE=$([Math]::Round($mae,5))"
+            }
+
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_FIRST_TOUCH_6=$(Get-FirstTouch $bars $entry 6 6)"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_FIRST_TOUCH_10=$(Get-FirstTouch $bars $entry 10 10)"
+            Write-Host "ONEBAR_OUTCOME_$($case.Id)_RESULT=MEASURED"
+          }
+
+          Write-Host 'ONEBAR_OUTCOME_ENTRY_PROXY=M1_OPEN_AT_EVAL_CLOSE'
+          Write-Host 'ONEBAR_OUTCOME_CAUTION=PROXY_NOT_EXACT_TICK_ENTRY'
+          Write-Host 'ONEBAR_OUTCOME_READ_ONLY=TRUE'
+          Write-Host 'ONEBAR_OUTCOME_PRODUCTION_HTTP_METHODS=GET_ONLY'
+          Write-Host 'ONEBAR_OUTCOME_PRODUCTION_MUTATION=NONE'
+          Write-Host 'ONEBAR_OUTCOME_MODE_MUTATION=NONE'
+          Write-Host 'ONEBAR_OUTCOME_ARM_MUTATION=NONE'
+          Write-Host 'ONEBAR_OUTCOME_ORDER_MUTATION=NONE'
+          Write-Host 'ONEBAR_OUTCOME_POSITION_MUTATION=NONE'
+          Write-Host 'ONEBAR_OUTCOME_LIVE_TEST_ORDER=NONE'
