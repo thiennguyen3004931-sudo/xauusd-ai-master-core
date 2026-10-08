@@ -1,0 +1,127 @@
+name: Phase7C Read-Only Sideway One-Bar Candidate Quality Audit
+
+on:
+  push:
+    branches:
+      - ops/sideway-onebar-candidate-quality-audit-8fa57d37
+    paths:
+      - '.github/workflows/phase7c-readonly-sideway-onebar-candidate-quality-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 8
+    steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@v4
+
+      - name: Inspect historical Sideway audit candidates read-only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = '8fa57d37ab9232ff913041bc97f151e71de26beb'
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "SIDEWAY_QUALITY_PRODUCTION_HEAD=$actual"
+          if ($actual -ne $expected) { throw "Production HEAD mismatch: $actual" }
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $att = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation/' -Method Get -TimeoutSec 10
+          $mode = [string]$life.mode.mode
+          $arm = [string]$cap.liveArmStatus
+          $attOverall = [string]$att.overall
+          $attCommit = [string]$att.deployment.sourceCommit
+          Write-Host "SIDEWAY_QUALITY_MODE=$mode"
+          Write-Host "SIDEWAY_QUALITY_ARM=$arm"
+          Write-Host "SIDEWAY_QUALITY_ATTESTATION=$attOverall"
+          Write-Host "SIDEWAY_QUALITY_ATTESTED_COMMIT=$attCommit"
+          if ($mode -ne 'PAUSE') { throw "Diagnostic requires PAUSE; actual=$mode" }
+          if ($arm -ne 'ARMED') { throw "Diagnostic requires ARMED; actual=$arm" }
+          if ($attOverall -ne 'EXACT_MATCH' -or $attCommit.ToLowerInvariant() -ne $expected) {
+            throw 'Runtime source attestation mismatch.'
+          }
+
+          $auditPath = Join-Path $prod '.runtime\phase7c-executors\decision-observability\live\sideway-decisions.jsonl'
+          if (-not (Test-Path -LiteralPath $auditPath)) { throw "Missing Sideway audit: $auditPath" }
+
+          $targets = @(
+            [pscustomobject]@{ Id='SEP10'; At=[DateTimeOffset]::Parse('2026-09-10T09:00:04Z') },
+            [pscustomobject]@{ Id='SEP14'; At=[DateTimeOffset]::Parse('2026-09-14T02:40:02Z') },
+            [pscustomobject]@{ Id='OCT05'; At=[DateTimeOffset]::Parse('2026-10-05T13:55:05Z') }
+          )
+
+          function To-Ms([object]$value) {
+            if ($null -eq $value) { return $null }
+            if ($value -is [ValueType]) {
+              $n = [double]$value
+              if ($n -gt 1e12) { return [int64]$n }
+              if ($n -gt 1e9) { return [int64]($n * 1000) }
+            }
+            $s = [string]$value
+            [double]$n = 0
+            if ([double]::TryParse($s, [ref]$n)) {
+              if ($n -gt 1e12) { return [int64]$n }
+              if ($n -gt 1e9) { return [int64]($n * 1000) }
+            }
+            try { return [DateTimeOffset]::Parse($s).ToUnixTimeMilliseconds() } catch { return $null }
+          }
+
+          $rows = New-Object 'System.Collections.Generic.List[object]'
+          foreach ($line in Get-Content -LiteralPath $auditPath) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            try { $obj = $line | ConvertFrom-Json -Depth 80 } catch { continue }
+            $eventMs = To-Ms $obj.timestamp
+            if ($null -eq $eventMs -and $null -ne $obj.raw) { $eventMs = To-Ms $obj.raw.timestamp }
+            $closeMs = $null
+            if ($null -ne $obj.closeTime) { $closeMs = To-Ms $obj.closeTime }
+            elseif ($null -ne $obj.raw -and $null -ne $obj.raw.closeTime) { $closeMs = To-Ms $obj.raw.closeTime }
+
+            foreach ($target in $targets) {
+              $targetMs = $target.At.ToUnixTimeMilliseconds()
+              $eventNear = $null -ne $eventMs -and [Math]::Abs([double]$eventMs - [double]$targetMs) -le 10*60*1000
+              $closeNear = $null -ne $closeMs -and [Math]::Abs([double]$closeMs - [double]$targetMs) -le 10*60*1000
+              if ($eventNear -or $closeNear) {
+                $rows.Add([pscustomobject]@{
+                  target = $target.Id
+                  event = [string]$obj.event
+                  timestamp = $obj.timestamp
+                  closeTime = if ($null -ne $obj.closeTime) { $obj.closeTime } else { $obj.raw.closeTime }
+                  side = if ($null -ne $obj.side) { $obj.side } else { $obj.raw.side }
+                  reason = if ($null -ne $obj.reason) { $obj.reason } else { $obj.raw.reason }
+                  phase = if ($null -ne $obj.phase) { $obj.phase } else { $obj.raw.phase }
+                  confirmation = if ($null -ne $obj.confirmation) { $obj.confirmation } else { $obj.raw.confirmation }
+                  confirmationCloseTime = if ($null -ne $obj.confirmationCloseTime) { $obj.confirmationCloseTime } else { $obj.raw.confirmationCloseTime }
+                  confirmationAgeBars = if ($null -ne $obj.confirmationAgeBars) { $obj.confirmationAgeBars } else { $obj.raw.confirmationAgeBars }
+                  plan = if ($null -ne $obj.plan) { $obj.plan } else { $obj.raw.plan }
+                  entryConditions = if ($null -ne $obj.entryConditions) { $obj.entryConditions } else { $obj.raw.entryConditions }
+                  regime = if ($null -ne $obj.regime) { $obj.regime } else { $obj.raw.regime }
+                  confidence = if ($null -ne $obj.confidence) { $obj.confidence } else { $obj.raw.confidence }
+                  hasRange = if ($null -ne $obj.hasRange) { $obj.hasRange } else { $obj.raw.hasRange }
+                  range = if ($null -ne $obj.range) { $obj.range } else { $obj.raw.range }
+                  structuralStopDistance = if ($null -ne $obj.structuralStopDistance) { $obj.structuralStopDistance } else { $obj.raw.structuralStopDistance }
+                  raw = $obj.raw
+                })
+              }
+            }
+          }
+
+          foreach ($target in $targets) {
+            $matches = @($rows | Where-Object target -eq $target.Id)
+            Write-Host "SIDEWAY_QUALITY_$($target.Id)_MATCH_COUNT=$($matches.Count)"
+            foreach ($m in $matches) {
+              $json = $m | ConvertTo-Json -Depth 30 -Compress
+              Write-Host "SIDEWAY_QUALITY_ROW=$json"
+            }
+          }
+
+          Write-Host 'SIDEWAY_QUALITY_READ_ONLY=TRUE'
+          Write-Host 'SIDEWAY_QUALITY_PRODUCTION_MUTATION=NONE'
+          Write-Host 'SIDEWAY_QUALITY_MODE_MUTATION=NONE'
+          Write-Host 'SIDEWAY_QUALITY_ARM_MUTATION=NONE'
+          Write-Host 'SIDEWAY_QUALITY_ORDER_MUTATION=NONE'
+          Write-Host 'SIDEWAY_QUALITY_POSITION_MUTATION=NONE'
+          Write-Host 'SIDEWAY_QUALITY_LIVE_TEST_ORDER=NONE'
