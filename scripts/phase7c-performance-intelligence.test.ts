@@ -280,3 +280,103 @@ test("Performance Intelligence audit funnel respects the requested days window",
   assert.equal(sideway.blockedEvents, 1);
   assert.deepEqual(sideway.blockedReasons, [{ rule: "CURRENT_BLOCKER", count: 1 }]);
 });
+
+test("Sideway M5 confirmation age is read from persisted evidence and conflicts fail closed", () => {
+  assert.equal(
+    __test.confirmationAgeBarsOf({ raw: { confirmationAgeBars: 1 } }),
+    1,
+  );
+  assert.equal(
+    __test.confirmationAgeBarsOf({ confirmation_age_bars: 0 }),
+    0,
+  );
+  assert.equal(
+    __test.confirmationAgeBarsOf({ raw: { confirmationAgeBars: -1 } }),
+    null,
+  );
+  assert.equal(__test.sidewayM5ConfirmationPath(0), "M5_CURRENT");
+  assert.equal(__test.sidewayM5ConfirmationPath(1), "M5_CARRY_1");
+  assert.equal(__test.sidewayM5ConfirmationPath(2), "M5_CARRY_OTHER");
+  assert.equal(__test.sidewayM5ConfirmationPath(null), "UNKNOWN");
+
+  const event = (age: number | null) => ({
+    raw: {},
+    index: 0,
+    eventId: String(age),
+    eventName: "ENTRY_SUBMIT",
+    occurredAtMs: 1,
+    identifiers: [],
+    passedRules: [],
+    blockedRules: [],
+    blockReasons: [],
+    entryType: "IMMEDIATE",
+    regime: "RANGING",
+    entryPolicy: null,
+    performanceStrategy: "SIDEWAY",
+    confirmationAgeBars: age,
+  });
+
+  assert.equal(__test.chooseConfirmationAgeBars([event(1)] as never), 1);
+  assert.equal(__test.chooseConfirmationAgeBars([event(1), event(1)] as never), 1);
+  assert.equal(__test.chooseConfirmationAgeBars([event(0), event(1)] as never), null);
+});
+
+test("Sideway M5 confirmation age profitability uses only EXACT SIDEWAY trades", () => {
+  const trade = (
+    ageBars: number | null,
+    netPnl: number,
+    verdict: "EXACT" | "AMBIGUOUS" = "EXACT",
+    performanceStrategy: "SIDEWAY" | "TREND" = "SIDEWAY",
+  ) => ({
+    strategy: performanceStrategy === "SIDEWAY" ? "SIDEWAY" : "TREND",
+    netPnl,
+    correlation: { verdict },
+    attribution: { performanceStrategy, confirmationAgeBars: ageBars },
+  });
+
+  const rows = __test.aggregateSidewayM5ConfirmationAge([
+    trade(0, 10),
+    trade(0, -4),
+    trade(1, 8),
+    trade(1, -2),
+    trade(2, 5),
+    trade(null, -1),
+    trade(1, 999, "AMBIGUOUS"),
+    trade(1, 999, "EXACT", "TREND"),
+  ] as never);
+
+  const current = rows.find((row) => row.path === "M5_CURRENT");
+  const carry = rows.find((row) => row.path === "M5_CARRY_1");
+  const other = rows.find((row) => row.path === "M5_CARRY_OTHER");
+  const unknown = rows.find((row) => row.path === "UNKNOWN");
+
+  assert.deepEqual(current, {
+    path: "M5_CURRENT",
+    ageBars: 0,
+    sampleSize: 2,
+    wins: 1,
+    losses: 1,
+    breakeven: 0,
+    netPnl: 6,
+    expectancy: 3,
+    winRatePercent: 50,
+    profitFactor: 2.5,
+  });
+  assert.deepEqual(carry, {
+    path: "M5_CARRY_1",
+    ageBars: 1,
+    sampleSize: 2,
+    wins: 1,
+    losses: 1,
+    breakeven: 0,
+    netPnl: 6,
+    expectancy: 3,
+    winRatePercent: 50,
+    profitFactor: 4,
+  });
+  assert.equal(other?.sampleSize, 1);
+  assert.equal(other?.netPnl, 5);
+  assert.equal(unknown?.sampleSize, 1);
+  assert.equal(unknown?.netPnl, -1);
+});
+
