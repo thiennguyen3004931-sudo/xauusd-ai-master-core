@@ -19,7 +19,6 @@ $ExpectedSourceCommit = $ExpectedSourceCommit.Trim().ToLowerInvariant()
 if ($ExpectedSourceCommit -notmatch '^[0-9a-f]{40}$') {
   throw "Invalid AUTO LIVE monitor expected source commit: $ExpectedSourceCommit"
 }
-Write-Host "MONITOR_EXPECTED_SOURCE_COMMIT=$ExpectedSourceCommit"
 
 function Get-ObjectProperty {
   param([object]$Object, [string]$Name)
