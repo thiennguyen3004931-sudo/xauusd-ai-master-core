@@ -69,11 +69,11 @@ jobs:
             foreach ($close in @($case.SourceClose,$case.EvalClose)) {
               $key = [string]$close
               if ($rowsByClose.ContainsKey($key)) { continue }
-              $rowsByClose[$key] = New-Object 'System.Collections.Generic.List[object]'
+              $rowsByClose[$key] = @()
               $needle = '"closeTime":' + $key
               foreach ($match in @(Select-String -LiteralPath $auditPath -SimpleMatch -Pattern $needle)) {
                 try { $o = $match.Line | ConvertFrom-Json } catch { continue }
-                $rowsByClose[$key].Add($o)
+                $rowsByClose[$key] += $o
               }
               Write-Host "ONEBAR_OUTCOME_CLOSE_$($key)_AUDIT_ROWS=$($rowsByClose[$key].Count)"
             }
