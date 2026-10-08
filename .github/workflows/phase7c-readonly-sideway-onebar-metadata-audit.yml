@@ -48,7 +48,6 @@ jobs:
             $kept = 0
             foreach ($m in $matches) {
               try { $o = $m.Line | ConvertFrom-Json -Depth 80 } catch { continue }
-              if ([string]$o.raw.closeTime -ne $close) { continue }
               if ($o.event -notin @('ENTRY_STRATEGY_CONDITIONS_PASS','ENTRY_STRATEGY_CONDITION_BLOCK','ENTRY_PLAN_BLOCK','ENTRY_FINAL_PLAN_BLOCK','ENTRY_AUTO_LOT_BLOCK','ENTRY_FINAL_GATE_BLOCK','ENTRY_SUBMIT','ENTRY_FILLED')) { continue }
               $kept += 1
               $m5 = $null
