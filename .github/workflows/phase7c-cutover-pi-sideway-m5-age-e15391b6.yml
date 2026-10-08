@@ -1,0 +1,137 @@
+name: Phase7C Cutover PI Sideway M5 Age e15391b6
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-cutover-pi-sideway-m5-age-e15391b6.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 18
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: e15391b61799330804e6bde95eb8933f4a3cae19
+          fetch-depth: 0
+
+      - name: Guarded Performance Intelligence production cutover
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $current = '8fa57d37ab9232ff913041bc97f151e71de26beb'
+          $target = 'e15391b61799330804e6bde95eb8933f4a3cae19'
+          $targetTree = '27dbe29df2ad37d6030b215bae9a169392463af1'
+          $helperBlob = 'd8fb26409df5ddecdf5353ab0fdf42cbd8d3500f'
+
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "PI_M5_AGE_CUTOVER_PRE_HEAD=$actual"
+
+          if ($actual -eq $target) {
+            Write-Host 'PI_M5_AGE_CUTOVER_TRANSITION=SKIPPED_ALREADY_TARGET'
+          } elseif ($actual -eq $current) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PWD 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot $prod -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 $helperBlob -ExpectedInitialArm ARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            throw "UNEXPECTED_PRODUCTION_HEAD expected_current=$current expected_target=$target actual=$actual"
+          }
+
+          $postHead = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodBranch = (git -C $prod branch --show-current).Trim()
+          $prodTree = (git -C $prod rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+
+          Write-Host "PI_M5_AGE_CUTOVER_POST_HEAD=$postHead"
+          Write-Host "PI_M5_AGE_CUTOVER_POST_BRANCH=$prodBranch"
+          Write-Host "PI_M5_AGE_CUTOVER_POST_TREE=$prodTree"
+
+          if ($postHead -ne $target) { throw 'Production HEAD did not reach target.' }
+          if ($prodBranch -ne 'main') { throw "Expected production branch main; actual=$prodBranch" }
+          if ($prodTree -ne $targetTree) { throw "Expected production tree $targetTree; actual=$prodTree" }
+
+          $corePath = Join-Path $prod 'apps\api\src\services\phase7c-performance-intelligence-core.service.ts'
+          $typesPath = Join-Path $prod 'apps\web\src\phase7c-performance-intelligence-types.ts'
+          $cardPath = Join-Path $prod 'apps\web\src\ui\Phase7CPerformanceIntelligenceCard.tsx'
+          $core = Get-Content -LiteralPath $corePath -Raw
+          $types = Get-Content -LiteralPath $typesPath -Raw
+          $card = Get-Content -LiteralPath $cardPath -Raw
+
+          foreach ($required in @(
+            'confirmationAgeBars',
+            'aggregateSidewayM5ConfirmationAge',
+            '"M5_CURRENT"',
+            '"M5_CARRY_1"',
+            'sidewayM5Confirmation: aggregateSidewayM5ConfirmationAge(trades)',
+            'autoRetune: false'
+          )) {
+            if ($core -notmatch [regex]::Escape($required)) {
+              throw "Performance Intelligence core contract missing: $required"
+            }
+          }
+          if ($types -notmatch [regex]::Escape('sidewayM5Confirmation')) {
+            throw 'Performance Intelligence web types missing Sideway M5 confirmation bucket.'
+          }
+          if ($card -notmatch [regex]::Escape('Sideway M5 confirmation age')) {
+            throw 'Performance Intelligence UI missing Sideway M5 confirmation age section.'
+          }
+          Write-Host 'PI_M5_AGE_SOURCE_CONTRACT=PASS'
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $att = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation/' -Method Get -TimeoutSec 10
+
+          $mode = [string]$life.mode.mode
+          $armStatus = [string]$cap.liveArmStatus
+          $armed = [bool]$cap.liveExecutionArmed
+          $attOverall = [string]$att.overall
+          $attCommit = [string]$att.deployment.sourceCommit
+
+          Write-Host "PI_M5_AGE_CUTOVER_FINAL_MODE=$mode"
+          Write-Host "PI_M5_AGE_CUTOVER_FINAL_ARM=$armStatus"
+          Write-Host "PI_M5_AGE_CUTOVER_FINAL_ARMED=$armed"
+          Write-Host "PI_M5_AGE_CUTOVER_ATTESTATION=$attOverall"
+          Write-Host "PI_M5_AGE_CUTOVER_ATTESTED_COMMIT=$attCommit"
+
+          if ($mode -ne 'PAUSE') { throw "Expected PAUSE after cutover; actual=$mode" }
+          if ($armStatus -ne 'ARMED' -or -not $armed) { throw 'Expected ARM to remain ARMED.' }
+          if ($attOverall -ne 'EXACT_MATCH') { throw "Runtime source attestation not exact: $attOverall" }
+          if ($attCommit.ToLowerInvariant() -ne $target) { throw "Runtime source commit mismatch: $attCommit" }
+
+          $pi = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/performance-intelligence?days=90&symbol=XAUUSD' -Method Get -Headers @{ Accept='application/json' } -TimeoutSec 120
+          if ($pi.version -ne 2) { throw "Unexpected Performance Intelligence version: $($pi.version)" }
+          if ($pi.safety.readOnly -ne $true) { throw 'Performance Intelligence must remain read-only.' }
+          if ($pi.safety.autoRetune -ne $false) { throw 'Performance Intelligence autoRetune must remain false.' }
+          if ($pi.safety.strategyMutation -ne $false -or $pi.safety.riskMutation -ne $false -or
+              $pi.safety.orderMutation -ne $false -or $pi.safety.positionMutation -ne $false -or
+              $pi.safety.modeMutation -ne $false -or $pi.safety.armMutation -ne $false) {
+            throw 'Performance Intelligence safety contract is not mutation-free.'
+          }
+
+          $buckets = @($pi.sidewayM5Confirmation)
+          $paths = @($buckets | ForEach-Object { [string]$_.path })
+          foreach ($requiredPath in @('M5_CURRENT','M5_CARRY_1','M5_CARRY_OTHER','UNKNOWN')) {
+            if ($paths -notcontains $requiredPath) {
+              throw "Missing Performance Intelligence Sideway M5 bucket: $requiredPath"
+            }
+          }
+
+          Write-Host "PI_M5_AGE_BUCKET_COUNT=$($buckets.Count)"
+          foreach ($bucket in $buckets) {
+            Write-Host ("PI_M5_AGE_BUCKET={0}|N={1}|PNL={2}|EXPECTANCY={3}|WR={4}|PF={5}" -f $bucket.path,$bucket.sampleSize,$bucket.netPnl,$bucket.expectancy,$bucket.winRatePercent,$bucket.profitFactor)
+          }
+
+          Write-Host 'PI_M5_AGE_PRODUCTION=PASS'
+          Write-Host 'PERFORMANCE_INTELLIGENCE_READ_ONLY=TRUE'
+          Write-Host 'AUTO_RETUNE=FALSE'
+          Write-Host 'TRADING_LOGIC_MUTATION=NONE'
+          Write-Host 'RISK_LOT_MUTATION=NONE'
+          Write-Host 'MODE_FINAL=PAUSE'
+          Write-Host 'ARM_FINAL=ARMED'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
