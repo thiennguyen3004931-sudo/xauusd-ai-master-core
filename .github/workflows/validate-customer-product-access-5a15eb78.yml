@@ -1,0 +1,79 @@
+name: Validate Customer Product Access 5a15eb78
+
+on:
+  push:
+    branches:
+      - ops/validate-customer-product-access-5a15eb78
+    paths:
+      - '.github/workflows/validate-customer-product-access-5a15eb78.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: 5a15eb78f6e2bc1c36c54b428e45b1220d18b086
+          fetch-depth: 0
+
+      - name: Verify exact head
+        shell: powershell
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          Write-Host "CUSTOMER_ACCESS_EXPECTED_HEAD=5a15eb78f6e2bc1c36c54b428e45b1220d18b086"
+          Write-Host "CUSTOMER_ACCESS_ACTUAL_HEAD=$actual"
+          if ($actual -ne '5a15eb78f6e2bc1c36c54b428e45b1220d18b086') {
+            throw 'Exact-head checkout mismatch.'
+          }
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build copy protocol dependency
+        run: pnpm --filter @xauusd/copy-protocol build
+
+      - name: Customer access license tests
+        run: pnpm --filter @xauusd/license-service test
+
+      - name: Customer access license typecheck
+        run: pnpm --filter @xauusd/license-service typecheck
+
+      - name: Customer access license build
+        run: pnpm --filter @xauusd/license-service build
+
+      - name: P2 IP boundary contract
+        run: node --test scripts/test-bot-ip-protection-p2-boundary.mjs
+
+      - name: Diff hygiene
+        run: git diff --check e15391b61799330804e6bde95eb8933f4a3cae19..5a15eb78f6e2bc1c36c54b428e45b1220d18b086
+
+      - name: Safety summary
+        shell: powershell
+        run: |
+          Write-Host 'CUSTOMER_PRODUCT_ACCESS_VALIDATION=PASS'
+          Write-Host 'SELF_MANAGED_AUTHORIZATION=TESTED'
+          Write-Host 'COPY_FOLLOWER_AUTHORIZATION=TESTED'
+          Write-Host 'PROPRIETARY_STRATEGY_DEPENDENCY=NONE'
+          Write-Host 'PRODUCTION_MUTATION=NONE'
+          Write-Host 'MODE_MUTATION=NONE'
+          Write-Host 'ARM_MUTATION=NONE'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
