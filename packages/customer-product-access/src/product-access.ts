@@ -1,6 +1,6 @@
 import {
   assertLicenseRecord,
-  effectiveLicenseStatus: licenseStatus,
+  effectiveLicenseStatus,
   type LicenseRecord,
   type LicenseStatus,
 } from "@xauusd/license-service";
@@ -410,7 +410,7 @@ export function authorizeSelfManagedAccess(
     };
   }
 
-  if (effectiveLicenseStatus !== "ACTIVE") {
+  if (licenseStatus !== "ACTIVE") {
     return {
       ok: false,
       code: "LICENSE_NOT_ACTIVE",
@@ -483,7 +483,7 @@ export function authorizeCopyFollowerAccess(
     };
   }
 
-  if (effectiveLicenseStatus !== "ACTIVE") {
+  if (licenseStatus !== "ACTIVE") {
     return {
       ok: false,
       code: "LICENSE_NOT_ACTIVE",
