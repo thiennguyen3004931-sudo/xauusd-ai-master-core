@@ -72,7 +72,7 @@ jobs:
               $rowsByClose[$key] = New-Object 'System.Collections.Generic.List[object]'
               $needle = '"closeTime":' + $key
               foreach ($match in @(Select-String -LiteralPath $auditPath -SimpleMatch -Pattern $needle)) {
-                try { $o = $match.Line | ConvertFrom-Json -Depth 80 } catch { continue }
+                try { $o = $match.Line | ConvertFrom-Json } catch { continue }
                 $rowsByClose[$key].Add($o)
               }
               Write-Host "ONEBAR_OUTCOME_CLOSE_$($key)_AUDIT_ROWS=$($rowsByClose[$key].Count)"
