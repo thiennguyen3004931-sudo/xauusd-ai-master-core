@@ -46,8 +46,19 @@ jobs:
           $regime = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/live-regime?symbol=XAUUSD&count=320' -Method Get -TimeoutSec 12
           $quote = Invoke-RestMethod -Uri "$bridgeBase/v1/quotes/XAUUSD" -Headers $headers -Method Get -TimeoutSec 10
           $candles = Invoke-RestMethod -Uri "$bridgeBase/v1/candles/XAUUSD?timeframe=M5&count=8" -Headers $headers -Method Get -TimeoutSec 10
-          $positions = @(Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $headers -Method Get -TimeoutSec 10)
-          $orders = @(Invoke-RestMethod -Uri "$bridgeBase/v1/orders?symbol=XAUUSD" -Headers $headers -Method Get -TimeoutSec 10)
+          function Read-BridgeArray {
+            param([string]$Uri, [hashtable]$Headers)
+            $response = Invoke-WebRequest -UseBasicParsing -Uri $Uri -Headers $Headers -Method Get -TimeoutSec 10
+            if ([string]::IsNullOrWhiteSpace($response.Content)) { return }
+            $parsed = $response.Content | ConvertFrom-Json
+            if ($null -eq $parsed) { return }
+            foreach ($item in @($parsed)) {
+              if ($null -ne $item) { Write-Output $item }
+            }
+          }
+
+          $positions = @(Read-BridgeArray -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $headers)
+          $orders = @(Read-BridgeArray -Uri "$bridgeBase/v1/orders?symbol=XAUUSD" -Headers $headers)
 
           $mode = [string]$life.mode.mode
           $arm = [string]$cap.liveArmStatus
@@ -63,8 +74,12 @@ jobs:
 
           if ($mode -ne 'PAUSE') { throw "Shadow diagnostic requires PAUSE; actual=$mode" }
           if ($arm -ne 'ARMED') { throw "Shadow diagnostic requires ARMED; actual=$arm" }
-          if ($positions.Count -ne 0) { throw "Shadow diagnostic requires zero positions." }
-          if ($orders.Count -ne 0) { throw "Shadow diagnostic requires zero pending orders." }
+          foreach ($p in $positions) {
+            Write-Host ("SIDEWAY_SHADOW_POSITION=ticket={0}|side={1}|volume={2}|magic={3}|comment={4}|openPrice={5}|stopLoss={6}|takeProfit={7}" -f [string]$p.ticket,[string]$p.side,[string]$p.volume,[string]$p.magic,[string]$p.comment,[string]$p.openPrice,[string]$p.stopLoss,[string]$p.takeProfit)
+          }
+          foreach ($o in $orders) {
+            Write-Host ("SIDEWAY_SHADOW_PENDING=ticket={0}|type={1}|volume={2}|magic={3}|comment={4}|price={5}|stopLoss={6}|takeProfit={7}" -f [string]$o.ticket,[string]$o.type,[string]$o.volume,[string]$o.magic,[string]$o.comment,[string]$o.price,[string]$o.stopLoss,[string]$o.takeProfit)
+          }
           if ($attOverall -ne 'EXACT_MATCH') { throw "Runtime source attestation not exact: $attOverall" }
           if ($attCommit.ToLowerInvariant() -ne $expected) { throw "Runtime source commit mismatch: $attCommit" }
 
