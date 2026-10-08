@@ -10,9 +10,14 @@ if (!regimePath || !quotePath || !candlesPath) {
   throw new Error("Usage: node diagnose-phase7c-sideway-live-shadow-onebar.mjs <regime.json> <quote.json> <candles.json>");
 }
 
-const regime = JSON.parse(fs.readFileSync(regimePath, "utf8"));
-const quote = JSON.parse(fs.readFileSync(quotePath, "utf8"));
-const candles = JSON.parse(fs.readFileSync(candlesPath, "utf8"));
+function readJson(path) {
+  const raw = fs.readFileSync(path, "utf8").replace(/^\uFEFF/, "");
+  return JSON.parse(raw);
+}
+
+const regime = readJson(regimePath);
+const quote = readJson(quotePath);
+const candles = readJson(candlesPath);
 
 const rows = Array.isArray(candles) ? candles : [];
 const latest = rows.at(-1) ?? null;
