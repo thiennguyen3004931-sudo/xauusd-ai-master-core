@@ -1,6 +1,6 @@
 import {
   assertLicenseRecord,
-  effectiveLicenseStatus,
+  effectiveLicenseStatus: licenseStatus,
   type LicenseRecord,
   type LicenseStatus,
 } from "@xauusd/license-service";
@@ -287,7 +287,7 @@ function validateCommon(
     return { ok: false, code: "INVALID_GRANT" };
   }
 
-  const effectiveLicenseStatus = effectiveLicenseStatus(license, request.now);
+  const licenseStatus = effectiveLicenseStatus(license, request.now);
 
   if (
     grant.licenseId !== license.licenseId ||
@@ -300,7 +300,7 @@ function validateCommon(
       ok: false,
       code: "LICENSE_GRANT_MISMATCH",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -312,7 +312,7 @@ function validateCommon(
       ok: false,
       code: "INSTALLATION_MISMATCH",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -321,7 +321,7 @@ function validateCommon(
       ok: false,
       code: "MT5_LOGIN_NOT_ALLOWED",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -330,7 +330,7 @@ function validateCommon(
       ok: false,
       code: "BROKER_SERVER_NOT_ALLOWED",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -368,14 +368,14 @@ export function authorizeSelfManagedAccess(
   const common = validateCommon(license, grant, request);
   if (common) return common;
 
-  const effectiveLicenseStatus = effectiveLicenseStatus(license, request.now);
+  const licenseStatus = effectiveLicenseStatus(license, request.now);
 
   if (grant.productMode !== "SELF_MANAGED") {
     return {
       ok: false,
       code: "PRODUCT_MODE_MISMATCH",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -384,7 +384,7 @@ export function authorizeSelfManagedAccess(
       ok: false,
       code: "BOT_MODE_NOT_ALLOWED",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -397,7 +397,7 @@ export function authorizeSelfManagedAccess(
       ok: false,
       code: "GRANT_NOT_YET_VALID",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -406,7 +406,7 @@ export function authorizeSelfManagedAccess(
       ok: false,
       code: "GRANT_EXPIRED",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -415,7 +415,7 @@ export function authorizeSelfManagedAccess(
       ok: false,
       code: "LICENSE_NOT_ACTIVE",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -423,7 +423,7 @@ export function authorizeSelfManagedAccess(
     ok: true,
     code: "AUTHORIZED",
     productMode: grant.productMode,
-    effectiveLicenseStatus,
+    effectiveLicenseStatus: licenseStatus,
     exposureAllowed: true,
   };
 }
@@ -445,14 +445,14 @@ export function authorizeCopyFollowerAccess(
   const common = validateCommon(license, grant, request);
   if (common) return common;
 
-  const effectiveLicenseStatus = effectiveLicenseStatus(license, request.now);
+  const licenseStatus = effectiveLicenseStatus(license, request.now);
 
   if (grant.productMode !== "COPY_FOLLOWER") {
     return {
       ok: false,
       code: "PRODUCT_MODE_MISMATCH",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -461,7 +461,7 @@ export function authorizeCopyFollowerAccess(
       ok: false,
       code: "SIZING_MODE_NOT_ALLOWED",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -470,7 +470,7 @@ export function authorizeCopyFollowerAccess(
       ok: false,
       code: "GRANT_NOT_YET_VALID",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -479,7 +479,7 @@ export function authorizeCopyFollowerAccess(
       ok: false,
       code: "GRANT_EXPIRED",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -488,7 +488,7 @@ export function authorizeCopyFollowerAccess(
       ok: false,
       code: "LICENSE_NOT_ACTIVE",
       productMode: grant.productMode,
-      effectiveLicenseStatus,
+      effectiveLicenseStatus: licenseStatus,
     };
   }
 
@@ -496,7 +496,7 @@ export function authorizeCopyFollowerAccess(
     ok: true,
     code: "AUTHORIZED",
     productMode: grant.productMode,
-    effectiveLicenseStatus,
+    effectiveLicenseStatus: licenseStatus,
     exposureAllowed: true,
   };
 }
