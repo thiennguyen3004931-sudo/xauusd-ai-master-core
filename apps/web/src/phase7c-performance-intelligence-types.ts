@@ -23,6 +23,7 @@ export interface Phase7CPerformanceIntelligenceTrade {
     regime: string | null;
     entryPolicy: string | null;
     performanceStrategy: Phase7CPerformanceStrategy;
+    confirmationAgeBars: number | null;
     passedRules: string[];
     blockedRules: string[];
     decisionEventIds: string[];
@@ -89,6 +90,18 @@ export interface Phase7CPerformanceIntelligenceSnapshot {
     winRatePercent: number;
     profitFactor: number | null;
   }>;
+  sidewayM5Confirmation: Array<{
+    path: "M5_CURRENT" | "M5_CARRY_1" | "M5_CARRY_OTHER" | "UNKNOWN";
+    ageBars: 0 | 1 | null;
+    sampleSize: number;
+    wins: number;
+    losses: number;
+    breakeven: number;
+    netPnl: number;
+    expectancy: number;
+    winRatePercent: number;
+    profitFactor: number | null;
+  }>;
   entryFunnel: Array<{
     strategy: Phase7CPerformanceStrategy;
     observedEntryDecisionEvents: number;
@@ -133,6 +146,7 @@ export interface Phase7CPerformanceCorrelationRow {
     regime: string | null;
     entryPolicy?: string | null;
     performanceStrategy?: Phase7CPerformanceStrategy;
+    confirmationAgeBars?: number | null;
     passedRules: string[];
     blockedRules: string[];
     decisionEventIds: string[];
