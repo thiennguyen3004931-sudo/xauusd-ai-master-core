@@ -55,7 +55,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PRODUCTION_ROOT: F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
-          EXPECTED_SOURCE_COMMIT: 8514fafffea7e7cde6a3bddfbb3cd23474bc20f7
           MONITOR_ISSUE_NUMBER: '28'
         run: |
           $notify = $false
@@ -67,7 +66,6 @@ jobs:
 
           $params = @{
             ProductionRoot = $env:PRODUCTION_ROOT
-            ExpectedSourceCommit = $env:EXPECTED_SOURCE_COMMIT
             IssueNumber = [int]$env:MONITOR_ISSUE_NUMBER
             Notify = $notify
           }
