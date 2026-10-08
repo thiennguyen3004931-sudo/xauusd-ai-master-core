@@ -1,0 +1,95 @@
+name: Phase7C Read-Only Sideway One-Bar Exact Context
+
+on:
+  push:
+    branches:
+      - ops/sideway-onebar-candidate-quality-audit-8fa57d37
+    paths:
+      - '.github/workflows/phase7c-readonly-sideway-onebar-exact-context.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exact-context:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 6
+    steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@v4
+
+      - name: Extract exact audit rows and historical ticks
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = '8fa57d37ab9232ff913041bc97f151e71de26beb'
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Production HEAD mismatch: $actual" }
+
+          $accountPath = Join-Path $prod '.runtime\phase7c-account-mode.json'
+          $lib = Join-Path $prod 'scripts\lib\phase7c-account-mode.ps1'
+          . $lib
+          $accountState = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+          $envFile = [string]$accountState.envFile
+          if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $prod $envFile }
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+          $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+
+          $auditPath = Join-Path $prod '.runtime\phase7c-executors\decision-observability\live\sideway-decisions.jsonl'
+          $cases = @(
+            [pscustomobject]@{ Id='SEP10'; SourceClose=[int64]1789030500000; EvalClose=[int64]1789030800000 },
+            [pscustomobject]@{ Id='SEP14'; SourceClose=[int64]1789353300000; EvalClose=[int64]1789353600000 },
+            [pscustomobject]@{ Id='OCT05'; SourceClose=[int64]1791208200000; EvalClose=[int64]1791208500000 }
+          )
+
+          foreach ($case in $cases) {
+            foreach ($kind in @('SOURCE','EVAL')) {
+              $close = if ($kind -eq 'SOURCE') { $case.SourceClose } else { $case.EvalClose }
+              $needle = '"closeTime":' + [string]$close
+              $matches = @(Select-String -LiteralPath $auditPath -SimpleMatch -Pattern $needle)
+              Write-Host "ONEBAR_EXACT_$($case.Id)_$($kind)_COUNT=$($matches.Count)"
+              foreach ($m in $matches) {
+                try { $o = $m.Line | ConvertFrom-Json -Depth 80 } catch { continue }
+                $compact = [pscustomobject]@{
+                  id = $case.Id
+                  kind = $kind
+                  timestamp = $o.timestamp
+                  timestampIso = $o.timestampIso
+                  event = $o.event
+                  reasonCode = $o.reasonCode
+                  reason = $o.reason
+                  setup = $o.setup
+                  entryConditions = $o.entryConditions
+                  plan = $o.plan
+                  raw = $o.raw
+                } | ConvertTo-Json -Depth 35 -Compress
+                Write-Host "ONEBAR_EXACT_ROW=$compact"
+              }
+            }
+
+            $evalMatches = @(Select-String -LiteralPath $auditPath -SimpleMatch -Pattern ('"closeTime":' + [string]$case.EvalClose))
+            $eventMs = $case.EvalClose
+            foreach ($m in $evalMatches) {
+              try { $o = $m.Line | ConvertFrom-Json -Depth 80 } catch { continue }
+              if ($o.event -eq 'ENTRY_STRATEGY_CONDITION_BLOCK' -and [string]$o.reason -match 'm5Confirmation') {
+                $eventMs = [int64]$o.timestamp
+                break
+              }
+            }
+            $fromMs = $eventMs - 1500
+            $toMs = $eventMs + 5000
+            $ticks = @(Invoke-RestMethod -Uri "$bridgeBase/v1/history/ticks/XAUUSD?fromMs=$fromMs&toMs=$toMs" -Headers $headers -Method Get -TimeoutSec 20)
+            Write-Host "ONEBAR_EXACT_$($case.Id)_EVENT_MS=$eventMs"
+            Write-Host "ONEBAR_EXACT_$($case.Id)_TICK_COUNT=$($ticks.Count)"
+            foreach ($tick in ($ticks | Select-Object -First 12)) {
+              Write-Host ("ONEBAR_EXACT_TICK={0}" -f ($tick | ConvertTo-Json -Depth 8 -Compress))
+            }
+          }
+
+          Write-Host 'ONEBAR_EXACT_READ_ONLY=TRUE'
+          Write-Host 'ONEBAR_EXACT_PRODUCTION_MUTATION=NONE'
+          Write-Host 'ONEBAR_EXACT_ORDER_MUTATION=NONE'
+          Write-Host 'ONEBAR_EXACT_POSITION_MUTATION=NONE'
+          Write-Host 'ONEBAR_EXACT_LIVE_TEST_ORDER=NONE'
