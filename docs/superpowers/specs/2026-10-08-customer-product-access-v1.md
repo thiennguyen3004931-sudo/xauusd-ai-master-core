@@ -11,13 +11,13 @@ This layer is authorization only. It does not change trading logic, risk logic, 
 
 ## Existing security foundation
 
-V1 reuses the already-approved components on main:
+V1 reuses the already-approved public-contract components on main:
 
 - `@xauusd/copy-protocol`
 - `@xauusd/license-service`
 - `@xauusd/installation-proof`
 
-The Master/Core repository remains private and canonical. Strategy internals remain server-side.
+The two-product entitlement policy itself lives in the private-only `@xauusd/customer-product-access` package. The three governed public packages remain byte-for-byte aligned with `security/public-contract.lock.json`. The Master/Core repository remains private and canonical. Strategy internals and commercial product entitlements remain server-side.
 
 ## Product modes
 
