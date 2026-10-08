@@ -1,0 +1,124 @@
+name: Phase7C Cutover Monitor Dynamic Source 8fa57d37
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase7c-cutover-monitor-dynamic-source-8fa57d37.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: 8fa57d37ab9232ff913041bc97f151e71de26beb
+          fetch-depth: 0
+
+      - name: Guarded monitor-source production cutover
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $current = '147249bdd600fcd8ac5d93076bc946808e9f0275'
+          $target = '8fa57d37ab9232ff913041bc97f151e71de26beb'
+          $targetTree = '84572620e645dd0206e10bf5448aaa79246719db'
+          $helperBlob = 'd8fb26409df5ddecdf5353ab0fdf42cbd8d3500f'
+
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          Write-Host "MONITOR_SOURCE_CUTOVER_PRE_HEAD=$actual"
+
+          if ($actual -eq $target) {
+            Write-Host 'MONITOR_SOURCE_CUTOVER_TRANSITION=SKIPPED_ALREADY_TARGET'
+          } elseif ($actual -eq $current) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PWD 'scripts\rollout-phase7c-production-source-transition-local.ps1') -ProjectRoot $prod -ExpectedCurrentCommit $current -TargetCommit $target -ExpectedRemoteMainCommit $target -ExpectedHelperBlobSha1 $helperBlob -ExpectedInitialArm ARMED -ExpectedInitialRuntimeState HEALTHY -TimeoutSeconds 300
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            throw "UNEXPECTED_PRODUCTION_HEAD expected_current=$current expected_target=$target actual=$actual"
+          }
+
+          $postHead = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          $prodBranch = (git -C $prod branch --show-current).Trim()
+          $prodTree = (git -C $prod rev-parse 'HEAD^{tree}').Trim().ToLowerInvariant()
+
+          Write-Host "MONITOR_SOURCE_CUTOVER_POST_HEAD=$postHead"
+          Write-Host "MONITOR_SOURCE_CUTOVER_POST_BRANCH=$prodBranch"
+          Write-Host "MONITOR_SOURCE_CUTOVER_POST_TREE=$prodTree"
+
+          if ($postHead -ne $target) { throw 'Production HEAD did not reach monitor-source target.' }
+          if ($prodBranch -ne 'main') { throw "Expected production branch main; actual=$prodBranch" }
+          if ($prodTree -ne $targetTree) { throw "Expected production tree $targetTree; actual=$prodTree" }
+
+          $workflowPath = Join-Path $prod '.github\workflows\auto-live-event-monitor.yml'
+          $monitorPath = Join-Path $prod 'scripts\ops\auto-live-event-monitor.ps1'
+          $testPath = Join-Path $prod 'scripts\test-auto-live-event-monitor-source.ps1'
+          $workflow = Get-Content -LiteralPath $workflowPath -Raw
+          $monitor = Get-Content -LiteralPath $monitorPath -Raw
+          $test = Get-Content -LiteralPath $testPath -Raw
+
+          if ($workflow -match 'EXPECTED_SOURCE_COMMIT:') {
+            throw 'Stale workflow-level expected source pin remains after cutover.'
+          }
+          foreach ($required in @(
+            'refs/remotes/origin/main',
+            'expectedSourceCommit = $ExpectedSourceCommit',
+            'MONITOR_EXPECTED_SOURCE_COMMIT=$ExpectedSourceCommit'
+          )) {
+            if ($monitor -notmatch [regex]::Escape($required)) {
+              throw "Monitor dynamic source contract missing: $required"
+            }
+          }
+          if ($test -notmatch [regex]::Escape('stale production SHA removed')) {
+            throw 'Monitor source test no longer forbids stale production SHA.'
+          }
+          Write-Host 'MONITOR_DYNAMIC_SOURCE_CONTRACT=PASS'
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $att = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation/' -Method Get -TimeoutSec 10
+
+          $mode = [string]$life.mode.mode
+          $armStatus = [string]$cap.liveArmStatus
+          $armed = [bool]$cap.liveExecutionArmed
+          $attOverall = [string]$att.overall
+          $attCommit = [string]$att.deployment.sourceCommit
+
+          Write-Host "MONITOR_SOURCE_CUTOVER_FINAL_MODE=$mode"
+          Write-Host "MONITOR_SOURCE_CUTOVER_FINAL_ARM=$armStatus"
+          Write-Host "MONITOR_SOURCE_CUTOVER_FINAL_ARMED=$armed"
+          Write-Host "MONITOR_SOURCE_CUTOVER_ATTESTATION=$attOverall"
+          Write-Host "MONITOR_SOURCE_CUTOVER_ATTESTED_COMMIT=$attCommit"
+
+          if ($mode -ne 'PAUSE') { throw "Expected PAUSE after monitor-source cutover; actual=$mode" }
+          if ($armStatus -ne 'ARMED' -or -not $armed) { throw 'Expected ARM to remain ARMED.' }
+          if ($attOverall -ne 'EXACT_MATCH') { throw "Runtime source attestation not exact: $attOverall" }
+          if ($attCommit.ToLowerInvariant() -ne $target) { throw "Runtime source commit mismatch: $attCommit" }
+
+          $monitorOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $monitorPath -ProductionRoot $prod 2>&1
+          $monitorExit = $LASTEXITCODE
+          $monitorOutput | ForEach-Object { Write-Host $_ }
+          if ($monitorExit -ne 0) { throw "Post-cutover monitor dry-run failed with exit=$monitorExit" }
+
+          $expectedLine = @($monitorOutput | Where-Object { [string]$_ -eq "MONITOR_EXPECTED_SOURCE_COMMIT=$target" })
+          $sourceLine = @($monitorOutput | Where-Object { [string]$_ -eq "MONITOR_SOURCE_COMMIT=$target" })
+          $headLine = @($monitorOutput | Where-Object { [string]$_ -eq "MONITOR_PRODUCTION_HEAD=$target" })
+          $exactLine = @($monitorOutput | Where-Object { [string]$_ -eq 'MONITOR_RUNTIME_SOURCE_OVERALL=EXACT_MATCH' })
+
+          if ($expectedLine.Count -lt 1) { throw 'Dynamic monitor did not resolve target as expected source.' }
+          if ($sourceLine.Count -lt 1) { throw 'Dynamic monitor attested source mismatch.' }
+          if ($headLine.Count -lt 1) { throw 'Dynamic monitor production HEAD mismatch.' }
+          if ($exactLine.Count -lt 1) { throw 'Dynamic monitor runtime source was not EXACT_MATCH.' }
+
+          Write-Host 'MONITOR_SOURCE_CUTOVER_PRODUCTION=PASS'
+          Write-Host 'TRADING_LOGIC_MUTATION=NONE'
+          Write-Host 'RISK_LOT_MUTATION=NONE'
+          Write-Host 'MODE_FINAL=PAUSE'
+          Write-Host 'ARM_FINAL=ARMED'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
