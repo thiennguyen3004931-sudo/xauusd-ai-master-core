@@ -44,6 +44,7 @@ export function Phase7CPerformanceIntelligenceCard() {
   const recentTrades = snapshot?.trades.slice(-8).reverse() ?? [];
   const topRules = snapshot?.rules.slice(0, 6) ?? [];
   const entryFunnel = snapshot?.entryFunnel ?? [];
+  const sidewayM5Confirmation = snapshot?.sidewayM5Confirmation ?? [];
 
   return (
     <Card variant="outlined">
@@ -141,6 +142,23 @@ export function Phase7CPerformanceIntelligenceCard() {
                   </Box>
 
                   <Box>
+                    <Typography variant="subtitle2" gutterBottom>Sideway M5 confirmation age</Typography>
+                    <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                      {sidewayM5Confirmation.map((item) => (
+                        <Chip
+                          key={item.path}
+                          size="small"
+                          label={`${item.path}: n=${item.sampleSize} · PnL ${pnlLabel(item.netPnl)} · WR ${item.winRatePercent.toFixed(1)}%`}
+                          variant="outlined"
+                        />
+                      ))}
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary">
+                      Chỉ dùng trade correlation EXACT. M5_CURRENT = age 0; M5_CARRY_1 = confirmation từ cây M5 liền trước.
+                    </Typography>
+                  </Box>
+
+                  <Box>
                     <Typography variant="subtitle2" gutterBottom>Entry funnel / blocked reasons</Typography>
                     <Stack spacing={0.75}>
                       {entryFunnel.map((item) => (
@@ -232,6 +250,9 @@ export function Phase7CPerformanceIntelligenceCard() {
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
                                 {new Date(trade.closedAt).toLocaleString("vi-VN")} · {trade.attribution.entryType} · {trade.attribution.regime ?? "regime N/A"}
+                                {trade.attribution.performanceStrategy === "SIDEWAY"
+                                  ? ` · M5 age ${trade.attribution.confirmationAgeBars ?? "N/A"}`
+                                  : ""}
                               </Typography>
                             </Box>
                             <Stack direction="row" spacing={1} alignItems="center">
