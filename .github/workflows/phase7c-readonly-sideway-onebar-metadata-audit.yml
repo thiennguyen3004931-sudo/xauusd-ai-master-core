@@ -1,0 +1,82 @@
+name: Phase7C Read-Only Sideway One-Bar Metadata Audit
+
+on:
+  push:
+    branches:
+      - ops/sideway-onebar-candidate-quality-audit-8fa57d37
+    paths:
+      - '.github/workflows/phase7c-readonly-sideway-onebar-metadata-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 8
+    steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@v4
+
+      - name: Extract exact one-bar metadata read-only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = '8fa57d37ab9232ff913041bc97f151e71de26beb'
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Production HEAD mismatch: $actual" }
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
+          $att = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation/' -Method Get -TimeoutSec 10
+          if ([string]$life.mode.mode -ne 'PAUSE') { throw 'PAUSE required' }
+          if ([string]$cap.liveArmStatus -ne 'ARMED') { throw 'ARMED required' }
+          if ([string]$att.overall -ne 'EXACT_MATCH' -or [string]$att.deployment.sourceCommit -ne $expected) { throw 'Source attestation mismatch' }
+
+          $auditPath = Join-Path $prod '.runtime\phase7c-executors\decision-observability\live\sideway-decisions.jsonl'
+          $cases = @(
+            [pscustomobject]@{ Id='SEP10'; SourceClose='1789030500000'; EvalClose='1789030800000' },
+            [pscustomobject]@{ Id='SEP14'; SourceClose='1789353300000'; EvalClose='1789353600000' },
+            [pscustomobject]@{ Id='OCT05'; SourceClose='1791208200000'; EvalClose='1791208500000' }
+          )
+
+          function Emit-Rows([string]$id,[string]$kind,[string]$close) {
+            $needle = '"closeTime":' + $close
+            $matches = @(Select-String -LiteralPath $auditPath -SimpleMatch -Pattern $needle)
+            Write-Host "ONEBAR_META_$($id)_$($kind)_RAW_MATCH_COUNT=$($matches.Count)"
+            $kept = 0
+            foreach ($m in $matches) {
+              try { $o = $m.Line | ConvertFrom-Json -Depth 80 } catch { continue }
+              if ([string]$o.raw.closeTime -ne $close) { continue }
+              if ($o.event -notin @('ENTRY_STRATEGY_CONDITIONS_PASS','ENTRY_STRATEGY_CONDITION_BLOCK','ENTRY_PLAN_BLOCK','ENTRY_FINAL_PLAN_BLOCK','ENTRY_AUTO_LOT_BLOCK','ENTRY_FINAL_GATE_BLOCK','ENTRY_SUBMIT','ENTRY_FILLED')) { continue }
+              $kept += 1
+              $m5 = $null
+              if ($null -ne $o.entryConditions) {
+                $m5row = @($o.entryConditions.conditions | Where-Object { [string]$_.id -eq 'm5Confirmation' } | Select-Object -First 1)
+                if ($m5row.Count) { $m5 = $m5row[0] }
+              }
+              $compact = [pscustomobject]@{
+                id=$id; kind=$kind; closeTime=$close; timestamp=$o.timestamp; timestampIso=$o.timestampIso;
+                event=$o.event; reason=$o.reason; side=$o.raw.side;
+                m5Status=if($null -ne $m5){$m5.status}else{$null};
+                m5Observed=if($null -ne $m5){$m5.observed}else{$null};
+                failedConditions=if($null -ne $o.entryConditions){$o.entryConditions.failedConditions}else{$null};
+                plan=if($null -ne $o.raw.plan){$o.raw.plan}else{$null};
+                validation=if($null -ne $o.raw.validation){$o.raw.validation}else{$null}
+              } | ConvertTo-Json -Depth 20 -Compress
+              Write-Host "ONEBAR_META_ROW=$compact"
+            }
+            Write-Host "ONEBAR_META_$($id)_$($kind)_KEPT_COUNT=$kept"
+          }
+
+          foreach ($case in $cases) {
+            Emit-Rows $case.Id 'SOURCE' $case.SourceClose
+            Emit-Rows $case.Id 'EVAL' $case.EvalClose
+          }
+
+          Write-Host 'ONEBAR_META_READ_ONLY=TRUE'
+          Write-Host 'ONEBAR_META_PRODUCTION_MUTATION=NONE'
+          Write-Host 'ONEBAR_META_ORDER_MUTATION=NONE'
+          Write-Host 'ONEBAR_META_POSITION_MUTATION=NONE'
+          Write-Host 'ONEBAR_META_LIVE_TEST_ORDER=NONE'
