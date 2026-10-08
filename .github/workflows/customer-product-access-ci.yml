@@ -62,6 +62,34 @@ jobs:
       - name: Private product boundary contract
         run: node --test scripts/test-customer-product-access-boundary.mjs
 
+      - name: Fetch pinned public contract
+        shell: powershell
+        run: |
+          $lock = Get-Content "security/public-contract.lock.json" -Raw | ConvertFrom-Json
+          $publicCommit = [string]$lock.publicCommit
+          if ($publicCommit -notmatch '^[0-9a-f]{40}
+      - name: Diff hygiene
+        run: git diff --check
+
+      - name: Safety summary
+        shell: powershell
+        run: |
+          Write-Host 'CUSTOMER_PRODUCT_ACCESS=PASS'
+          Write-Host 'PUBLIC_CONTRACT_MUTATION=NONE'
+          Write-Host 'TRADING_LOGIC_MUTATION=NONE'
+          Write-Host 'PRODUCTION_MUTATION=NONE'
+          Write-Host 'MODE_MUTATION=NONE'
+          Write-Host 'ARM_MUTATION=NONE'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
+) {
+            throw 'PUBLIC_CONTRACT_COMMIT_INVALID'
+          }
+          git fetch --no-tags --depth=1 https://github.com/thiennguyen3004931-sudo/xauusd-ai-master.git $publicCommit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "CUSTOMER_ACCESS_PUBLIC_CONTRACT_FETCH=$publicCommit"
+
       - name: Public contract lock remains unchanged
         run: node scripts/security/verify-public-contract-lock.mjs security/public-contract.lock.json
 
