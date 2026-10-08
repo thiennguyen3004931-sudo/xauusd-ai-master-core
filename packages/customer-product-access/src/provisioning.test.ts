@@ -138,6 +138,21 @@ describe("COPY_FOLLOWER provisioning", () => {
     });
   });
 
+  it("rejects free-form bot-mode fields at the copy boundary", () => {
+    expect(() =>
+      issueCopyFollowerGrant(
+        license(),
+        {
+          grantId: "grant-copy-cross-field",
+          issuedAt: NOW,
+          expiresAt: NOW + 10_000,
+          allowedCopySizingModes: ["FIXED_LOT"],
+          allowedBotModes: ["AUTO"],
+        } as never,
+      ),
+    ).toThrow(/unknown field/);
+  });
+
   it("requires at least one sizing mode and rejects duplicates", () => {
     expect(() =>
       issueCopyFollowerGrant(license(), {
@@ -224,5 +239,20 @@ describe("provisioning validity window", () => {
         },
       ),
     ).toThrow(/must be ACTIVE/);
+
+    expect(() =>
+      issueSelfManagedGrant(
+        license({
+          issuedAt: NOW - 100_000,
+          expiresAt: NOW - 1,
+        }),
+        {
+          grantId: "grant-expired",
+          issuedAt: NOW,
+          expiresAt: NOW + 10_000,
+          allowedBotModes: ["AUTO"],
+        },
+      ),
+    ).toThrow();
   });
 });
