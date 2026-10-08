@@ -1,0 +1,71 @@
+name: Phase7C Validate PI Sideway M5 Age f6e8d166
+
+on:
+  push:
+    branches:
+      - ops/validate-pi-sideway-m5-age-f6e8d166
+    paths:
+      - '.github/workflows/phase7c-validate-pi-sideway-m5-age-f6e8d166.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: f6e8d1663ab9f74dab8870caa9c478254af2a6d3
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        shell: powershell
+        run: pnpm install --frozen-lockfile
+
+      - name: Performance Intelligence source contract
+        shell: powershell
+        run: node scripts/test-phase7c-performance-intelligence-source.mjs
+
+      - name: Build API dependency graph
+        shell: powershell
+        run: pnpm --filter @xauusd/api... build
+
+      - name: Build web dependency graph
+        shell: powershell
+        run: pnpm --filter @xauusd/web... build
+
+      - name: Performance Intelligence semantic tests
+        shell: powershell
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-intelligence.test.ts
+
+      - name: Performance correlation schema semantic tests
+        shell: powershell
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-correlation-schema.test.ts
+
+      - name: Safety summary
+        shell: powershell
+        run: |
+          Write-Host 'PI_SIDEWAY_M5_AGE_VALIDATION=PASS'
+          Write-Host 'PI_SIDEWAY_M5_AGE_READ_ONLY=TRUE'
+          Write-Host 'TRADING_LOGIC_MUTATION=NONE'
+          Write-Host 'RISK_LOT_MUTATION=NONE'
+          Write-Host 'MODE_MUTATION=NONE'
+          Write-Host 'ARM_MUTATION=NONE'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
