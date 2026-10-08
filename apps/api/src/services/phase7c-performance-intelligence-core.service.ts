@@ -10,6 +10,7 @@ type Strategy = "TREND" | "SIDEWAY";
 type PerformanceStrategy = Strategy | "REVERSAL";
 type CorrelationVerdict = "EXACT" | "AMBIGUOUS" | "UNMATCHED";
 type EntryType = "IMMEDIATE" | "PULLBACK" | "RECOVERY" | "UNKNOWN";
+type SidewayM5ConfirmationPath = "M5_CURRENT" | "M5_CARRY_1" | "M5_CARRY_OTHER" | "UNKNOWN";
 type IdentifierKind = "POSITION" | "ORDER" | "SIGNAL";
 type RawEvent = Record<string, unknown>;
 
@@ -80,6 +81,7 @@ interface ParsedAuditEvent {
   regime: string | null;
   entryPolicy: string | null;
   performanceStrategy: PerformanceStrategy;
+  confirmationAgeBars: number | null;
 }
 
 interface ParsedAuditSource {
@@ -102,6 +104,7 @@ export interface Phase7CPerformanceAttribution {
   regime: string | null;
   entryPolicy: string | null;
   performanceStrategy: PerformanceStrategy;
+  confirmationAgeBars: number | null;
   passedRules: string[];
   blockedRules: string[];
   decisionEventIds: string[];
@@ -324,6 +327,18 @@ function firstStringField(raw: RawEvent, keys: readonly string[]): string | null
   return found;
 }
 
+function confirmationAgeBarsOf(raw: RawEvent): number | null {
+  let found: number | null = null;
+  visitObject(raw, (key, nested) => {
+    if (found !== null) return;
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey !== "confirmationagebars" && normalizedKey !== "confirmation_age_bars") return;
+    const value = Number(nested);
+    if (Number.isInteger(value) && value >= 0 && value <= 100) found = value;
+  });
+  return found;
+}
+
 function entryTypeOf(raw: RawEvent, eventName: string, strategy: Strategy): EntryType {
   const dailyMode = firstStringField(raw, ["dailyMode", "daily_mode"]);
   if ((dailyMode ?? "").toUpperCase() === "RECOVERY_TP") return "RECOVERY";
@@ -480,6 +495,7 @@ async function parseAuditSource(
         regime,
         entryPolicy,
         performanceStrategy: performanceStrategyOf(strategy, entryPolicy, regime),
+        confirmationAgeBars: confirmationAgeBarsOf(raw),
       });
     } catch {
       malformedRows += 1;
@@ -614,6 +630,22 @@ function choosePerformanceStrategy(
   );
 }
 
+function chooseConfirmationAgeBars(events: ParsedAuditEvent[]): number | null {
+  const values = [...new Set(
+    events
+      .map((event) => event.confirmationAgeBars)
+      .filter((value): value is number => value !== null),
+  )];
+  return values.length === 1 ? values[0]! : null;
+}
+
+function sidewayM5ConfirmationPath(ageBars: number | null): SidewayM5ConfirmationPath {
+  if (ageBars === 0) return "M5_CURRENT";
+  if (ageBars === 1) return "M5_CARRY_1";
+  if (ageBars !== null && ageBars >= 2) return "M5_CARRY_OTHER";
+  return "UNKNOWN";
+}
+
 export interface Phase7CPerformanceEntryFunnelBucket {
   strategy: PerformanceStrategy;
   observedEntryDecisionEvents: number;
@@ -728,6 +760,42 @@ function aggregateEntryTypes(trades: readonly Phase7CPerformanceIntelligenceTrad
   });
 }
 
+function aggregateSidewayM5ConfirmationAge(
+  trades: readonly Phase7CPerformanceIntelligenceTrade[],
+) {
+  const paths: readonly SidewayM5ConfirmationPath[] = [
+    "M5_CURRENT",
+    "M5_CARRY_1",
+    "M5_CARRY_OTHER",
+    "UNKNOWN",
+  ];
+  return paths.map((path) => {
+    const rows = trades.filter(
+      (trade) =>
+        trade.correlation.verdict === "EXACT" &&
+        trade.attribution.performanceStrategy === "SIDEWAY" &&
+        sidewayM5ConfirmationPath(trade.attribution.confirmationAgeBars) === path,
+    );
+    const wins = rows.filter((row) => row.netPnl > 0);
+    const losses = rows.filter((row) => row.netPnl < 0);
+    const grossProfit = wins.reduce((sum, row) => sum + row.netPnl, 0);
+    const grossLoss = Math.abs(losses.reduce((sum, row) => sum + row.netPnl, 0));
+    const netPnl = rows.reduce((sum, row) => sum + row.netPnl, 0);
+    return {
+      path,
+      ageBars: path === "M5_CURRENT" ? 0 : path === "M5_CARRY_1" ? 1 : null,
+      sampleSize: rows.length,
+      wins: wins.length,
+      losses: losses.length,
+      breakeven: rows.length - wins.length - losses.length,
+      netPnl: round(netPnl),
+      expectancy: rows.length ? round(netPnl / rows.length) : 0,
+      winRatePercent: rows.length ? round((wins.length / rows.length) * 100) : 0,
+      profitFactor: grossLoss > 0 ? round(grossProfit / grossLoss, 3) : grossProfit > 0 ? null : 0,
+    };
+  });
+}
+
 export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAUUSD") {
   const performance = await getMt5PerformanceSnapshot(days, symbol);
   const auditRoot = decisionAuditRoot(performance.account.accountMode);
@@ -803,6 +871,7 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
         regime: chooseRegime(attributedEvents),
         entryPolicy: chooseEntryPolicy(attributedEvents),
         performanceStrategy: choosePerformanceStrategy(strategy, attributedEvents),
+        confirmationAgeBars: chooseConfirmationAgeBars(attributedEvents),
         passedRules: [...new Set(attributedEvents.flatMap((event) => event.passedRules))].sort(),
         blockedRules: [...new Set(attributedEvents.flatMap((event) => event.blockedRules))].sort(),
         decisionEventIds: attributedEvents.map((event) => event.eventId).slice(0, 100),
@@ -868,6 +937,7 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
     trades,
     rules: aggregateRules(trades, correlationCoveragePercent),
     entryTypes: aggregateEntryTypes(trades),
+    sidewayM5Confirmation: aggregateSidewayM5ConfirmationAge(trades),
     entryFunnel: buildEntryFunnel(windowedAuditSources),
     decisionBlocks: [...blockCounts.entries()]
       .map(([key, count]) => {
@@ -889,6 +959,7 @@ export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAU
       "Performance Intelligence v2 separates canonical REVERSAL entries from TREND profitability only when entry-policy/context evidence proves REVERSAL; market regime alone never re-labels an entry strategy.",
       "Entry funnel counts are descriptive event counts from persisted decision evidence: evaluated, blocked/clear, submit, fill. They never relax or retune entry rules.",
       "Decision-block counts are descriptive only; blocked rules are not assigned hypothetical PnL.",
+      "Sideway M5 confirmation-age profitability uses only EXACT-correlated realized trades and persisted confirmationAgeBars; M5_CURRENT means age 0 and M5_CARRY_1 means age 1.",
       "MFE/MAE is not reported until a canonical persisted price-path source is available.",
     ],
   };
@@ -900,6 +971,10 @@ export const __test = {
   buildEntryFunnel,
   filterAuditSourcesByWindow,
   entryBlockReasonsOf,
+  confirmationAgeBarsOf,
+  chooseConfirmationAgeBars,
+  sidewayM5ConfirmationPath,
+  aggregateSidewayM5ConfirmationAge,
   entryPolicyOf,
   entryTypeOf,
   identifiersOf,
