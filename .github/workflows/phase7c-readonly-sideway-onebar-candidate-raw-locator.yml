@@ -1,0 +1,61 @@
+name: Phase7C Read-Only Sideway One-Bar Candidate Raw Locator
+
+on:
+  push:
+    branches:
+      - ops/sideway-onebar-candidate-quality-audit-8fa57d37
+    paths:
+      - '.github/workflows/phase7c-readonly-sideway-onebar-candidate-raw-locator.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  locate:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@v4
+
+      - name: Locate candidate audit rows read-only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prod = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $expected = '8fa57d37ab9232ff913041bc97f151e71de26beb'
+          $actual = (git -C $prod rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Production HEAD mismatch: $actual" }
+
+          $auditPath = Join-Path $prod '.runtime\phase7c-executors\decision-observability\live\sideway-decisions.jsonl'
+          if (-not (Test-Path -LiteralPath $auditPath)) { throw "Missing Sideway audit: $auditPath" }
+
+          $info = Get-Item -LiteralPath $auditPath
+          Write-Host "SIDEWAY_RAW_FILE_SIZE=$($info.Length)"
+          Write-Host "SIDEWAY_RAW_FIRST_LINE=$(Get-Content -LiteralPath $auditPath -TotalCount 1)"
+          Write-Host "SIDEWAY_RAW_LAST_LINE=$(Get-Content -LiteralPath $auditPath -Tail 1)"
+
+          $patterns = @(
+            '2026-09-10',
+            '2026-09-14',
+            '2026-10-05',
+            '17890308',
+            '17893536',
+            '17912085',
+            '1789030',
+            '1789353',
+            '1791208'
+          )
+          foreach ($pattern in $patterns) {
+            $matches = @(Select-String -LiteralPath $auditPath -SimpleMatch -Pattern $pattern)
+            Write-Host "SIDEWAY_RAW_PATTERN=$pattern|COUNT=$($matches.Count)"
+            foreach ($m in ($matches | Select-Object -First 20)) {
+              Write-Host "SIDEWAY_RAW_MATCH=$($m.Line)"
+            }
+          }
+
+          Write-Host 'SIDEWAY_RAW_READ_ONLY=TRUE'
+          Write-Host 'SIDEWAY_RAW_PRODUCTION_MUTATION=NONE'
+          Write-Host 'SIDEWAY_RAW_ORDER_MUTATION=NONE'
+          Write-Host 'SIDEWAY_RAW_POSITION_MUTATION=NONE'
+          Write-Host 'SIDEWAY_RAW_LIVE_TEST_ORDER=NONE'
