@@ -1,11 +1,24 @@
 param(
   [string]$ProductionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master',
-  [string]$ExpectedSourceCommit = '8514fafffea7e7cde6a3bddfbb3cd23474bc20f7',
+  [string]$ExpectedSourceCommit = '',
   [int]$IssueNumber = 28,
   [switch]$Notify
 )
 
 $ErrorActionPreference = 'Stop'
+
+$RepositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+if ([string]::IsNullOrWhiteSpace($ExpectedSourceCommit)) {
+  $resolvedMain = & git -C $RepositoryRoot rev-parse refs/remotes/origin/main 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$resolvedMain)) {
+    throw 'Unable to resolve canonical origin/main for AUTO LIVE monitor expected source.'
+  }
+  $ExpectedSourceCommit = ([string]$resolvedMain).Trim()
+}
+$ExpectedSourceCommit = $ExpectedSourceCommit.Trim().ToLowerInvariant()
+if ($ExpectedSourceCommit -notmatch '^[0-9a-f]{40}$') {
+  throw "Invalid AUTO LIVE monitor expected source commit: $ExpectedSourceCommit"
+}
 
 function Get-ObjectProperty {
   param([object]$Object, [string]$Name)
@@ -175,6 +188,7 @@ $recommendedMode = [string](Get-ObjectProperty $regime 'recommendedMode')
 $state = [ordered]@{
   version = 1
   observedAt = [DateTime]::UtcNow.ToString('o')
+  expectedSourceCommit = $ExpectedSourceCommit
   sourceCommit = $sourceCommit
   productionHead = $productionHead
   botMode = $botMode
@@ -200,6 +214,7 @@ $state = [ordered]@{
   managementFingerprint = if ($positions.Count -gt 0) { Get-Sha256 -Lines @($managementPairs) } else { '' }
 }
 
+Write-Host "MONITOR_EXPECTED_SOURCE_COMMIT=$ExpectedSourceCommit"
 Write-Host "MONITOR_SOURCE_COMMIT=$sourceCommit"
 Write-Host "MONITOR_PRODUCTION_HEAD=$productionHead"
 Write-Host "MONITOR_ACCOUNT_MODE=$accountMode"
@@ -328,7 +343,7 @@ $stateJson = $state | ConvertTo-Json -Depth 12 -Compress
 $newMarker = "<!-- XAUUSD_AUTO_LIVE_MONITOR_STATE_JSON:$stateJson -->"
 
 $comparisonNames = @(
-  'sourceCommit','productionHead','botMode','accountMode','lifecycleRunning','lifecycleReady',
+  'expectedSourceCommit','sourceCommit','productionHead','botMode','accountMode','lifecycleRunning','lifecycleReady',
   'telegramReady','telegramStatus','mt5Status','armStatus','liveExecutionArmed',
   'runtimeSourceOverall','sourceComponentMismatches','regime','recommendedMode','effectiveStrategy',
   'positionCount','pendingOrderCount','positionSignature','pendingOrderSignature',
@@ -356,6 +371,7 @@ $eventText
 
 ~~~text
 OBSERVED_AT=$($state.observedAt)
+EXPECTED_SOURCE_COMMIT=$ExpectedSourceCommit
 SOURCE_COMMIT=$sourceCommit
 PRODUCTION_HEAD=$productionHead
 ACCOUNT_MODE=$accountMode
@@ -416,7 +432,7 @@ if ($env:GITHUB_STEP_SUMMARY) {
 - Lifecycle: **running=$lifecycleRunning, ready=$lifecycleReady**
 - Telegram: **ready=$telegramReady, status=$telegramStatus**
 - MT5: **$mt5Status**
-- Runtime source: **$runtimeOverall**
+- Runtime source: **$runtimeOverall** (expected **$ExpectedSourceCommit**)
 - Regime: **$currentRegime -> $recommendedMode**
 - Effective strategy: **$effectiveStrategy**
 - Positions / pending: **$($positions.Count) / $($orders.Count)**
