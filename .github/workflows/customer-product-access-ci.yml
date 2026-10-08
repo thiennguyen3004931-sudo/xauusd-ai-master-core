@@ -67,23 +67,7 @@ jobs:
         run: |
           $lock = Get-Content "security/public-contract.lock.json" -Raw | ConvertFrom-Json
           $publicCommit = [string]$lock.publicCommit
-          if ($publicCommit -notmatch '^[0-9a-f]{40}
-      - name: Diff hygiene
-        run: git diff --check
-
-      - name: Safety summary
-        shell: powershell
-        run: |
-          Write-Host 'CUSTOMER_PRODUCT_ACCESS=PASS'
-          Write-Host 'PUBLIC_CONTRACT_MUTATION=NONE'
-          Write-Host 'TRADING_LOGIC_MUTATION=NONE'
-          Write-Host 'PRODUCTION_MUTATION=NONE'
-          Write-Host 'MODE_MUTATION=NONE'
-          Write-Host 'ARM_MUTATION=NONE'
-          Write-Host 'ORDER_MUTATION=NONE'
-          Write-Host 'POSITION_MUTATION=NONE'
-          Write-Host 'LIVE_TEST_ORDER=NONE'
-) {
+          if ($publicCommit -notmatch '^[0-9a-f]{40}$') {
             throw 'PUBLIC_CONTRACT_COMMIT_INVALID'
           }
           git fetch --no-tags --depth=1 https://github.com/thiennguyen3004931-sudo/xauusd-ai-master.git $publicCommit
