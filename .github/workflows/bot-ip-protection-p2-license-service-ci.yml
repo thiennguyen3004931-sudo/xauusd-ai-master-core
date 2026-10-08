@@ -26,7 +26,7 @@ permissions:
 jobs:
   license-service:
     name: license-service-contract
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 15
     steps:
       - name: Checkout

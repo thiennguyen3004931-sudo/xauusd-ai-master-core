@@ -24,7 +24,7 @@ permissions:
 jobs:
   installation-proof:
     name: installation-proof
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 10
     steps:
       - name: Checkout
