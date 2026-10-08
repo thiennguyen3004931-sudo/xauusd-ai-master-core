@@ -64,24 +64,19 @@ jobs:
           $auditPath = Join-Path $prod '.runtime\phase7c-executors\decision-observability\live\sideway-decisions.jsonl'
           if (-not (Test-Path -LiteralPath $auditPath)) { throw "Missing Sideway audit: $auditPath" }
 
-          $wanted = @{}
-          foreach ($case in $cases) {
-            $wanted[[string]$case.SourceClose] = $true
-            $wanted[[string]$case.EvalClose] = $true
-          }
           $rowsByClose = @{}
-          $closeRegex = '"closeTime":(' + (($wanted.Keys | Sort-Object) -join '|') + ')'
-          foreach ($line in Get-Content -LiteralPath $auditPath) {
-            if ($line -match $closeRegex) {
-              $closeKey = [string]$Matches[1]
-            } else {
-              continue
+          foreach ($case in $cases) {
+            foreach ($close in @($case.SourceClose,$case.EvalClose)) {
+              $key = [string]$close
+              if ($rowsByClose.ContainsKey($key)) { continue }
+              $rowsByClose[$key] = New-Object 'System.Collections.Generic.List[object]'
+              $needle = '"closeTime":' + $key
+              foreach ($match in @(Select-String -LiteralPath $auditPath -SimpleMatch -Pattern $needle)) {
+                try { $o = $match.Line | ConvertFrom-Json -Depth 80 } catch { continue }
+                $rowsByClose[$key].Add($o)
+              }
+              Write-Host "ONEBAR_OUTCOME_CLOSE_$($key)_AUDIT_ROWS=$($rowsByClose[$key].Count)"
             }
-            try { $o = $line | ConvertFrom-Json -Depth 80 } catch { continue }
-            if (-not $rowsByClose.ContainsKey($closeKey)) {
-              $rowsByClose[$closeKey] = New-Object 'System.Collections.Generic.List[object]'
-            }
-            $rowsByClose[$closeKey].Add($o)
           }
 
           function Get-M5ObservedPattern([object]$row) {
