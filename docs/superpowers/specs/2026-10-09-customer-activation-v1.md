@@ -11,7 +11,7 @@ Activation is not trading execution. It only decides whether the presented custo
 The activation boundary receives:
 
 - parent license
-- customer product grant
+- customer product grant lifecycle record
 - installation proof for a RECONNECT challenge
 - installation ID
 - MT5 login
@@ -22,7 +22,7 @@ The activation boundary receives:
 
 ## Ordering
 
-1. Product access authorization runs first.
+1. Product lifecycle authorization runs first; revoked grants fail closed for new exposure.
 2. If access fails, the installation challenge is not consumed.
 3. If access succeeds, the installation proof must verify against:
    - exact license ID
@@ -37,7 +37,7 @@ This ordering prevents unauthorized requests from burning a valid one-time chall
 
 ## SELF_MANAGED
 
-Activation requires the existing Self-Managed access decision plus valid installation proof.
+Activation requires the existing Self-Managed lifecycle access decision plus valid installation proof. Revoked grants cannot activate new-exposure modes, while safety PAUSE remains available with valid binding.
 
 The activation response carries through the existing access decision:
 
@@ -52,7 +52,7 @@ Activation requires:
 
 - explicit allowed sizing mode
 - exact account/broker/installation binding
-- active grant/license for new exposure
+- active non-revoked grant lifecycle plus active license for new exposure
 - valid bound installation proof
 
 Activation does not transport copy commands and does not execute orders.
@@ -89,8 +89,11 @@ Tests must prove:
 4. replayed challenge is rejected;
 5. valid Copy-Follower activation succeeds for an allowlisted sizing mode;
 6. wrong broker/account/product entitlement fails closed;
-7. package dependency boundary remains isolated;
-8. no runtime, persistence, network, MT5, order, or position mutation is introduced.
+7. revoked Self-Managed AUTO is blocked before proof consumption;
+8. safety PAUSE remains activatable after grant revocation;
+9. revoked Copy-Follower activation is blocked before proof consumption;
+10. package dependency boundary remains isolated;
+11. no runtime, persistence, network, MT5, order, or position mutation is introduced.
 
 ## Production boundary
 
