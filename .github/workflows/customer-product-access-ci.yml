@@ -70,8 +70,21 @@ jobs:
           if ($publicCommit -notmatch '^[0-9a-f]{40}$') {
             throw 'PUBLIC_CONTRACT_COMMIT_INVALID'
           }
-          git fetch --no-tags --depth=1 https://github.com/thiennguyen3004931-sudo/xauusd-ai-master.git $publicCommit
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $fetchOk = $false
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            git fetch --no-tags --depth=1 https://github.com/thiennguyen3004931-sudo/xauusd-ai-master.git $publicCommit
+            if ($LASTEXITCODE -eq 0) {
+              $fetchOk = $true
+              break
+            }
+            if ($attempt -lt 4) {
+              Write-Warning "Public contract fetch attempt $attempt failed; retrying"
+              Start-Sleep -Seconds 5
+            }
+          }
+          if (-not $fetchOk) {
+            throw "PUBLIC_CONTRACT_FETCH_FAILED_AFTER_RETRIES"
+          }
           Write-Host "CUSTOMER_ACCESS_PUBLIC_CONTRACT_FETCH=$publicCommit"
 
       - name: Public contract lock remains unchanged

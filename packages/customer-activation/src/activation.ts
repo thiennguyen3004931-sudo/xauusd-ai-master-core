@@ -1,9 +1,9 @@
 import {
-  authorizeCopyFollowerAccess,
-  authorizeSelfManagedAccess,
+  authorizeCopyFollowerLifecycleAccess,
+  authorizeSelfManagedLifecycleAccess,
   type CopyFollowerAccessRequest,
-  type CustomerProductAccessCode,
-  type CustomerProductGrant,
+  type CustomerGrantLifecycleAccessDecision,
+  type CustomerProductGrantLifecycleRecord,
   type SelfManagedAccessRequest,
 } from "@xauusd/customer-product-access";
 import {
@@ -12,6 +12,11 @@ import {
   type InstallationProofFailureCode,
 } from "@xauusd/installation-proof";
 import type { LicenseRecord } from "@xauusd/license-service";
+
+type CustomerActivationAccessDeniedCode = Extract<
+  CustomerGrantLifecycleAccessDecision,
+  { readonly ok: false }
+>["code"];
 
 export type CustomerActivationFailureCode =
   | "ACCESS_DENIED"
@@ -28,10 +33,7 @@ export type CustomerActivationDecision =
   | {
       readonly ok: false;
       readonly code: CustomerActivationFailureCode;
-      readonly accessCode?: Exclude<
-        CustomerProductAccessCode,
-        "AUTHORIZED" | "AUTHORIZED_SAFE_PAUSE"
-      >;
+      readonly accessCode?: CustomerActivationAccessDeniedCode;
       readonly installationProofCode?: InstallationProofFailureCode;
     };
 
@@ -74,10 +76,10 @@ async function verifyBoundInstallation(
 
 export async function activateSelfManagedCustomer(
   license: LicenseRecord,
-  grant: CustomerProductGrant,
+  lifecycle: CustomerProductGrantLifecycleRecord,
   request: SelfManagedActivationRequest,
 ): Promise<CustomerActivationDecision> {
-  const access = authorizeSelfManagedAccess(license, grant, {
+  const access = authorizeSelfManagedLifecycleAccess(license, lifecycle, {
     installationId: request.installationId,
     mt5Login: request.mt5Login,
     brokerServer: request.brokerServer,
@@ -119,10 +121,10 @@ export async function activateSelfManagedCustomer(
 
 export async function activateCopyFollowerCustomer(
   license: LicenseRecord,
-  grant: CustomerProductGrant,
+  lifecycle: CustomerProductGrantLifecycleRecord,
   request: CopyFollowerActivationRequest,
 ): Promise<CustomerActivationDecision> {
-  const access = authorizeCopyFollowerAccess(license, grant, {
+  const access = authorizeCopyFollowerLifecycleAccess(license, lifecycle, {
     installationId: request.installationId,
     mt5Login: request.mt5Login,
     brokerServer: request.brokerServer,

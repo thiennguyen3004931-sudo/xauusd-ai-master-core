@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  createCustomerProductGrantLifecycle,
   issueCopyFollowerGrant,
   issueSelfManagedGrant,
+  revokeCustomerProductGrant,
 } from "@xauusd/customer-product-access";
 import {
   createInstallationChallenge,
@@ -61,18 +63,43 @@ function oneTimeConsumer() {
   };
 }
 
-describe("SELF_MANAGED activation", () => {
-  it("activates only after product access and bound installation proof both pass", async () => {
-    const { license, proof } = fixture();
-    const grant = issueSelfManagedGrant(license, {
+function selfLifecycle(
+  license: LicenseRecord,
+  allowedBotModes: readonly ("AUTO" | "SEMI")[] = ["AUTO"],
+) {
+  return createCustomerProductGrantLifecycle(
+    issueSelfManagedGrant(license, {
       grantId: "grant-self-activation",
       issuedAt: NOW - 1_000,
       expiresAt: NOW + 10_000,
-      allowedBotModes: ["AUTO"],
-    });
+      allowedBotModes,
+    }),
+  );
+}
+
+function copyLifecycle(
+  license: LicenseRecord,
+  allowedCopySizingModes: readonly ("EQUITY_RATIO" | "FIXED_LOT")[] = [
+    "EQUITY_RATIO",
+  ],
+) {
+  return createCustomerProductGrantLifecycle(
+    issueCopyFollowerGrant(license, {
+      grantId: "grant-copy-activation",
+      issuedAt: NOW - 1_000,
+      expiresAt: NOW + 10_000,
+      allowedCopySizingModes,
+    }),
+  );
+}
+
+describe("SELF_MANAGED activation", () => {
+  it("activates only after lifecycle access and bound installation proof both pass", async () => {
+    const { license, proof } = fixture();
+    const lifecycle = selfLifecycle(license);
 
     await expect(
-      activateSelfManagedCustomer(license, grant, {
+      activateSelfManagedCustomer(license, lifecycle, {
         installationId: license.installationId,
         mt5Login: 777001,
         brokerServer: "Broker-Real",
@@ -92,15 +119,10 @@ describe("SELF_MANAGED activation", () => {
 
   it("fails access before consuming an installation challenge", async () => {
     const { license, proof } = fixture();
-    const grant = issueSelfManagedGrant(license, {
-      grantId: "grant-self-no-auto",
-      issuedAt: NOW - 1_000,
-      expiresAt: NOW + 10_000,
-      allowedBotModes: ["SEMI"],
-    });
+    const lifecycle = selfLifecycle(license, ["SEMI"]);
 
     let consumeCalls = 0;
-    const decision = await activateSelfManagedCustomer(license, grant, {
+    const decision = await activateSelfManagedCustomer(license, lifecycle, {
       installationId: license.installationId,
       mt5Login: 777001,
       brokerServer: "Broker-Real",
@@ -121,6 +143,61 @@ describe("SELF_MANAGED activation", () => {
     expect(consumeCalls).toBe(0);
   });
 
+  it("blocks revoked AUTO activation before proof consumption", async () => {
+    const { license, proof } = fixture();
+    const lifecycle = revokeCustomerProductGrant(
+      selfLifecycle(license),
+      NOW - 1,
+    );
+
+    let consumeCalls = 0;
+    const decision = await activateSelfManagedCustomer(license, lifecycle, {
+      installationId: license.installationId,
+      mt5Login: 777001,
+      brokerServer: "Broker-Real",
+      now: NOW,
+      requestedBotMode: "AUTO",
+      proof,
+      consumeOnce: async () => {
+        consumeCalls += 1;
+        return true;
+      },
+    });
+
+    expect(decision).toMatchObject({
+      ok: false,
+      code: "ACCESS_DENIED",
+      accessCode: "GRANT_REVOKED",
+    });
+    expect(consumeCalls).toBe(0);
+  });
+
+  it("keeps safety PAUSE activatable after grant revocation", async () => {
+    const { license, proof } = fixture();
+    const lifecycle = revokeCustomerProductGrant(
+      selfLifecycle(license),
+      NOW - 1,
+    );
+
+    await expect(
+      activateSelfManagedCustomer(license, lifecycle, {
+        installationId: license.installationId,
+        mt5Login: 777001,
+        brokerServer: "Broker-Real",
+        now: NOW,
+        requestedBotMode: "PAUSE",
+        proof,
+        consumeOnce: oneTimeConsumer(),
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      code: "ACTIVATED",
+      productMode: "SELF_MANAGED",
+      exposureAllowed: false,
+      accessCode: "AUTHORIZED_SAFE_PAUSE",
+    });
+  });
+
   it("rejects a proof from another device key", async () => {
     const { license } = fixture();
     const otherKeys = generateInstallationDeviceKeyPair();
@@ -138,15 +215,10 @@ describe("SELF_MANAGED activation", () => {
       privateKey: otherKeys.privateKey,
     });
 
-    const grant = issueSelfManagedGrant(license, {
-      grantId: "grant-self-wrong-proof",
-      issuedAt: NOW - 1_000,
-      expiresAt: NOW + 10_000,
-      allowedBotModes: ["AUTO"],
-    });
+    const lifecycle = selfLifecycle(license);
 
     await expect(
-      activateSelfManagedCustomer(license, grant, {
+      activateSelfManagedCustomer(license, lifecycle, {
         installationId: license.installationId,
         mt5Login: 777001,
         brokerServer: "Broker-Real",
@@ -164,12 +236,7 @@ describe("SELF_MANAGED activation", () => {
 
   it("rejects replay of an already consumed challenge", async () => {
     const { license, proof } = fixture();
-    const grant = issueSelfManagedGrant(license, {
-      grantId: "grant-self-replay",
-      issuedAt: NOW - 1_000,
-      expiresAt: NOW + 10_000,
-      allowedBotModes: ["AUTO"],
-    });
+    const lifecycle = selfLifecycle(license);
     const consumeOnce = oneTimeConsumer();
 
     const request = {
@@ -183,11 +250,11 @@ describe("SELF_MANAGED activation", () => {
     };
 
     await expect(
-      activateSelfManagedCustomer(license, grant, request),
+      activateSelfManagedCustomer(license, lifecycle, request),
     ).resolves.toMatchObject({ ok: true, code: "ACTIVATED" });
 
     await expect(
-      activateSelfManagedCustomer(license, grant, request),
+      activateSelfManagedCustomer(license, lifecycle, request),
     ).resolves.toMatchObject({
       ok: false,
       code: "INSTALLATION_PROOF_DENIED",
@@ -199,15 +266,10 @@ describe("SELF_MANAGED activation", () => {
 describe("COPY_FOLLOWER activation", () => {
   it("activates a follower only for an allowlisted sizing mode and bound device", async () => {
     const { license, proof } = fixture();
-    const grant = issueCopyFollowerGrant(license, {
-      grantId: "grant-copy-activation",
-      issuedAt: NOW - 1_000,
-      expiresAt: NOW + 10_000,
-      allowedCopySizingModes: ["EQUITY_RATIO"],
-    });
+    const lifecycle = copyLifecycle(license);
 
     await expect(
-      activateCopyFollowerCustomer(license, grant, {
+      activateCopyFollowerCustomer(license, lifecycle, {
         installationId: license.installationId,
         mt5Login: 777001,
         brokerServer: "Broker-Real",
@@ -225,17 +287,41 @@ describe("COPY_FOLLOWER activation", () => {
     });
   });
 
-  it("blocks a wrong broker before proof consumption", async () => {
+  it("blocks revoked follower activation before proof consumption", async () => {
     const { license, proof } = fixture();
-    const grant = issueCopyFollowerGrant(license, {
-      grantId: "grant-copy-wrong-broker",
-      issuedAt: NOW - 1_000,
-      expiresAt: NOW + 10_000,
-      allowedCopySizingModes: ["FIXED_LOT"],
-    });
+    const lifecycle = revokeCustomerProductGrant(
+      copyLifecycle(license),
+      NOW - 1,
+    );
 
     let consumeCalls = 0;
-    const decision = await activateCopyFollowerCustomer(license, grant, {
+    const decision = await activateCopyFollowerCustomer(license, lifecycle, {
+      installationId: license.installationId,
+      mt5Login: 777001,
+      brokerServer: "Broker-Real",
+      now: NOW,
+      requestedSizingMode: "EQUITY_RATIO",
+      proof,
+      consumeOnce: async () => {
+        consumeCalls += 1;
+        return true;
+      },
+    });
+
+    expect(decision).toMatchObject({
+      ok: false,
+      code: "ACCESS_DENIED",
+      accessCode: "GRANT_REVOKED",
+    });
+    expect(consumeCalls).toBe(0);
+  });
+
+  it("blocks a wrong broker before proof consumption", async () => {
+    const { license, proof } = fixture();
+    const lifecycle = copyLifecycle(license, ["FIXED_LOT"]);
+
+    let consumeCalls = 0;
+    const decision = await activateCopyFollowerCustomer(license, lifecycle, {
       installationId: license.installationId,
       mt5Login: 777001,
       brokerServer: "Other-Broker",
