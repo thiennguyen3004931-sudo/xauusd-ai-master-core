@@ -324,6 +324,28 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@24.13.3)(lightningcss@1.33.0)
 
+  packages/customer-grant-admin-service:
+    dependencies:
+      '@xauusd/customer-grant-registry':
+        specifier: workspace:*
+        version: link:../customer-grant-registry
+      '@xauusd/customer-product-access':
+        specifier: workspace:*
+        version: link:../customer-product-access
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(postcss@8.5.25)(tsx@4.23.8)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@24.13.3)(lightningcss@1.33.0)
+
   packages/customer-grant-registry:
     dependencies:
       '@xauusd/customer-product-access':
