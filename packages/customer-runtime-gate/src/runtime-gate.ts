@@ -31,17 +31,22 @@ export interface CopyFollowerRuntimeActivationRequest
   readonly grantId: string;
 }
 
+type RuntimeContextFailure = {
+  readonly ok: false;
+  readonly code:
+    | "GRANT_NOT_FOUND"
+    | "INVALID_GRANT_SOURCE"
+    | "PRODUCT_MODE_MISMATCH"
+    | "LICENSE_NOT_FOUND"
+    | "INVALID_LICENSE_SOURCE";
+};
+
 export type CustomerRuntimeActivationDecision =
   | CustomerActivationDecision
+  | RuntimeContextFailure
   | {
       readonly ok: false;
-      readonly code:
-        | "INVALID_RUNTIME_REQUEST"
-        | "GRANT_NOT_FOUND"
-        | "INVALID_GRANT_SOURCE"
-        | "PRODUCT_MODE_MISMATCH"
-        | "LICENSE_NOT_FOUND"
-        | "INVALID_LICENSE_SOURCE";
+      readonly code: "INVALID_RUNTIME_REQUEST";
     };
 
 type ProductMode = "SELF_MANAGED" | "COPY_FOLLOWER";
@@ -152,7 +157,7 @@ async function loadCurrentRuntimeContext(
       readonly lifecycle: CustomerProductGrantLifecycleRecord;
       readonly license: LicenseRecord;
     }
-  | CustomerRuntimeActivationDecision
+  | RuntimeContextFailure
 > {
   const lifecycle = await registry.get(grantId);
   if (!lifecycle) {
