@@ -1,9 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
+import type { CustomerGrantRegistryRepository } from "@xauusd/customer-grant-registry";
 import {
   assertCustomerProductGrantLifecycleRecord,
-  type CustomerGrantRegistryRepository,
-} from "@xauusd/customer-grant-registry";
-import type { CustomerProductGrantLifecycleRecord } from "@xauusd/customer-product-access";
+  type CustomerProductGrantLifecycleRecord,
+} from "@xauusd/customer-product-access";
 import {
   assertInstallationChallenge,
   type InstallationChallenge,
