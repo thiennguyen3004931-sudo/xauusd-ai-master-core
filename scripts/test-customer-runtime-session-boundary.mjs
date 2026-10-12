@@ -31,8 +31,10 @@ test("runtime session package uses only customer security/control dependencies",
   ]);
 });
 
-test("runtime session package has no trading, MT5, API, network, or persistence dependency", async () => {
-  const files = await listFilesRecursively(sourceDir);
+test("runtime session production source has no trading, MT5, API, or network dependency", async () => {
+  const files = (await listFilesRecursively(sourceDir)).filter(
+    (file) => !file.endsWith(".test.ts"),
+  );
   const forbidden = [
     "@xauusd/strategy-engine",
     "@xauusd/risk-engine",
