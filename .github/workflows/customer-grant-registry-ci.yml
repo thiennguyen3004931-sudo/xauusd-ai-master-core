@@ -20,6 +20,10 @@ on:
       - ".github/workflows/customer-grant-registry-ci.yml"
       - "pnpm-lock.yaml"
 
+concurrency:
+  group: customer-grant-registry-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
