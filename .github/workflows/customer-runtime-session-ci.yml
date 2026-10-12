@@ -28,6 +28,10 @@ on:
       - ".github/workflows/customer-runtime-session-ci.yml"
       - "pnpm-lock.yaml"
 
+concurrency:
+  group: customer-runtime-session-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
