@@ -228,6 +228,27 @@ function sameNumberArray(
   );
 }
 
+function sameGrantSnapshot(
+  left: CustomerProductGrantLifecycleRecord,
+  right: CustomerProductGrantLifecycleRecord,
+): boolean {
+  return (
+    left.grant.version === right.grant.version &&
+    left.grant.grantId === right.grant.grantId &&
+    left.grant.licenseId === right.grant.licenseId &&
+    left.grant.customerId === right.grant.customerId &&
+    left.grant.productMode === right.grant.productMode &&
+    left.grant.installationId === right.grant.installationId &&
+    sameStringArray(left.grant.allowedBotModes, right.grant.allowedBotModes) &&
+    sameStringArray(
+      left.grant.allowedCopySizingModes,
+      right.grant.allowedCopySizingModes,
+    ) &&
+    left.grant.issuedAt === right.grant.issuedAt &&
+    left.grant.expiresAt === right.grant.expiresAt
+  );
+}
+
 function sameLicenseSnapshot(
   left: LicenseRecord,
   right: LicenseRecord,
@@ -272,7 +293,8 @@ async function exposureStateRemainsCurrent(
   if (
     currentLifecycle.revision !== lifecycle.revision ||
     currentLifecycle.status !== lifecycle.status ||
-    currentLifecycle.revokedAt !== lifecycle.revokedAt
+    currentLifecycle.revokedAt !== lifecycle.revokedAt ||
+    !sameGrantSnapshot(lifecycle, currentLifecycle)
   ) {
     return false;
   }
