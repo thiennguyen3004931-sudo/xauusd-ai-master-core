@@ -9,7 +9,10 @@ import {
   type RegisterCustomerGrantDecision,
   type RevokeRegisteredCustomerGrantDecision,
 } from "@xauusd/customer-grant-registry";
-import type { CustomerProductGrantLifecycleRecord } from "@xauusd/customer-product-access";
+import {
+  assertCustomerProductGrantLifecycleRecord,
+  type CustomerProductGrantLifecycleRecord,
+} from "@xauusd/customer-product-access";
 
 export const CUSTOMER_GRANT_ADMIN_ACTIONS = [
   "READ_GRANT",
@@ -122,6 +125,65 @@ function isSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value);
 }
 
+function isValidAdminQuery(value: unknown): value is CustomerGrantAdminQuery {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const query = value as Record<string, unknown>;
+  const allowed = [
+    "customerId",
+    "licenseId",
+    "installationId",
+    "productMode",
+    "lifecycleStatus",
+  ] as const;
+
+  for (const key of Object.keys(query)) {
+    if (!(allowed as readonly string[]).includes(key)) {
+      return false;
+    }
+  }
+
+  for (const field of ["customerId", "licenseId", "installationId"] as const) {
+    if (
+      query[field] !== undefined &&
+      !isCanonicalNonBlankString(query[field])
+    ) {
+      return false;
+    }
+  }
+
+  if (
+    query.productMode !== undefined &&
+    query.productMode !== "SELF_MANAGED" &&
+    query.productMode !== "COPY_FOLLOWER"
+  ) {
+    return false;
+  }
+
+  if (
+    query.lifecycleStatus !== undefined &&
+    query.lifecycleStatus !== "ACTIVE" &&
+    query.lifecycleStatus !== "REVOKED"
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isValidLifecycle(
+  value: unknown,
+): value is CustomerProductGrantLifecycleRecord {
+  try {
+    assertCustomerProductGrantLifecycleRecord(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function validExactKeys(
   value: Record<string, unknown>,
   allowed: readonly string[],
@@ -202,19 +264,11 @@ function isValidCommand(value: unknown): value is CustomerGrantAdminCommand {
   }
 
   if (operation === "LIST_GRANTS") {
-    return (
-      command.query !== null &&
-      typeof command.query === "object" &&
-      !Array.isArray(command.query)
-    );
+    return isValidAdminQuery(command.query);
   }
 
   if (operation === "REGISTER_GRANT") {
-    return (
-      command.lifecycle !== null &&
-      typeof command.lifecycle === "object" &&
-      !Array.isArray(command.lifecycle)
-    );
+    return isValidLifecycle(command.lifecycle);
   }
 
   return (
