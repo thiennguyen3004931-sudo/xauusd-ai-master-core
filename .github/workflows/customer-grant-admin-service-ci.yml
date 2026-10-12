@@ -22,6 +22,10 @@ on:
       - ".github/workflows/customer-grant-admin-service-ci.yml"
       - "pnpm-lock.yaml"
 
+concurrency:
+  group: customer-grant-admin-service-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
