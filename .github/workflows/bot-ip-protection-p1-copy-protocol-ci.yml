@@ -18,6 +18,10 @@ on:
       - ".github/workflows/bot-ip-protection-p1-copy-protocol-ci.yml"
       - "pnpm-lock.yaml"
 
+concurrency:
+  group: bot-ip-protection-p1-copy-protocol-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
