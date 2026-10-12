@@ -115,6 +115,40 @@ describe("customer grant admin command service", () => {
       ),
     ).resolves.toEqual({ ok: false, code: "INVALID_COMMAND" });
 
+    await expect(
+      executeCustomerGrantAdminCommand(
+        repository,
+        authorizer,
+        { subjectId: "admin-001" },
+        {
+          version: 1,
+          operation: "LIST_GRANTS",
+          query: { unknown: true },
+          now: NOW,
+        },
+      ),
+    ).resolves.toEqual({ ok: false, code: "INVALID_COMMAND" });
+
+    await expect(
+      executeCustomerGrantAdminCommand(
+        repository,
+        authorizer,
+        { subjectId: "admin-001" },
+        {
+          version: 1,
+          operation: "REGISTER_GRANT",
+          lifecycle: {
+            version: 1,
+            grant: { grantId: "malformed" },
+            status: "ACTIVE",
+            revokedAt: null,
+            revision: 1,
+          },
+          now: NOW,
+        },
+      ),
+    ).resolves.toEqual({ ok: false, code: "INVALID_COMMAND" });
+
     expect(authorizeCalls).toBe(0);
   });
 
