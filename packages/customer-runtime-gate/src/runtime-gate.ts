@@ -10,10 +10,12 @@ import {
   COPY_FOLLOWER_SIZING_MODES,
   SELF_MANAGED_BOT_MODES,
   assertCustomerProductGrantLifecycleRecord,
+  effectiveCustomerGrantStatus,
   type CustomerProductGrantLifecycleRecord,
 } from "@xauusd/customer-product-access";
 import {
   assertLicenseRecord,
+  effectiveLicenseStatus,
   type LicenseRecord,
 } from "@xauusd/license-service";
 
@@ -21,14 +23,23 @@ export interface CustomerLicenseResolver {
   get(licenseId: string): Promise<unknown | null>;
 }
 
-export interface SelfManagedRuntimeActivationRequest
-  extends SelfManagedActivationRequest {
+export type SelfManagedRuntimeActivationRequest = Omit<
+  SelfManagedActivationRequest,
+  "now" | "consumeOnce"
+> & {
   readonly grantId: string;
-}
+};
 
-export interface CopyFollowerRuntimeActivationRequest
-  extends CopyFollowerActivationRequest {
+export type CopyFollowerRuntimeActivationRequest = Omit<
+  CopyFollowerActivationRequest,
+  "now" | "consumeOnce"
+> & {
   readonly grantId: string;
+};
+
+export interface CustomerRuntimeSecurityServices {
+  readonly now: () => number;
+  readonly consumeOnce: SelfManagedActivationRequest["consumeOnce"];
 }
 
 type RuntimeContextFailure = {
@@ -38,7 +49,9 @@ type RuntimeContextFailure = {
     | "INVALID_GRANT_SOURCE"
     | "PRODUCT_MODE_MISMATCH"
     | "LICENSE_NOT_FOUND"
-    | "INVALID_LICENSE_SOURCE";
+    | "INVALID_LICENSE_SOURCE"
+    | "INVALID_RUNTIME_SECURITY_CONTEXT"
+    | "RUNTIME_STATE_CHANGED";
 };
 
 export type CustomerRuntimeActivationDecision =
@@ -56,10 +69,8 @@ const SELF_MANAGED_KEYS = new Set([
   "installationId",
   "mt5Login",
   "brokerServer",
-  "now",
   "requestedBotMode",
   "proof",
-  "consumeOnce",
 ]);
 
 const COPY_FOLLOWER_KEYS = new Set([
@@ -67,10 +78,8 @@ const COPY_FOLLOWER_KEYS = new Set([
   "installationId",
   "mt5Login",
   "brokerServer",
-  "now",
   "requestedSizingMode",
   "proof",
-  "consumeOnce",
 ]);
 
 function isCanonicalNonBlankString(value: unknown): value is string {
@@ -108,9 +117,7 @@ function isValidBaseRequest(
     isCanonicalNonBlankString(request.grantId) &&
     isCanonicalNonBlankString(request.installationId) &&
     isPositiveSafeInteger(request.mt5Login) &&
-    isCanonicalNonBlankString(request.brokerServer) &&
-    isSafeInteger(request.now) &&
-    typeof request.consumeOnce === "function"
+    isCanonicalNonBlankString(request.brokerServer)
   );
 }
 
@@ -144,6 +151,35 @@ function isCopyFollowerRuntimeRequest(
       request.requestedSizingMode as (typeof COPY_FOLLOWER_SIZING_MODES)[number],
     )
   );
+}
+
+function resolveRuntimeSecurity(
+  value: unknown,
+): CustomerRuntimeSecurityServices | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const candidate = value as Partial<CustomerRuntimeSecurityServices>;
+  if (
+    typeof candidate.now !== "function" ||
+    typeof candidate.consumeOnce !== "function"
+  ) {
+    return null;
+  }
+
+  return candidate as CustomerRuntimeSecurityServices;
+}
+
+function readServerNow(
+  security: CustomerRuntimeSecurityServices,
+): number | null {
+  try {
+    const now = security.now();
+    return isSafeInteger(now) ? now : null;
+  } catch {
+    return null;
+  }
 }
 
 async function loadCurrentRuntimeContext(
@@ -274,6 +310,7 @@ async function exposureStateRemainsCurrent(
   licenses: CustomerLicenseResolver,
   lifecycle: CustomerProductGrantLifecycleRecord,
   license: LicenseRecord,
+  now: number,
 ): Promise<boolean> {
   let currentLifecycle: CustomerProductGrantLifecycleRecord | null;
   try {
@@ -314,16 +351,31 @@ async function exposureStateRemainsCurrent(
     return false;
   }
 
-  return sameLicenseSnapshot(license, rawCurrentLicense);
+  if (!sameLicenseSnapshot(license, rawCurrentLicense)) {
+    return false;
+  }
+
+  if (effectiveCustomerGrantStatus(currentLifecycle, now) !== "ACTIVE") {
+    return false;
+  }
+
+  return effectiveLicenseStatus(rawCurrentLicense, now) === "ACTIVE";
 }
 
 export async function activateSelfManagedRuntime(
   registry: CustomerGrantRegistryRepository,
   licenses: CustomerLicenseResolver,
+  securityInput: unknown,
   request: unknown,
 ): Promise<CustomerRuntimeActivationDecision> {
   if (!isSelfManagedRuntimeRequest(request)) {
     return { ok: false, code: "INVALID_RUNTIME_REQUEST" };
+  }
+
+  const security = resolveRuntimeSecurity(securityInput);
+  const now = security ? readServerNow(security) : null;
+  if (!security || now === null) {
+    return { ok: false, code: "INVALID_RUNTIME_SECURITY_CONTEXT" };
   }
 
   const context = await loadCurrentRuntimeContext(
@@ -344,24 +396,28 @@ export async function activateSelfManagedRuntime(
       installationId: request.installationId,
       mt5Login: request.mt5Login,
       brokerServer: request.brokerServer,
-      now: request.now,
+      now,
       requestedBotMode: request.requestedBotMode,
       proof: request.proof,
-      consumeOnce: request.consumeOnce,
+      consumeOnce: security.consumeOnce,
     },
   );
 
-  if (
-    decision.ok &&
-    decision.exposureAllowed &&
-    !(await exposureStateRemainsCurrent(
-      registry,
-      licenses,
-      context.lifecycle,
-      context.license,
-    ))
-  ) {
-    return { ok: false, code: "RUNTIME_STATE_CHANGED" };
+  if (decision.ok && decision.exposureAllowed) {
+    const finalNow = readServerNow(security);
+    if (
+      finalNow === null ||
+      finalNow < now ||
+      !(await exposureStateRemainsCurrent(
+        registry,
+        licenses,
+        context.lifecycle,
+        context.license,
+        finalNow,
+      ))
+    ) {
+      return { ok: false, code: "RUNTIME_STATE_CHANGED" };
+    }
   }
 
   return decision;
@@ -370,10 +426,17 @@ export async function activateSelfManagedRuntime(
 export async function activateCopyFollowerRuntime(
   registry: CustomerGrantRegistryRepository,
   licenses: CustomerLicenseResolver,
+  securityInput: unknown,
   request: unknown,
 ): Promise<CustomerRuntimeActivationDecision> {
   if (!isCopyFollowerRuntimeRequest(request)) {
     return { ok: false, code: "INVALID_RUNTIME_REQUEST" };
+  }
+
+  const security = resolveRuntimeSecurity(securityInput);
+  const now = security ? readServerNow(security) : null;
+  if (!security || now === null) {
+    return { ok: false, code: "INVALID_RUNTIME_SECURITY_CONTEXT" };
   }
 
   const context = await loadCurrentRuntimeContext(
@@ -394,24 +457,28 @@ export async function activateCopyFollowerRuntime(
       installationId: request.installationId,
       mt5Login: request.mt5Login,
       brokerServer: request.brokerServer,
-      now: request.now,
+      now,
       requestedSizingMode: request.requestedSizingMode,
       proof: request.proof,
-      consumeOnce: request.consumeOnce,
+      consumeOnce: security.consumeOnce,
     },
   );
 
-  if (
-    decision.ok &&
-    decision.exposureAllowed &&
-    !(await exposureStateRemainsCurrent(
-      registry,
-      licenses,
-      context.lifecycle,
-      context.license,
-    ))
-  ) {
-    return { ok: false, code: "RUNTIME_STATE_CHANGED" };
+  if (decision.ok && decision.exposureAllowed) {
+    const finalNow = readServerNow(security);
+    if (
+      finalNow === null ||
+      finalNow < now ||
+      !(await exposureStateRemainsCurrent(
+        registry,
+        licenses,
+        context.lifecycle,
+        context.license,
+        finalNow,
+      ))
+    ) {
+      return { ok: false, code: "RUNTIME_STATE_CHANGED" };
+    }
   }
 
   return decision;

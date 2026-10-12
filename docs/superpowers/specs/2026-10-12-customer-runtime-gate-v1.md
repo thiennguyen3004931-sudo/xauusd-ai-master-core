@@ -16,10 +16,8 @@ Caller-controlled input may contain:
 - installation ID
 - MT5 login
 - broker server
-- current timestamp
 - requested SELF_MANAGED bot mode or COPY_FOLLOWER sizing mode
 - installation proof
-- one-time challenge consumer
 
 Caller-controlled input must not contain:
 
@@ -29,23 +27,26 @@ Caller-controlled input must not contain:
 - grant status
 - product permissions
 - installation public key
+- current/server timestamp
+- one-time challenge consumer
 
-Exact-key validation rejects extra fields before repository or license resolution.
+The server injects a trusted clock and one-time challenge consumer separately from caller input. Exact-key validation rejects attempts to smuggle either field in the runtime request before repository or license resolution.
 
 ## Server-side resolution
 
 Activation order:
 
 1. validate exact runtime request shape;
-2. fetch the current lifecycle by `grantId`;
-3. validate the lifecycle source;
-4. require the expected product mode;
-5. fetch the current license by the lifecycle's `licenseId`;
-6. validate the license source and exact license ID;
-7. delegate to the approved customer activation flow;
-8. lifecycle access remains before installation proof consumption;
-9. when activation would allow new exposure, re-read the lifecycle and license;
-10. fail closed with `RUNTIME_STATE_CHANGED` if either server-side authorization snapshot changed during proof verification.
+2. validate the server security context and read trusted server time;
+3. fetch the current lifecycle by `grantId`;
+4. validate the lifecycle source;
+5. require the expected product mode;
+6. fetch the current license by the lifecycle's `licenseId`;
+7. validate the license source and exact license ID;
+8. delegate to the approved customer activation flow using server time and the server-owned one-time consumer;
+9. lifecycle access remains before installation proof consumption;
+10. when activation would allow new exposure, re-read server time, lifecycle and license;
+11. fail closed with `RUNTIME_STATE_CHANGED` if authorization state changed, time moved backward, or the grant/license became ineffective during proof verification.
 
 This prevents callers from selecting stale lifecycle/license objects and closes the revoke/suspend race between initial authorization and exposure activation.
 
@@ -59,6 +60,7 @@ Runtime-specific failures include:
 - PRODUCT_MODE_MISMATCH
 - LICENSE_NOT_FOUND
 - INVALID_LICENSE_SOURCE
+- INVALID_RUNTIME_SECURITY_CONTEXT
 - RUNTIME_STATE_CHANGED
 
 Existing activation failures remain unchanged.
@@ -90,7 +92,7 @@ V1 adds no:
 Tests must prove:
 
 1. SELF_MANAGED activation loads lifecycle and license from server-side sources;
-2. caller-supplied stale lifecycle/license fields are rejected before any source access;
+2. caller-supplied lifecycle/license/time/replay-consumer fields are rejected before any source access;
 3. current revoked grant blocks AUTO before proof consumption;
 4. PAUSE remains safe after revocation;
 5. current suspended license blocks exposure before proof consumption;
@@ -99,7 +101,9 @@ Tests must prove:
 8. product mode mismatch fails before proof consumption;
 9. grant revoke during proof verification blocks exposure;
 10. license status change during proof verification blocks exposure;
-11. package has no trading, MT5, persistence, network, or API route dependency.
+11. server time crossing grant/license expiry during proof verification blocks exposure;
+12. invalid server clock/replay-consumer context fails closed;
+13. package has no trading, MT5, persistence, network, or API route dependency.
 
 ## Safety boundary
 

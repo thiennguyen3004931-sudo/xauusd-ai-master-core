@@ -21,6 +21,7 @@ import {
   activateCopyFollowerRuntime,
   activateSelfManagedRuntime,
   type CustomerLicenseResolver,
+  type CustomerRuntimeSecurityServices,
 } from "./runtime-gate.js";
 
 const NOW = 7_000_000;
@@ -31,6 +32,21 @@ function oneTimeConsumer() {
     if (seen.has(challengeId)) return false;
     seen.add(challengeId);
     return true;
+  };
+}
+
+function security(
+  consumeOnce = oneTimeConsumer(),
+  times: readonly number[] = [NOW, NOW],
+): CustomerRuntimeSecurityServices {
+  let index = 0;
+  return {
+    now() {
+      const value = times[Math.min(index, times.length - 1)];
+      index += 1;
+      return value;
+    },
+    consumeOnce,
   };
 }
 
@@ -116,7 +132,7 @@ async function registerCopyFollower(
 }
 
 describe("SELF_MANAGED runtime gate", () => {
-  it("resolves lifecycle and license server-side before activation", async () => {
+  it("resolves lifecycle, license, time and replay consumer server-side", async () => {
     const repository = new InMemoryCustomerGrantRegistryRepository();
     const { license, proof } = fixture();
     await registerSelfManaged(repository, license);
@@ -126,15 +142,14 @@ describe("SELF_MANAGED runtime gate", () => {
       activateSelfManagedRuntime(
         repository,
         resolver(license, licenseLookups),
+        security(),
         {
           grantId: "grant-runtime-self",
           installationId: license.installationId,
           mt5Login: 880001,
           brokerServer: "Broker-Real",
-          now: NOW,
           requestedBotMode: "AUTO",
           proof,
-          consumeOnce: oneTimeConsumer(),
         },
       ),
     ).resolves.toEqual({
@@ -148,7 +163,7 @@ describe("SELF_MANAGED runtime gate", () => {
     expect(licenseLookups).toEqual([license.licenseId, license.licenseId]);
   });
 
-  it("rejects caller-supplied lifecycle/license fields before repository access", async () => {
+  it("rejects caller-supplied trusted fields before repository access", async () => {
     let repositoryCalls = 0;
     const repository: CustomerGrantRegistryRepository = {
       async get() {
@@ -174,14 +189,15 @@ describe("SELF_MANAGED runtime gate", () => {
           return null;
         },
       },
+      security(),
       {
         grantId: "grant-runtime-self",
         installationId: "install-runtime-001",
         mt5Login: 880001,
         brokerServer: "Broker-Real",
-        now: NOW,
         requestedBotMode: "AUTO",
         proof: {},
+        now: NOW,
         consumeOnce: async () => true,
         lifecycle: { stale: true },
         license: { stale: true },
@@ -193,34 +209,68 @@ describe("SELF_MANAGED runtime gate", () => {
     expect(licenseCalls).toBe(0);
   });
 
-  it("blocks revoked AUTO using the current registry record before proof consumption", async () => {
-    const repository = new InMemoryCustomerGrantRegistryRepository();
-    const { license, proof } = fixture();
-    await registerSelfManaged(repository, license);
-    await expect(
-      revokeRegisteredCustomerGrant(
-        repository,
-        "grant-runtime-self",
-        NOW - 1,
-      ),
-    ).resolves.toMatchObject({ ok: true, code: "REVOKED" });
+  it("rejects an invalid server security context before source access", async () => {
+    let repositoryCalls = 0;
+    const repository: CustomerGrantRegistryRepository = {
+      async get() {
+        repositoryCalls += 1;
+        return null;
+      },
+      async compareAndSet() {
+        throw new Error("must not write");
+      },
+      async list() {
+        throw new Error("must not list");
+      },
+    };
 
-    let consumeCalls = 0;
-    const decision = await activateSelfManagedRuntime(
+    const { license, proof } = fixture();
+    const result = await activateSelfManagedRuntime(
       repository,
       resolver(license),
+      { now: () => Number.NaN, consumeOnce: oneTimeConsumer() },
       {
         grantId: "grant-runtime-self",
         installationId: license.installationId,
         mt5Login: 880001,
         brokerServer: "Broker-Real",
-        now: NOW,
         requestedBotMode: "AUTO",
         proof,
-        consumeOnce: async () => {
-          consumeCalls += 1;
-          return true;
-        },
+      },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      code: "INVALID_RUNTIME_SECURITY_CONTEXT",
+    });
+    expect(repositoryCalls).toBe(0);
+  });
+
+  it("blocks revoked AUTO before proof consumption", async () => {
+    const repository = new InMemoryCustomerGrantRegistryRepository();
+    const { license, proof } = fixture();
+    await registerSelfManaged(repository, license);
+    await revokeRegisteredCustomerGrant(
+      repository,
+      "grant-runtime-self",
+      NOW - 1,
+    );
+
+    let consumeCalls = 0;
+    const decision = await activateSelfManagedRuntime(
+      repository,
+      resolver(license),
+      security(async () => {
+        consumeCalls += 1;
+        return true;
+      }),
+      {
+        grantId: "grant-runtime-self",
+        installationId: license.installationId,
+        mt5Login: 880001,
+        brokerServer: "Broker-Real",
+        requestedBotMode: "AUTO",
+        proof,
       },
     );
 
@@ -243,16 +293,19 @@ describe("SELF_MANAGED runtime gate", () => {
     );
 
     await expect(
-      activateSelfManagedRuntime(repository, resolver(license), {
-        grantId: "grant-runtime-self",
-        installationId: license.installationId,
-        mt5Login: 880001,
-        brokerServer: "Broker-Real",
-        now: NOW,
-        requestedBotMode: "PAUSE",
-        proof,
-        consumeOnce: oneTimeConsumer(),
-      }),
+      activateSelfManagedRuntime(
+        repository,
+        resolver(license),
+        security(),
+        {
+          grantId: "grant-runtime-self",
+          installationId: license.installationId,
+          mt5Login: 880001,
+          brokerServer: "Broker-Real",
+          requestedBotMode: "PAUSE",
+          proof,
+        },
+      ),
     ).resolves.toEqual({
       ok: true,
       code: "ACTIVATED",
@@ -262,7 +315,7 @@ describe("SELF_MANAGED runtime gate", () => {
     });
   });
 
-  it("uses current license status from the resolver instead of caller state", async () => {
+  it("uses current license status from the resolver", async () => {
     const repository = new InMemoryCustomerGrantRegistryRepository();
     const activeFixture = fixture("ACTIVE");
     await registerSelfManaged(repository, activeFixture.license);
@@ -277,18 +330,17 @@ describe("SELF_MANAGED runtime gate", () => {
     const decision = await activateSelfManagedRuntime(
       repository,
       resolver(suspended),
+      security(async () => {
+        consumeCalls += 1;
+        return true;
+      }),
       {
         grantId: "grant-runtime-self",
         installationId: suspended.installationId,
         mt5Login: 880001,
         brokerServer: "Broker-Real",
-        now: NOW,
         requestedBotMode: "AUTO",
         proof: activeFixture.proof,
-        consumeOnce: async () => {
-          consumeCalls += 1;
-          return true;
-        },
       },
     );
 
@@ -335,18 +387,17 @@ describe("SELF_MANAGED runtime gate", () => {
     const decision = await activateSelfManagedRuntime(
       repository,
       resolver(license),
+      security(async () => {
+        consumeCalls += 1;
+        return true;
+      }),
       {
         grantId: "grant-runtime-self",
         installationId: license.installationId,
         mt5Login: 880001,
         brokerServer: "Broker-Real",
-        now: NOW,
         requestedBotMode: "AUTO",
         proof,
-        consumeOnce: async () => {
-          consumeCalls += 1;
-          return true;
-        },
       },
     );
 
@@ -377,18 +428,17 @@ describe("SELF_MANAGED runtime gate", () => {
     const decision = await activateSelfManagedRuntime(
       repository,
       licenses,
+      security(async () => {
+        consumeCalls += 1;
+        return true;
+      }),
       {
         grantId: "grant-runtime-self",
         installationId: license.installationId,
         mt5Login: 880001,
         brokerServer: "Broker-Real",
-        now: NOW,
         requestedBotMode: "AUTO",
         proof,
-        consumeOnce: async () => {
-          consumeCalls += 1;
-          return true;
-        },
       },
     );
 
@@ -397,29 +447,58 @@ describe("SELF_MANAGED runtime gate", () => {
     expect(lookups).toBe(2);
   });
 
-  it("fails closed for missing grants or missing licenses", async () => {
+  it("fails closed if server time crosses grant expiry during proof verification", async () => {
     const repository = new InMemoryCustomerGrantRegistryRepository();
     const { license, proof } = fixture();
+    await registerSelfManaged(repository, license);
 
+    const decision = await activateSelfManagedRuntime(
+      repository,
+      resolver(license),
+      security(oneTimeConsumer(), [NOW, NOW + 20_000]),
+      {
+        grantId: "grant-runtime-self",
+        installationId: license.installationId,
+        mt5Login: 880001,
+        brokerServer: "Broker-Real",
+        requestedBotMode: "AUTO",
+        proof,
+      },
+    );
+
+    expect(decision).toEqual({ ok: false, code: "RUNTIME_STATE_CHANGED" });
+  });
+
+  it("fails closed for missing grants or licenses", async () => {
+    const repository = new InMemoryCustomerGrantRegistryRepository();
+    const { license, proof } = fixture();
     const request = {
       grantId: "grant-runtime-self",
       installationId: license.installationId,
       mt5Login: 880001,
       brokerServer: "Broker-Real",
-      now: NOW,
       requestedBotMode: "AUTO" as const,
       proof,
-      consumeOnce: oneTimeConsumer(),
     };
 
     await expect(
-      activateSelfManagedRuntime(repository, resolver(license), request),
+      activateSelfManagedRuntime(
+        repository,
+        resolver(license),
+        security(),
+        request,
+      ),
     ).resolves.toEqual({ ok: false, code: "GRANT_NOT_FOUND" });
 
     await registerSelfManaged(repository, license);
 
     await expect(
-      activateSelfManagedRuntime(repository, resolver(null), request),
+      activateSelfManagedRuntime(
+        repository,
+        resolver(null),
+        security(),
+        request,
+      ),
     ).resolves.toEqual({ ok: false, code: "LICENSE_NOT_FOUND" });
   });
 });
@@ -431,16 +510,19 @@ describe("COPY_FOLLOWER runtime gate", () => {
     await registerCopyFollower(repository, license);
 
     await expect(
-      activateCopyFollowerRuntime(repository, resolver(license), {
-        grantId: "grant-runtime-copy",
-        installationId: license.installationId,
-        mt5Login: 880001,
-        brokerServer: "Broker-Real",
-        now: NOW,
-        requestedSizingMode: "EQUITY_RATIO",
-        proof,
-        consumeOnce: oneTimeConsumer(),
-      }),
+      activateCopyFollowerRuntime(
+        repository,
+        resolver(license),
+        security(),
+        {
+          grantId: "grant-runtime-copy",
+          installationId: license.installationId,
+          mt5Login: 880001,
+          brokerServer: "Broker-Real",
+          requestedSizingMode: "EQUITY_RATIO",
+          proof,
+        },
+      ),
     ).resolves.toEqual({
       ok: true,
       code: "ACTIVATED",
@@ -459,18 +541,17 @@ describe("COPY_FOLLOWER runtime gate", () => {
     const decision = await activateSelfManagedRuntime(
       repository,
       resolver(license),
+      security(async () => {
+        consumeCalls += 1;
+        return true;
+      }),
       {
         grantId: "grant-runtime-copy",
         installationId: license.installationId,
         mt5Login: 880001,
         brokerServer: "Broker-Real",
-        now: NOW,
         requestedBotMode: "AUTO",
         proof,
-        consumeOnce: async () => {
-          consumeCalls += 1;
-          return true;
-        },
       },
     );
 
