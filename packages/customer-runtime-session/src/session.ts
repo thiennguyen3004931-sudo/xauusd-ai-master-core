@@ -64,7 +64,7 @@ export class InMemoryCustomerRuntimeChallengeStore
     this.challenges.delete(challengeId);
     this.consumed.add(challengeId);
 
-    if (now < challenge.issuedAt || now >= challenge.expiresAt) {
+    if (now < challenge.issuedAt || now > challenge.expiresAt) {
       return false;
     }
 
