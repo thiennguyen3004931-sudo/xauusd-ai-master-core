@@ -26,6 +26,10 @@ on:
       - ".github/workflows/customer-runtime-gate-ci.yml"
       - "pnpm-lock.yaml"
 
+concurrency:
+  group: customer-runtime-gate-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

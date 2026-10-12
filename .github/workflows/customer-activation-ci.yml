@@ -24,6 +24,10 @@ on:
       - ".github/workflows/customer-activation-ci.yml"
       - "pnpm-lock.yaml"
 
+concurrency:
+  group: customer-activation-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

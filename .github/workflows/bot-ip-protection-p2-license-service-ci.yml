@@ -20,6 +20,10 @@ on:
       - ".github/workflows/bot-ip-protection-p2-license-service-ci.yml"
       - "pnpm-lock.yaml"
 
+concurrency:
+  group: bot-ip-protection-p2-license-service-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

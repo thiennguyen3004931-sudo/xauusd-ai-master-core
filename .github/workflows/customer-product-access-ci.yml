@@ -18,6 +18,10 @@ on:
       - ".github/workflows/customer-product-access-ci.yml"
       - "pnpm-lock.yaml"
 
+concurrency:
+  group: customer-product-access-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
