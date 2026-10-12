@@ -159,7 +159,13 @@ async function loadCurrentRuntimeContext(
     }
   | RuntimeContextFailure
 > {
-  const lifecycle = await registry.get(grantId);
+  let lifecycle: CustomerProductGrantLifecycleRecord | null;
+  try {
+    lifecycle = await registry.get(grantId);
+  } catch {
+    return { ok: false, code: "INVALID_GRANT_SOURCE" };
+  }
+
   if (!lifecycle) {
     return { ok: false, code: "GRANT_NOT_FOUND" };
   }
@@ -174,7 +180,13 @@ async function loadCurrentRuntimeContext(
     return { ok: false, code: "PRODUCT_MODE_MISMATCH" };
   }
 
-  const rawLicense = await licenses.get(lifecycle.grant.licenseId);
+  let rawLicense: unknown | null;
+  try {
+    rawLicense = await licenses.get(lifecycle.grant.licenseId);
+  } catch {
+    return { ok: false, code: "INVALID_LICENSE_SOURCE" };
+  }
+
   if (rawLicense === null) {
     return { ok: false, code: "LICENSE_NOT_FOUND" };
   }
@@ -194,6 +206,93 @@ async function loadCurrentRuntimeContext(
     lifecycle,
     license: rawLicense,
   };
+}
+
+function sameStringArray(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function sameNumberArray(
+  left: readonly number[],
+  right: readonly number[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function sameLicenseSnapshot(
+  left: LicenseRecord,
+  right: LicenseRecord,
+): boolean {
+  return (
+    left.licenseId === right.licenseId &&
+    left.status === right.status &&
+    left.customerId === right.customerId &&
+    sameNumberArray(left.allowedMt5Logins, right.allowedMt5Logins) &&
+    sameStringArray(left.allowedBrokerServers, right.allowedBrokerServers) &&
+    left.installationId === right.installationId &&
+    left.installationPublicKey === right.installationPublicKey &&
+    left.plan === right.plan &&
+    left.maxAccounts === right.maxAccounts &&
+    left.issuedAt === right.issuedAt &&
+    left.expiresAt === right.expiresAt &&
+    left.revokedAt === right.revokedAt
+  );
+}
+
+async function exposureStateRemainsCurrent(
+  registry: CustomerGrantRegistryRepository,
+  licenses: CustomerLicenseResolver,
+  lifecycle: CustomerProductGrantLifecycleRecord,
+  license: LicenseRecord,
+): Promise<boolean> {
+  let currentLifecycle: CustomerProductGrantLifecycleRecord | null;
+  try {
+    currentLifecycle = await registry.get(lifecycle.grant.grantId);
+  } catch {
+    return false;
+  }
+
+  if (!currentLifecycle) return false;
+
+  try {
+    assertCustomerProductGrantLifecycleRecord(currentLifecycle);
+  } catch {
+    return false;
+  }
+
+  if (
+    currentLifecycle.revision !== lifecycle.revision ||
+    currentLifecycle.status !== lifecycle.status ||
+    currentLifecycle.revokedAt !== lifecycle.revokedAt
+  ) {
+    return false;
+  }
+
+  let rawCurrentLicense: unknown | null;
+  try {
+    rawCurrentLicense = await licenses.get(license.licenseId);
+  } catch {
+    return false;
+  }
+
+  if (rawCurrentLicense === null) return false;
+
+  try {
+    assertLicenseRecord(rawCurrentLicense);
+  } catch {
+    return false;
+  }
+
+  return sameLicenseSnapshot(license, rawCurrentLicense);
 }
 
 export async function activateSelfManagedRuntime(
@@ -216,7 +315,7 @@ export async function activateSelfManagedRuntime(
     return context;
   }
 
-  return activateSelfManagedCustomer(
+  const decision = await activateSelfManagedCustomer(
     context.license,
     context.lifecycle,
     {
@@ -229,6 +328,21 @@ export async function activateSelfManagedRuntime(
       consumeOnce: request.consumeOnce,
     },
   );
+
+  if (
+    decision.ok &&
+    decision.exposureAllowed &&
+    !(await exposureStateRemainsCurrent(
+      registry,
+      licenses,
+      context.lifecycle,
+      context.license,
+    ))
+  ) {
+    return { ok: false, code: "RUNTIME_STATE_CHANGED" };
+  }
+
+  return decision;
 }
 
 export async function activateCopyFollowerRuntime(
@@ -251,7 +365,7 @@ export async function activateCopyFollowerRuntime(
     return context;
   }
 
-  return activateCopyFollowerCustomer(
+  const decision = await activateCopyFollowerCustomer(
     context.license,
     context.lifecycle,
     {
@@ -264,4 +378,19 @@ export async function activateCopyFollowerRuntime(
       consumeOnce: request.consumeOnce,
     },
   );
+
+  if (
+    decision.ok &&
+    decision.exposureAllowed &&
+    !(await exposureStateRemainsCurrent(
+      registry,
+      licenses,
+      context.lifecycle,
+      context.license,
+    ))
+  ) {
+    return { ok: false, code: "RUNTIME_STATE_CHANGED" };
+  }
+
+  return decision;
 }
