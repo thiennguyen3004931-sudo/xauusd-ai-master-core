@@ -37,6 +37,35 @@ test("runtime gate production dependencies are customer-access only", () => {
   ]);
 });
 
+test("copy action gate is exported and preserves fail-closed product semantics", () => {
+  const index = readFileSync(join(sourceDir, "index.ts"), "utf8");
+  const copyGate = readFileSync(join(sourceDir, "copy-action-gate.ts"), "utf8");
+
+  assert.equal(index.includes('export * from "./copy-action-gate.js";'), true);
+
+  for (const expected of [
+    "authorizeCopyFollowerRuntimeAction",
+    '"GRANT_NOT_ACTIVE"',
+    '"ACTION_NOT_ALLOWED_FOR_GRANT_STATE"',
+    '"RUNTIME_STATE_CHANGED"',
+    "effectiveCustomerGrantStatus",
+    "authorizeLicenseAction",
+  ]) {
+    assert.equal(
+      copyGate.includes(expected),
+      true,
+      `copy action gate missing expected contract: ${expected}`,
+    );
+  }
+
+  const requestKeysStart = copyGate.indexOf("const ACTION_REQUEST_KEYS");
+  const requestKeysEnd = copyGate.indexOf("]);", requestKeysStart);
+  assert.notEqual(requestKeysStart, -1);
+  assert.notEqual(requestKeysEnd, -1);
+  const requestKeys = copyGate.slice(requestKeysStart, requestKeysEnd);
+  assert.equal(requestKeys.includes('"now"'), false);
+});
+
 test("runtime gate has no trading, persistence, network or API implementation", () => {
   const all = sourceFiles(sourceDir)
     .map((file) => readFileSync(file, "utf8"))
