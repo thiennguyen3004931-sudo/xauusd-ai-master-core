@@ -26,6 +26,16 @@ export interface CustomerCopyRuntimeActionRequest
   readonly licenseId: string;
 }
 
+type CustomerCopyRuntimeContextFailure = {
+  readonly ok: false;
+  readonly code:
+    | "GRANT_NOT_FOUND"
+    | "INVALID_GRANT_SOURCE"
+    | "PRODUCT_MODE_MISMATCH"
+    | "LICENSE_NOT_FOUND"
+    | "INVALID_LICENSE_SOURCE";
+};
+
 export type CustomerCopyRuntimeActionDecision =
   | {
       readonly ok: true;
@@ -39,11 +49,7 @@ export type CustomerCopyRuntimeActionDecision =
       readonly code:
         | "INVALID_RUNTIME_ACTION_REQUEST"
         | "INVALID_RUNTIME_SECURITY_CONTEXT"
-        | "GRANT_NOT_FOUND"
-        | "INVALID_GRANT_SOURCE"
-        | "PRODUCT_MODE_MISMATCH"
-        | "LICENSE_NOT_FOUND"
-        | "INVALID_LICENSE_SOURCE"
+        | CustomerCopyRuntimeContextFailure["code"]
         | "LICENSE_GRANT_MISMATCH"
         | "GRANT_NOT_ACTIVE"
         | "ACTION_NOT_ALLOWED_FOR_GRANT_STATE"
@@ -217,7 +223,7 @@ async function loadContext(
       readonly lifecycle: CustomerProductGrantLifecycleRecord;
       readonly license: LicenseRecord;
     }
-  | CustomerCopyRuntimeActionDecision
+  | CustomerCopyRuntimeContextFailure
 > {
   let lifecycle: CustomerProductGrantLifecycleRecord | null;
   try {
