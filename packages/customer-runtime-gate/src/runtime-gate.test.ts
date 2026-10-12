@@ -145,7 +145,7 @@ describe("SELF_MANAGED runtime gate", () => {
       accessCode: "AUTHORIZED",
     });
 
-    expect(licenseLookups).toEqual([license.licenseId]);
+    expect(licenseLookups).toEqual([license.licenseId, license.licenseId]);
   });
 
   it("rejects caller-supplied lifecycle/license fields before repository access", async () => {
@@ -298,6 +298,103 @@ describe("SELF_MANAGED runtime gate", () => {
       accessCode: "LICENSE_NOT_ACTIVE",
     });
     expect(consumeCalls).toBe(0);
+  });
+
+  it("fails closed if the grant changes after proof verification", async () => {
+    const { license, proof } = fixture();
+    const active = createCustomerProductGrantLifecycle(
+      issueSelfManagedGrant(license, {
+        grantId: "grant-runtime-self",
+        issuedAt: NOW - 1_000,
+        expiresAt: NOW + 10_000,
+        allowedBotModes: ["AUTO"],
+      }),
+    );
+    const revoked = {
+      ...active,
+      status: "REVOKED" as const,
+      revokedAt: NOW,
+      revision: 2,
+    };
+
+    let reads = 0;
+    const repository: CustomerGrantRegistryRepository = {
+      async get() {
+        reads += 1;
+        return reads === 1 ? active : revoked;
+      },
+      async compareAndSet() {
+        throw new Error("must not write");
+      },
+      async list() {
+        throw new Error("must not list");
+      },
+    };
+
+    let consumeCalls = 0;
+    const decision = await activateSelfManagedRuntime(
+      repository,
+      resolver(license),
+      {
+        grantId: "grant-runtime-self",
+        installationId: license.installationId,
+        mt5Login: 880001,
+        brokerServer: "Broker-Real",
+        now: NOW,
+        requestedBotMode: "AUTO",
+        proof,
+        consumeOnce: async () => {
+          consumeCalls += 1;
+          return true;
+        },
+      },
+    );
+
+    expect(decision).toEqual({ ok: false, code: "RUNTIME_STATE_CHANGED" });
+    expect(consumeCalls).toBe(1);
+    expect(reads).toBe(2);
+  });
+
+  it("fails closed if the current license changes after proof verification", async () => {
+    const repository = new InMemoryCustomerGrantRegistryRepository();
+    const { license, proof } = fixture();
+    await registerSelfManaged(repository, license);
+
+    const suspended: LicenseRecord = {
+      ...license,
+      status: "SUSPENDED",
+      revokedAt: null,
+    };
+    let lookups = 0;
+    const licenses: CustomerLicenseResolver = {
+      async get() {
+        lookups += 1;
+        return lookups === 1 ? license : suspended;
+      },
+    };
+
+    let consumeCalls = 0;
+    const decision = await activateSelfManagedRuntime(
+      repository,
+      licenses,
+      {
+        grantId: "grant-runtime-self",
+        installationId: license.installationId,
+        mt5Login: 880001,
+        brokerServer: "Broker-Real",
+        now: NOW,
+        requestedBotMode: "AUTO",
+        proof,
+        consumeOnce: async () => {
+          consumeCalls += 1;
+          return true;
+        },
+      },
+    );
+
+    expect(decision).toEqual({ ok: false, code: "RUNTIME_STATE_CHANGED" });
+    expect(consumeCalls).toBe(1);
+    expect(lookups).toBe(2);
   });
 
   it("fails closed for missing grants or missing licenses", async () => {
