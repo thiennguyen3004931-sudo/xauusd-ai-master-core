@@ -43,9 +43,11 @@ Activation order:
 5. fetch the current license by the lifecycle's `licenseId`;
 6. validate the license source and exact license ID;
 7. delegate to the approved customer activation flow;
-8. lifecycle access remains before installation proof consumption.
+8. lifecycle access remains before installation proof consumption;
+9. when activation would allow new exposure, re-read the lifecycle and license;
+10. fail closed with `RUNTIME_STATE_CHANGED` if either server-side authorization snapshot changed during proof verification.
 
-This prevents callers from selecting stale lifecycle/license objects.
+This prevents callers from selecting stale lifecycle/license objects and closes the revoke/suspend race between initial authorization and exposure activation.
 
 ## Fail-closed outcomes
 
@@ -57,6 +59,7 @@ Runtime-specific failures include:
 - PRODUCT_MODE_MISMATCH
 - LICENSE_NOT_FOUND
 - INVALID_LICENSE_SOURCE
+- RUNTIME_STATE_CHANGED
 
 Existing activation failures remain unchanged.
 
@@ -94,7 +97,9 @@ Tests must prove:
 6. missing grant/license fails closed;
 7. COPY_FOLLOWER uses the same server-side resolution path;
 8. product mode mismatch fails before proof consumption;
-9. package has no trading, MT5, persistence, network, or API route dependency.
+9. grant revoke during proof verification blocks exposure;
+10. license status change during proof verification blocks exposure;
+11. package has no trading, MT5, persistence, network, or API route dependency.
 
 ## Safety boundary
 
