@@ -347,7 +347,7 @@ describe("SELF_MANAGED runtime sessions", () => {
       privateKey: keys.privateKey,
     });
 
-    clock.value = issued.challenge.expiresAt;
+    clock.value = issued.challenge.expiresAt + 1;
 
     const result = await activateSelfManagedSession(
       registry,
@@ -366,7 +366,8 @@ describe("SELF_MANAGED runtime sessions", () => {
 
     expect(result).toMatchObject({
       ok: false,
-      code: "ACCESS_DENIED",
+      code: "INSTALLATION_PROOF_DENIED",
+      installationProofCode: "CHALLENGE_EXPIRED",
     });
   });
 });
