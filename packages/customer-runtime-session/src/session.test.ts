@@ -70,7 +70,7 @@ async function registerSelfManaged(
     issueSelfManagedGrant(license, {
       grantId: "grant-session-self",
       issuedAt: NOW - 1_000,
-      expiresAt: NOW + 50_000,
+      expiresAt: NOW + 90_000,
       allowedBotModes: ["AUTO"],
     }),
   );
