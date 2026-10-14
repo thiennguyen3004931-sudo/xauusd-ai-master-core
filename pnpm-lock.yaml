@@ -301,6 +301,9 @@ importers:
 
   packages/customer-agent:
     dependencies:
+      '@xauusd/copy-protocol':
+        specifier: workspace:*
+        version: link:../copy-protocol
       '@xauusd/installation-proof':
         specifier: workspace:*
         version: link:../installation-proof

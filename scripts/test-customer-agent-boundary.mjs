@@ -20,6 +20,7 @@ test("customer agent depends only on installation proof", async () => {
   );
   assert.equal(pkg.name, "@xauusd/customer-agent");
   assert.deepEqual(Object.keys(pkg.dependencies ?? {}).sort(), [
+    "@xauusd/copy-protocol",
     "@xauusd/installation-proof",
   ]);
 });
