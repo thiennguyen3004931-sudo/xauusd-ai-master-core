@@ -1,4 +1,5 @@
-import { DatabaseSync } from "node:sqlite";
+import { createRequire } from "node:module";
+import type { DatabaseSync as DatabaseSyncInstance } from "node:sqlite";
 import type { CustomerGrantRegistryRepository } from "@xauusd/customer-grant-registry";
 import {
   assertCustomerProductGrantLifecycleRecord,
@@ -14,6 +15,10 @@ import {
 } from "@xauusd/license-service";
 import type { CustomerLicenseResolver } from "@xauusd/customer-runtime-gate";
 import type { CustomerRuntimeChallengeStore } from "./session.js";
+
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
+  DatabaseSync: new (path: string) => DatabaseSyncInstance;
+};
 
 type SqlRow = Record<string, unknown>;
 
@@ -75,7 +80,7 @@ function parseGrant(payload: unknown): CustomerProductGrantLifecycleRecord {
   return cloneGrant(parsed);
 }
 
-function initializeSchema(db: DatabaseSync): void {
+function initializeSchema(db: DatabaseSyncInstance): void {
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = FULL;
@@ -117,7 +122,7 @@ function initializeSchema(db: DatabaseSync): void {
 export class SqliteCustomerLicenseRepository
   implements CustomerLicenseResolver
 {
-  constructor(private readonly db: DatabaseSync) {}
+  constructor(private readonly db: DatabaseSyncInstance) {}
 
   async get(licenseId: string): Promise<LicenseRecord | null> {
     canonicalNonBlank(licenseId, "licenseId");
@@ -146,7 +151,7 @@ export class SqliteCustomerLicenseRepository
 export class SqliteCustomerGrantRegistryRepository
   implements CustomerGrantRegistryRepository
 {
-  constructor(private readonly db: DatabaseSync) {}
+  constructor(private readonly db: DatabaseSyncInstance) {}
 
   async get(
     grantId: string,
@@ -222,7 +227,7 @@ export class SqliteCustomerGrantRegistryRepository
 export class SqliteCustomerRuntimeChallengeStore
   implements CustomerRuntimeChallengeStore
 {
-  constructor(private readonly db: DatabaseSync) {}
+  constructor(private readonly db: DatabaseSyncInstance) {}
 
   async put(challenge: InstallationChallenge): Promise<boolean> {
     assertInstallationChallenge(challenge);
@@ -267,7 +272,7 @@ export class SqliteCustomerRuntimeChallengeStore
 }
 
 export class SqliteCustomerSecurityStore {
-  private readonly db: DatabaseSync;
+  private readonly db: DatabaseSyncInstance;
 
   readonly licenses: SqliteCustomerLicenseRepository;
   readonly grants: SqliteCustomerGrantRegistryRepository;
