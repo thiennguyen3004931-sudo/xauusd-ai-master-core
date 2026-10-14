@@ -31,7 +31,7 @@ test("runtime session package uses only customer security/control dependencies",
   ]);
 });
 
-test("runtime session production source has no trading, MT5, API, or network dependency", async () => {
+test("runtime session production source has no trading or MT5 dependency", async () => {
   const files = (await listFilesRecursively(sourceDir)).filter(
     (file) => !file.endsWith(".test.ts"),
   );
@@ -44,8 +44,6 @@ test("runtime session production source has no trading, MT5, API, or network dep
     "axios",
     "fetch(",
     "WebSocket",
-    "node:http",
-    "node:https",
     "node:net",
     "node:fs",
     "writeFile(",
@@ -63,6 +61,46 @@ test("runtime session production source has no trading, MT5, API, or network dep
         `${path.relative(root, file)} contains forbidden marker: ${marker}`,
       );
     }
+  }
+});
+
+
+test("network access is isolated to the authenticated HTTPS gateway adapter", async () => {
+  const files = (await listFilesRecursively(sourceDir)).filter(
+    (file) => !file.endsWith(".test.ts"),
+  );
+  const networkUsers = [];
+  for (const file of files) {
+    const content = await readFile(file, "utf8");
+    if (content.includes("node:http") || content.includes("node:https")) {
+      networkUsers.push(path.relative(root, file));
+    }
+  }
+  assert.deepEqual(networkUsers, [
+    path.join("packages", "customer-runtime-session", "src", "api-gateway.ts"),
+  ]);
+
+  const source = await readFile(path.join(sourceDir, "api-gateway.ts"), "utf8");
+  for (const required of [
+    "Bearer ",
+    "timingSafeEqual",
+    "CUSTOMER_API_MAX_BODY_BYTES",
+    "RATE_LIMITED",
+    "AUTHORIZATION_DENIED",
+    "createCustomerApiGatewayHttpsServer",
+  ]) {
+    assert.ok(source.includes(required), `API gateway missing: ${required}`);
+  }
+  for (const forbidden of [
+    "@xauusd/strategy-engine",
+    "@xauusd/risk-engine",
+    "@xauusd/execution-engine",
+    "@xauusd/mt5-broker",
+    "order_send",
+    "position_modify",
+    "position_close",
+  ]) {
+    assert.equal(source.includes(forbidden), false, `API gateway contains forbidden marker: ${forbidden}`);
   }
 });
 
@@ -115,7 +153,8 @@ test("dedicated runtime session CI locks tests, typecheck, build, boundary, and 
     "node --test scripts/test-customer-runtime-session-boundary.mjs",
     "git diff --check",
     "PRODUCTION_MUTATION=NONE",
-    "API_ROUTE_MUTATION=NONE",
+    "CUSTOMER_API_GATEWAY=AUTHENTICATED_HTTPS",
+    "API_ROUTE_MUTATION=CUSTOMER_ONLY",
   ]) {
     assert.ok(workflow.includes(required), `Runtime session CI missing: ${required}`);
   }

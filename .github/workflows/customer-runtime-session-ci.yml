@@ -122,5 +122,6 @@ jobs:
           Write-Host 'POSITION_MUTATION=NONE'
           Write-Host 'LIVE_TEST_ORDER=NONE'
           Write-Host 'PERSISTENCE_MUTATION=NONE'
-          Write-Host 'NETWORK_MUTATION=NONE'
-          Write-Host 'API_ROUTE_MUTATION=NONE'
+          Write-Host 'CUSTOMER_API_GATEWAY=AUTHENTICATED_HTTPS'
+          Write-Host 'NETWORK_MUTATION=CUSTOMER_HTTPS_ONLY'
+          Write-Host 'API_ROUTE_MUTATION=CUSTOMER_ONLY'
