@@ -20,6 +20,8 @@ on:
       - "scripts/test-customer-agent-boundary.mjs"
       - "scripts/customer-handoff-self-managed-e2e.test.mjs"
       - "scripts/customer-handoff-copy-follower-e2e.test.mjs"
+      - "scripts/customer-handoff-installation-migration-e2e.test.mjs"
+      - "scripts/customer-handoff-installation-migration-e2e.test.mjs"
       - "scripts/customer-handoff-copy-follower-e2e.test.mjs"
       - "scripts/customer-handoff-self-managed-e2e.test.mjs"
       - ".github/workflows/customer-handoff-production-acceptance-readonly.yml"
@@ -157,6 +159,9 @@ jobs:
       - name: COPY_FOLLOWER simulated E2E
         run: node --test scripts/customer-handoff-copy-follower-e2e.test.mjs
 
+      - name: Revoke new-PC recovery simulated E2E
+        run: node --test scripts/customer-handoff-installation-migration-e2e.test.mjs
+
       - name: Diff hygiene
         run: git diff --check
 
@@ -179,6 +184,8 @@ jobs:
           Write-Host 'SELF_MANAGED_E2E=PASS'
           Write-Host 'COPY_FOLLOWER_E2E=PASS'
           Write-Host 'SIGNED_COPY_COMMAND=PASS'
+          Write-Host 'REVOKE_NEW_PC_RECOVERY_E2E=PASS'
+          Write-Host 'MIGRATION_AUDIT=PASS'
           Write-Host 'SQLITE_DURABILITY=PASS'
           Write-Host 'REPLAY_PROTECTION=PASS'
           Write-Host 'PRODUCTION_MUTATION=NONE'
