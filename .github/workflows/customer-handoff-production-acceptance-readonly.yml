@@ -18,6 +18,8 @@ on:
       - "packages/customer-agent/**"
       - "scripts/test-customer-runtime-session-boundary.mjs"
       - "scripts/test-customer-agent-boundary.mjs"
+      - "scripts/customer-handoff-self-managed-e2e.test.mjs"
+      - "scripts/customer-handoff-self-managed-e2e.test.mjs"
       - ".github/workflows/customer-handoff-production-acceptance-readonly.yml"
       - "pnpm-lock.yaml"
   push:
@@ -147,6 +149,9 @@ jobs:
       - name: Customer agent distribution boundary
         run: node --test scripts/test-customer-agent-boundary.mjs
 
+      - name: SELF_MANAGED simulated E2E
+        run: node --test scripts/customer-handoff-self-managed-e2e.test.mjs
+
       - name: Diff hygiene
         run: git diff --check
 
@@ -166,6 +171,7 @@ jobs:
           Write-Host 'CUSTOMER_API_RATE_LIMIT=PASS'
           Write-Host 'CUSTOMER_AGENT=PASS'
           Write-Host 'CUSTOMER_AGENT_MASTER_SOURCE_ACCESS=NONE'
+          Write-Host 'SELF_MANAGED_E2E=PASS'
           Write-Host 'SQLITE_DURABILITY=PASS'
           Write-Host 'REPLAY_PROTECTION=PASS'
           Write-Host 'PRODUCTION_MUTATION=NONE'
