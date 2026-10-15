@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { signCopyCommand } from "@xauusd/copy-protocol";
+import { signCopyCommand, type JsonObject } from "@xauusd/copy-protocol";
 import { CustomerCopyCommandVerifier } from "./copy-follower.js";
 import {
   CustomerFollowerExecutionAdapter,
@@ -35,7 +35,7 @@ function verifier(publicKey: string) {
   );
 }
 
-function body(payload: Record<string, unknown>) {
+function body(payload: JsonObject) {
   return {
     version: 1 as const,
     commandId: "exec-command-001",
