@@ -15,7 +15,9 @@ on:
       - "packages/customer-activation/**"
       - "packages/customer-runtime-gate/**"
       - "packages/customer-runtime-session/**"
+      - "packages/customer-agent/**"
       - "scripts/test-customer-runtime-session-boundary.mjs"
+      - "scripts/test-customer-agent-boundary.mjs"
       - ".github/workflows/customer-handoff-production-acceptance-readonly.yml"
       - "pnpm-lock.yaml"
   push:
@@ -31,7 +33,9 @@ on:
       - "packages/customer-activation/**"
       - "packages/customer-runtime-gate/**"
       - "packages/customer-runtime-session/**"
+      - "packages/customer-agent/**"
       - "scripts/test-customer-runtime-session-boundary.mjs"
+      - "scripts/test-customer-agent-boundary.mjs"
       - ".github/workflows/customer-handoff-production-acceptance-readonly.yml"
       - "pnpm-lock.yaml"
 
@@ -89,7 +93,8 @@ jobs:
             "@xauusd/customer-grant-admin-service",
             "@xauusd/customer-activation",
             "@xauusd/customer-runtime-gate",
-            "@xauusd/customer-runtime-session"
+            "@xauusd/customer-runtime-session",
+            "@xauusd/customer-agent"
           )
           foreach ($package in $packages) {
             pnpm --filter $package build
@@ -108,7 +113,8 @@ jobs:
             "@xauusd/customer-grant-admin-service",
             "@xauusd/customer-activation",
             "@xauusd/customer-runtime-gate",
-            "@xauusd/customer-runtime-session"
+            "@xauusd/customer-runtime-session",
+            "@xauusd/customer-agent"
           )
           foreach ($package in $packages) {
             pnpm --filter $package test
@@ -127,7 +133,8 @@ jobs:
             "@xauusd/customer-grant-admin-service",
             "@xauusd/customer-activation",
             "@xauusd/customer-runtime-gate",
-            "@xauusd/customer-runtime-session"
+            "@xauusd/customer-runtime-session",
+            "@xauusd/customer-agent"
           )
           foreach ($package in $packages) {
             pnpm --filter $package typecheck
@@ -136,6 +143,9 @@ jobs:
 
       - name: Runtime session security boundary
         run: node --test scripts/test-customer-runtime-session-boundary.mjs
+
+      - name: Customer agent distribution boundary
+        run: node --test scripts/test-customer-agent-boundary.mjs
 
       - name: Diff hygiene
         run: git diff --check
@@ -154,6 +164,8 @@ jobs:
           Write-Host 'CUSTOMER_API_GATEWAY=PASS'
           Write-Host 'CUSTOMER_API_AUTHENTICATION=PASS'
           Write-Host 'CUSTOMER_API_RATE_LIMIT=PASS'
+          Write-Host 'CUSTOMER_AGENT=PASS'
+          Write-Host 'CUSTOMER_AGENT_MASTER_SOURCE_ACCESS=NONE'
           Write-Host 'SQLITE_DURABILITY=PASS'
           Write-Host 'REPLAY_PROTECTION=PASS'
           Write-Host 'PRODUCTION_MUTATION=NONE'
