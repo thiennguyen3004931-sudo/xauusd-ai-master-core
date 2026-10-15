@@ -1,0 +1,137 @@
+name: Customer Deployment + Follower Execution Acceptance Read-Only
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "packages/customer-agent/**"
+      - "packages/copy-protocol/**"
+      - "packages/installation-proof/**"
+      - "customer-release/**"
+      - "scripts/customer-follower-execution-e2e.test.mjs"
+      - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
+      - "scripts/package-customer-agent-release.ps1"
+      - ".github/workflows/customer-deployment-follower-execution-acceptance.yml"
+      - "pnpm-lock.yaml"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/customer-agent/**"
+      - "packages/copy-protocol/**"
+      - "packages/installation-proof/**"
+      - "customer-release/**"
+      - "scripts/customer-follower-execution-e2e.test.mjs"
+      - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
+      - "scripts/package-customer-agent-release.ps1"
+      - ".github/workflows/customer-deployment-follower-execution-acceptance.yml"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+concurrency:
+  group: customer-deployment-follower-execution-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  customer-deployment-follower-execution:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install locked dependencies with bounded retry
+        shell: powershell
+        run: |
+          $ok = $false
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            pnpm install --frozen-lockfile
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            if ($attempt -lt 4) { Start-Sleep -Seconds 10 }
+          }
+          if (-not $ok) { throw "PNPM_INSTALL_FAILED_AFTER_RETRIES" }
+
+      - name: Build customer distribution dependencies
+        shell: powershell
+        run: |
+          pnpm --filter @xauusd/copy-protocol build
+          if ($LASTEXITCODE -ne 0) { throw "COPY_PROTOCOL_BUILD_FAILED" }
+          pnpm --filter @xauusd/installation-proof build
+          if ($LASTEXITCODE -ne 0) { throw "INSTALLATION_PROOF_BUILD_FAILED" }
+          pnpm --filter @xauusd/customer-agent build
+          if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_AGENT_BUILD_FAILED" }
+
+      - name: Customer agent unit tests
+        run: pnpm --filter @xauusd/customer-agent test
+
+      - name: Customer agent typecheck
+        run: pnpm --filter @xauusd/customer-agent typecheck
+
+      - name: Simulated follower execution E2E
+        run: node --test scripts/customer-follower-execution-e2e.test.mjs
+
+      - name: Distribution and execution boundary
+        run: node --test scripts/test-customer-deployment-follower-execution-boundary.mjs
+
+      - name: Build customer release package
+        shell: powershell
+        run: .\scripts\package-customer-agent-release.ps1 -SkipBuild
+
+      - name: Verify packaged customer release
+        shell: powershell
+        run: |
+          $zip = "artifacts/customer-agent-release/customer-agent-v1.zip"
+          if (-not (Test-Path $zip)) { throw "CUSTOMER_RELEASE_ZIP_MISSING" }
+          $verify = Join-Path $env:RUNNER_TEMP "customer-release-verify"
+          if (Test-Path $verify) { Remove-Item -Recurse -Force $verify }
+          Expand-Archive -Path $zip -DestinationPath $verify -Force
+          if (-not (Test-Path (Join-Path $verify "release-manifest.sha256"))) {
+            throw "CUSTOMER_RELEASE_MANIFEST_MISSING"
+          }
+          $forbidden = Get-ChildItem -Path $verify -Recurse -File | Where-Object {
+            $_.FullName -match "[\\/]src[\\/]" -or
+            $_.Name -match "\.pem$|\.key$|^\.env"
+          }
+          if ($forbidden) {
+            throw "CUSTOMER_RELEASE_FORBIDDEN_FILE=" + ($forbidden.FullName -join ",")
+          }
+          Push-Location $verify
+          node -e "import('@xauusd/customer-agent').then(m=>{if(!m.CustomerAgent||!m.CustomerFollowerExecutionAdapter)process.exit(2)})"
+          if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_RELEASE_IMPORT_FAILED" }
+          Pop-Location
+
+      - name: Diff hygiene
+        run: git diff --check
+
+      - name: Acceptance summary
+        shell: powershell
+        run: |
+          Write-Host 'CUSTOMER_DEPLOYMENT_PACKAGE=PASS'
+          Write-Host 'FOLLOWER_EXECUTION_BOUNDARY=PASS'
+          Write-Host 'SIGNED_COPY_COMMAND_TO_EXECUTOR_E2E=PASS'
+          Write-Host 'STRICT_EXECUTION_PAYLOAD=PASS'
+          Write-Host 'MASTER_SOURCE_INCLUDED=NO'
+          Write-Host 'PRIVATE_KEY_INCLUDED=NO'
+          Write-Host 'API_TOKEN_INCLUDED=NO'
+          Write-Host 'MT5_BRIDGE_INCLUDED=NO'
+          Write-Host 'MT5_LIVE_EXECUTION=NONE'
+          Write-Host 'ARM_MUTATION=NONE'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
