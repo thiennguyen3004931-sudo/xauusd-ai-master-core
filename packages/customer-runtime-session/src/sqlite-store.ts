@@ -16,7 +16,7 @@ import {
 import type { CustomerLicenseResolver } from "@xauusd/customer-runtime-gate";
 import type { CustomerRuntimeChallengeStore } from "./session.js";
 
-const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
+const { DatabaseSync } = createRequire(process.cwd() + "/package.json")("node:sqlite") as {
   DatabaseSync: new (path: string) => DatabaseSyncInstance;
 };
 
