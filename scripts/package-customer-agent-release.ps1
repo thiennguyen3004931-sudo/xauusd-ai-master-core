@@ -96,7 +96,7 @@ $forbiddenPathPatterns = @(
 
 $files = Get-ChildItem -Path $releaseDir -Recurse -File
 foreach ($file in $files) {
-  $relative = [IO.Path]::GetRelativePath($releaseDir, $file.FullName)
+  $relative = $file.FullName.Substring($releaseDir.Length).TrimStart([char[]]"\\/")
   foreach ($pattern in $forbiddenPathPatterns) {
     if ($relative -match $pattern) {
       throw "FORBIDDEN_RELEASE_PATH=$relative"
