@@ -1,0 +1,66 @@
+name: Phase7C Production Stopped Lifecycle Web Refresh
+
+on:
+  push:
+    branches:
+      - ops/phase7c-production-sync-preflight-ff116b5e
+    paths:
+      - ".github/workflows/phase7c-production-stopped-web-refresh.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  stopped-web-refresh:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+    steps:
+      - name: Checkout ops source
+        uses: actions/checkout@v4
+
+      - name: Refresh production API Web attestation while lifecycle remains stopped
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProductionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $ExpectedCommit = '9329530c513aae88b18cd584136b3ae4da9622d4'
+          $ExpectedTree = 'db5571e0f2a8e1790b4c24dd65d0c3978b056682'
+          $git = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          $head = ([string](& $git -C $ProductionRoot rev-parse HEAD)).Trim().ToLowerInvariant()
+          $branchName = ([string](& $git -C $ProductionRoot branch --show-current)).Trim()
+          $dirty = @(& $git -C $ProductionRoot status --porcelain --untracked-files=normal)
+          if ($branchName -ne 'main' -or $head -ne $ExpectedCommit -or $dirty.Count -ne 0) {
+            throw "Production source guard failed. branch=$branchName head=$head dirty=$($dirty.Count)"
+          }
+
+          $script = Join-Path $ProductionRoot 'scripts\rollout-phase7c-stopped-lifecycle-web-only-local.ps1'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script `
+            -WorkDir '.runtime' `
+            -ApiPort 3711 `
+            -WebPort 5717 `
+            -StartupTimeoutSeconds 120 `
+            -ExpectedCommit $ExpectedCommit `
+            -ExpectedTree $ExpectedTree
+          if ($LASTEXITCODE -ne 0) { throw "Stopped lifecycle Web-only rollout failed with exit code $LASTEXITCODE" }
+
+          $mode = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode' -Method Get -TimeoutSec 5
+          $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 5
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 5
+          $att = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation/' -Method Get -TimeoutSec 5
+          if ([string]$mode.state.mode -ne 'PAUSE') { throw 'Final mode is not PAUSE.' }
+          if ([string]$cap.liveArmStatus -ne 'DISARMED' -or [bool]$cap.liveExecutionArmed) { throw 'Final ARM is not DISARMED.' }
+          if ([bool]$life.running -or [bool]$life.ready) { throw 'Lifecycle unexpectedly started during Web refresh.' }
+          foreach ($name in @('api','web')) {
+            $row = @($att.components | Where-Object { [string]$_.component -eq $name })
+            if ($row.Count -ne 1 -or [string]$row[0].verdict -ne 'EXACT_MATCH' -or $row[0].alive -ne $true) {
+              throw "Final $name attestation is not active EXACT_MATCH."
+            }
+          }
+          Write-Host 'STOPPED_WEB_REFRESH_API=EXACT_MATCH'
+          Write-Host 'STOPPED_WEB_REFRESH_WEB=EXACT_MATCH'
+          Write-Host 'STOPPED_WEB_REFRESH_LIFECYCLE=STOPPED'
+          Write-Host 'STOPPED_WEB_REFRESH_MODE=PAUSE'
+          Write-Host 'STOPPED_WEB_REFRESH_ARM=DISARMED'
+          Write-Host 'STOPPED_WEB_REFRESH_ORDER_MUTATION=NONE'
+          Write-Host 'STOPPED_WEB_REFRESH_POSITION_MUTATION=NONE'
+          Write-Host 'STOPPED_WEB_REFRESH_RESULT=PASS'
