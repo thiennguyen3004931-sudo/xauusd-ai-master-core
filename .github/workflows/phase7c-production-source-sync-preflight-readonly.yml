@@ -1,0 +1,156 @@
+name: Phase7C Production Source Sync Preflight Read-Only
+
+on:
+  push:
+    branches:
+      - ops/phase7c-production-sync-preflight-ff116b5e
+    paths:
+      - ".github/workflows/phase7c-production-source-sync-preflight-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inspect production source/runtime without mutation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProductionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $TargetCommit = 'ff116b5e0c491163a11e33cb9e38fb6b503f0a1d'
+          $TaskName = 'XAUUSD-Phase7C-Executors'
+
+          Write-Host "SYNC_PREFLIGHT_OBSERVATION_ONLY=TRUE"
+          Write-Host "SYNC_PREFLIGHT_TARGET_COMMIT=$TargetCommit"
+
+          if (-not (Test-Path -LiteralPath $ProductionRoot -PathType Container)) {
+            throw "PRODUCTION_ROOT_MISSING=$ProductionRoot"
+          }
+
+          $git = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          $branch = ([string](& $git -C $ProductionRoot branch --show-current)).Trim()
+          $head = ([string](& $git -C $ProductionRoot rev-parse HEAD)).Trim().ToLowerInvariant()
+          $tree = ([string](& $git -C $ProductionRoot rev-parse 'HEAD^{tree}')).Trim().ToLowerInvariant()
+          $dirty = @(& $git -C $ProductionRoot status --porcelain --untracked-files=normal)
+          $origin = ([string](& $git -C $ProductionRoot remote get-url origin)).Trim()
+          $remoteRaw = @(& $git -C $ProductionRoot ls-remote --heads origin refs/heads/main)
+          $remoteMain = if ($remoteRaw.Count -eq 1) { ([string]$remoteRaw[0]).Split([char]9)[0].Trim().ToLowerInvariant() } else { '' }
+
+          Write-Host "SYNC_PREFLIGHT_PRODUCTION_BRANCH=$branch"
+          Write-Host "SYNC_PREFLIGHT_PRODUCTION_HEAD=$head"
+          Write-Host "SYNC_PREFLIGHT_PRODUCTION_TREE=$tree"
+          Write-Host "SYNC_PREFLIGHT_WORKTREE_DIRTY_COUNT=$($dirty.Count)"
+          Write-Host "SYNC_PREFLIGHT_ORIGIN=$origin"
+          Write-Host "SYNC_PREFLIGHT_REMOTE_MAIN=$remoteMain"
+
+          $accountPath = Join-Path $ProductionRoot '.runtime\phase7c-account-mode.json'
+          $armPath = Join-Path $ProductionRoot '.runtime\phase7c-live-arm.json'
+          $configPath = Join-Path $ProductionRoot '.runtime\phase7c-executor-task-config.json'
+          if (Test-Path -LiteralPath $accountPath) {
+            $account = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+            Write-Host "SYNC_PREFLIGHT_ACCOUNT_MODE=$([string]$account.accountMode)"
+            Write-Host "SYNC_PREFLIGHT_ACCOUNT_LIVE_EXECUTION_ENABLED=$([bool]$account.liveExecutionEnabled)"
+          } else {
+            Write-Host "SYNC_PREFLIGHT_ACCOUNT_STATE=MISSING"
+          }
+          if (Test-Path -LiteralPath $armPath) {
+            $localArm = Get-Content -LiteralPath $armPath -Raw | ConvertFrom-Json
+            Write-Host "SYNC_PREFLIGHT_LOCAL_ARMED=$([bool]$localArm.armed)"
+            Write-Host "SYNC_PREFLIGHT_LOCAL_ARM_ACCOUNT_MODE=$([string]$localArm.accountMode)"
+          } else {
+            Write-Host "SYNC_PREFLIGHT_LOCAL_ARM_STATE=MISSING"
+          }
+          if (Test-Path -LiteralPath $configPath) {
+            $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+            Write-Host "SYNC_PREFLIGHT_TASK_CONFIG_VERSION=$([int]$cfg.version)"
+            Write-Host "SYNC_PREFLIGHT_TASK_CONFIG_ARMED=$([bool]$cfg.armed)"
+            Write-Host "SYNC_PREFLIGHT_TASK_CONFIG_LIVE_EXECUTION_ENABLED=$([bool]$cfg.liveExecutionEnabled)"
+          } else {
+            Write-Host "SYNC_PREFLIGHT_TASK_CONFIG=MISSING"
+          }
+
+          try {
+            Import-Module ScheduledTasks -ErrorAction Stop
+            $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            Write-Host "SYNC_PREFLIGHT_TASK_STATE=$([string]$task.State)"
+          } catch {
+            Write-Host "SYNC_PREFLIGHT_TASK_STATE=UNAVAILABLE"
+          }
+
+          function Try-Get([string]$Uri) {
+            try {
+              return Invoke-RestMethod -Uri $Uri -Method Get -TimeoutSec 8
+            } catch {
+              return $null
+            }
+          }
+
+          $mode = Try-Get 'http://127.0.0.1:3711/api/v1/phase7c/bot-mode'
+          $life = Try-Get 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle'
+          $cap = Try-Get 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability'
+          $att = Try-Get 'http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation/'
+
+          Write-Host "SYNC_PREFLIGHT_CONTROL_API_REACHABLE=$($null -ne $life)"
+          if ($null -ne $mode) {
+            $modeValue = if ($null -ne $mode.state) { [string]$mode.state.mode } else { [string]$mode.mode }
+            Write-Host "SYNC_PREFLIGHT_BOT_MODE=$modeValue"
+          }
+          if ($null -ne $life) {
+            Write-Host "SYNC_PREFLIGHT_LIFECYCLE_RUNNING=$([bool]$life.running)"
+            Write-Host "SYNC_PREFLIGHT_LIFECYCLE_READY=$([bool]$life.ready)"
+            if ($null -ne $life.broker) {
+              Write-Host "SYNC_PREFLIGHT_BROKER_READY=$([bool]$life.broker.ready)"
+              if ($null -ne $life.broker.heartbeat) {
+                Write-Host "SYNC_PREFLIGHT_BROKER_HEARTBEAT_STATE=$([string]$life.broker.heartbeat.state)"
+                Write-Host "SYNC_PREFLIGHT_BROKER_DESIRED_EXECUTOR_STATE=$([string]$life.broker.heartbeat.desiredExecutorState)"
+              }
+            }
+          }
+          if ($null -ne $cap) {
+            Write-Host "SYNC_PREFLIGHT_ARM_STATUS=$([string]$cap.liveArmStatus)"
+            Write-Host "SYNC_PREFLIGHT_LIVE_EXECUTION_ARMED=$([bool]$cap.liveExecutionArmed)"
+          }
+          if ($null -ne $att) {
+            Write-Host "SYNC_PREFLIGHT_ATTESTATION_OVERALL=$([string]$att.overall)"
+            if ($null -ne $att.deployment) {
+              Write-Host "SYNC_PREFLIGHT_ATTESTED_SOURCE_COMMIT=$([string]$att.deployment.sourceCommit)"
+              Write-Host "SYNC_PREFLIGHT_ATTESTED_DEPLOYMENT_ID=$([string]$att.deployment.deploymentId)"
+            }
+            $mismatches = @($att.components | Where-Object { [string]$_.verdict -ne 'EXACT_MATCH' } | ForEach-Object { "$([string]$_.component)=$([string]$_.verdict)" })
+            Write-Host "SYNC_PREFLIGHT_ATTESTATION_MISMATCHES=$([string]::Join(',', $mismatches))"
+          }
+
+          $bridgeReachable = $false
+          try {
+            if (-not (Test-Path -LiteralPath $accountPath)) { throw 'account state missing' }
+            $account = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
+            $envFile = [string]$account.envFile
+            if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProductionRoot $envFile }
+            $lib = Join-Path $ProductionRoot 'scripts\lib\phase7c-account-mode.ps1'
+            . $lib
+            $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+            $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+            $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+            $health = Invoke-RestMethod -Uri "$bridgeBase/health?reconnect=false" -Headers $headers -Method Get -TimeoutSec 8
+            $positions = @(Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD&reconnect=false" -Headers $headers -Method Get -TimeoutSec 8)
+            $orders = @(Invoke-RestMethod -Uri "$bridgeBase/v1/orders?symbol=XAUUSD&reconnect=false" -Headers $headers -Method Get -TimeoutSec 8)
+            $bridgeReachable = $true
+            Write-Host "SYNC_PREFLIGHT_BRIDGE_CONNECTED=$([bool]$health.connected)"
+            Write-Host "SYNC_PREFLIGHT_BRIDGE_STATUS=$([string]$health.status)"
+            Write-Host "SYNC_PREFLIGHT_BRIDGE_ACCOUNT_MODE=$([string]$health.accountMode)"
+            Write-Host "SYNC_PREFLIGHT_BRIDGE_ARM_STATUS=$([string]$health.liveArmStatus)"
+            Write-Host "SYNC_PREFLIGHT_BRIDGE_LIVE_EXECUTION_ARMED=$([bool]$health.liveExecutionArmed)"
+            Write-Host "SYNC_PREFLIGHT_POSITION_COUNT=$($positions.Count)"
+            Write-Host "SYNC_PREFLIGHT_PENDING_ORDER_COUNT=$($orders.Count)"
+          } catch {
+            Write-Host "SYNC_PREFLIGHT_BRIDGE_ERROR=$($_.Exception.GetType().Name)"
+          }
+          Write-Host "SYNC_PREFLIGHT_BRIDGE_REACHABLE=$bridgeReachable"
+          Write-Host "SYNC_PREFLIGHT_MUTATION=NONE"
+          Write-Host "SYNC_PREFLIGHT_RESULT=PASS"
