@@ -88,9 +88,9 @@ jobs:
                 try {
                   $row = Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" -ErrorAction Stop
                   $cmd = [string]$row.CommandLine
-                  if ($cmd -match "phase7c-supervisor") { $marker = "SUPERVISOR" }
-                  elseif ($cmd -match "phase7c-trend") { $marker = "TREND" }
-                  elseif ($cmd -match "phase7c-sideway") { $marker = "SIDEWAY" }
+                  if ($cmd -match "run-phase7c-executors-local\.ps1") { $marker = "SUPERVISOR" }
+                  elseif ($cmd -match "run-phase7c-trend-controller-local\.ps1") { $marker = "TREND" }
+                  elseif ($cmd -match "run-phase7c-sideway-controller-local\.ps1") { $marker = "SIDEWAY" }
                   elseif ($cmd -match "phase7c-telegram") { $marker = "TELEGRAM" }
                   elseif ($cmd -match "regime-notifier") { $marker = "REGIME_NOTIFIER" }
                   elseif ($cmd -match "phase7c") { $marker = "OTHER_PHASE7C" }
