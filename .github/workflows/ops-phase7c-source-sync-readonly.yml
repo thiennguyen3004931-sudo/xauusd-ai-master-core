@@ -89,8 +89,8 @@ jobs:
                   $row = Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" -ErrorAction Stop
                   $cmd = [string]$row.CommandLine
                   if ($cmd -match "run-phase7c-executors-local\.ps1") { $marker = "SUPERVISOR" }
-                  elseif ($cmd -match "run-phase7c-trend-controller-local\.ps1") { $marker = "TREND" }
-                  elseif ($cmd -match "run-phase7c-sideway-controller-local\.ps1") { $marker = "SIDEWAY" }
+                  elseif ($cmd -match "run-phase7c-trend-controller-local\.ps1" -or $cmd -match "run-phase7c-trend-account-mode\.mjs") { $marker = "TREND" }
+                  elseif ($cmd -match "run-phase7c-sideway-controller-local\.ps1" -or $cmd -match "run-phase7c-sideway-locked\.mjs") { $marker = "SIDEWAY" }
                   elseif ($cmd -match "phase7c-telegram") { $marker = "TELEGRAM" }
                   elseif ($cmd -match "regime-notifier") { $marker = "REGIME_NOTIFIER" }
                   elseif ($cmd -match "phase7c") { $marker = "OTHER_PHASE7C" }
