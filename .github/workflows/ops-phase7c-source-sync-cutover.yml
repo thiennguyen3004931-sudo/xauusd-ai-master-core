@@ -1,0 +1,226 @@
+name: OPS Phase7C Source Sync Cutover ff116b5e
+
+on:
+  push:
+    branches:
+      - ops/phase7c-source-sync-ff116b5e
+    paths:
+      - ".github/workflows/ops-phase7c-source-sync-cutover.yml"
+
+concurrency:
+  group: ops-phase7c-source-sync-cutover-ff116b5e
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 20
+    steps:
+      - name: Guarded production source sync and stable recovery
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+
+          $ProjectRoot = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $ExpectedCurrent = "9329530c513aae88b18cd584136b3ae4da9622d4"
+          $Target = "ff116b5e0c491163a11e33cb9e38fb6b503f0a1d"
+          $ExpectedOrigin = "https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core"
+          $TimeoutSeconds = 300
+
+          function Read-BridgeArray([string]$Uri, [hashtable]$Headers) {
+            $response = Invoke-WebRequest -Uri $Uri -Headers $Headers -Method Get -UseBasicParsing -TimeoutSec 10
+            $raw = ([string]$response.Content).Trim()
+            if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq "[]") { return @() }
+            return @($raw | ConvertFrom-Json | Where-Object { $null -ne $_ })
+          }
+
+          function Get-LifecycleAliveCount($State) {
+            if ($null -eq $State -or $null -eq $State.processes) { return -1 }
+            $count = 0
+            foreach ($p in @($State.processes.PSObject.Properties)) {
+              if ($null -ne $p.Value -and [bool]$p.Value.alive) { $count++ }
+            }
+            return $count
+          }
+
+          function Assert-ControlSafety([string]$Stage, [string]$ControlApiUrl, [string]$BridgeBase, [hashtable]$BridgeHeaders) {
+            $mode = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 10
+            $arm = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 10
+            $life = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 10
+            $bridge = Invoke-RestMethod -Uri "$BridgeBase/health" -Headers $BridgeHeaders -Method Get -TimeoutSec 10
+            $positions = @(Read-BridgeArray "$BridgeBase/v1/positions?symbol=XAUUSD" $BridgeHeaders)
+            $orders = @(Read-BridgeArray "$BridgeBase/v1/orders?symbol=XAUUSD" $BridgeHeaders)
+
+            if ([string]$mode.state.mode -ne "PAUSE") { throw "$Stage requires PAUSE. actual=$($mode.state.mode)" }
+            if ([string]$arm.accountMode -ne "LIVE" -or [string]$arm.liveArmStatus -ne "DISARMED" -or [bool]$arm.liveExecutionArmed) {
+              throw "$Stage requires LIVE DISARMED."
+            }
+            if ([string]$life.accountMode.accountMode -ne "LIVE" -or -not [bool]$life.accountMode.valid) {
+              throw "$Stage lifecycle account mode is not valid LIVE."
+            }
+            if (-not [bool]$bridge.connected -or [string]$bridge.status -ne "ok" -or [string]$bridge.configuredAccountMode -ne "LIVE" -or [string]$bridge.accountMode -ne "real") {
+              throw "$Stage MT5 bridge is not healthy LIVE/real."
+            }
+            if ($positions.Count -ne 0 -or $orders.Count -ne 0) {
+              throw "$Stage requires flat XAUUSD. positions=$($positions.Count) pending=$($orders.Count)"
+            }
+
+            Write-Host "CUTOVER_$($Stage)_MODE=PAUSE"
+            Write-Host "CUTOVER_$($Stage)_ARM=DISARMED"
+            Write-Host "CUTOVER_$($Stage)_POSITIONS=0"
+            Write-Host "CUTOVER_$($Stage)_PENDING=0"
+            Write-Host "CUTOVER_$($Stage)_LIFECYCLE_RUNNING=$([bool]$life.running)"
+            Write-Host "CUTOVER_$($Stage)_LIFECYCLE_READY=$([bool]$life.ready)"
+            Write-Host "CUTOVER_$($Stage)_ALIVE_EXECUTORS=$(Get-LifecycleAliveCount $life)"
+            return [pscustomobject]@{
+              mode = $mode
+              arm = $arm
+              life = $life
+              bridge = $bridge
+            }
+          }
+
+          if (-not (Test-Path -LiteralPath $ProjectRoot -PathType Container)) {
+            throw "Production root missing: $ProjectRoot"
+          }
+
+          $git = (Get-Command git -ErrorAction Stop).Source
+          $branchNow = (& $git -C $ProjectRoot branch --show-current).Trim()
+          $headNow = (& $git -C $ProjectRoot rev-parse HEAD).Trim().ToLowerInvariant()
+          $dirty = @(& $git -C $ProjectRoot status --porcelain --untracked-files=normal)
+          $origin = (& $git -C $ProjectRoot remote get-url origin).Trim()
+
+          if ($branchNow -ne "main") { throw "Production branch must be main. actual=$branchNow" }
+          if (@($dirty | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -ne 0) { throw "Production worktree must be clean." }
+          if ($origin -ne $ExpectedOrigin -and $origin -ne "$ExpectedOrigin.git") { throw "Unexpected production origin: $origin" }
+          if ($headNow -ne $ExpectedCurrent -and $headNow -ne $Target) {
+            throw "Unexpected production HEAD. actual=$headNow expectedCurrent=$ExpectedCurrent target=$Target"
+          }
+
+          $remoteRaw = @(& $git -C $ProjectRoot ls-remote --heads origin refs/heads/main)
+          if ($LASTEXITCODE -ne 0 -or $remoteRaw.Count -ne 1) { throw "Could not resolve canonical remote main." }
+          $remoteMain = ([string]$remoteRaw[0]).Split([char]9)[0].Trim().ToLowerInvariant()
+          if ($remoteMain -ne $Target) { throw "Remote main changed. expected=$Target actual=$remoteMain" }
+
+          & $git -C $ProjectRoot fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          if ($LASTEXITCODE -ne 0) { throw "Exact origin/main fetch failed." }
+          & $git -C $ProjectRoot merge-base --is-ancestor $ExpectedCurrent $Target
+          if ($LASTEXITCODE -ne 0) { throw "Target is not a fast-forward descendant of expected current source." }
+
+          $configPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
+          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+          $ControlApiUrl = ([string]$config.controlApiUrl).TrimEnd("/")
+          $accountLib = Join-Path $ProjectRoot "scripts\lib\phase7c-account-mode.ps1"
+          . $accountLib
+
+          $envFileRaw = [string]$config.envFile
+          $EnvFile = if ([System.IO.Path]::IsPathRooted($envFileRaw)) {
+            [System.IO.Path]::GetFullPath($envFileRaw)
+          } else {
+            [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot $envFileRaw))
+          }
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $EnvFile -AccountMode "LIVE" -RequireTrading
+          $BridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $BridgeHeaders = @{ "x-mt5-api-key" = $envInfo.apiKey }
+
+          $preflight = Assert-ControlSafety "PREFLIGHT" $ControlApiUrl $BridgeBase $BridgeHeaders
+          $bridgeSession = [string]$preflight.bridge.bridgeSessionId
+          if ([string]::IsNullOrWhiteSpace($bridgeSession)) { throw "Bridge session id missing." }
+
+          if ($headNow -eq $ExpectedCurrent) {
+            if ([bool]$preflight.life.running -or (Get-LifecycleAliveCount $preflight.life) -gt 0) {
+              $body = @{} | ConvertTo-Json -Compress
+              [void](Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/lifecycle/stop" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 60)
+
+              $deadline = (Get-Date).AddSeconds(120)
+              $stopped = $false
+              while ((Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 750
+                try {
+                  $life = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 10
+                  if (-not [bool]$life.running -and (Get-LifecycleAliveCount $life) -eq 0) {
+                    $stopped = $true
+                    break
+                  }
+                } catch {}
+              }
+              if (-not $stopped) { throw "Lifecycle failed to reach stopped/zero-executor state." }
+              Write-Host "CUTOVER_LIFECYCLE_STOP=PASS"
+            } else {
+              Write-Host "CUTOVER_LIFECYCLE_STOP=SKIPPED_ALREADY_STOPPED"
+            }
+
+            [void](Assert-ControlSafety "POST_STOP" $ControlApiUrl $BridgeBase $BridgeHeaders)
+
+            $headBefore = (& $git -C $ProjectRoot rev-parse HEAD).Trim().ToLowerInvariant()
+            $dirtyBefore = @(& $git -C $ProjectRoot status --porcelain --untracked-files=normal)
+            if ($headBefore -ne $ExpectedCurrent -or @($dirtyBefore | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -ne 0) {
+              throw "Production source drifted before FF mutation."
+            }
+
+            & $git -C $ProjectRoot merge --ff-only $Target
+            if ($LASTEXITCODE -ne 0) { throw "Exact production fast-forward failed." }
+            $headAfter = (& $git -C $ProjectRoot rev-parse HEAD).Trim().ToLowerInvariant()
+            $dirtyAfter = @(& $git -C $ProjectRoot status --porcelain --untracked-files=normal)
+            if ($headAfter -ne $Target -or @($dirtyAfter | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -ne 0) {
+              throw "Post-FF source identity invalid. head=$headAfter dirty=$(@($dirtyAfter).Count)"
+            }
+            Write-Host "CUTOVER_GIT_FAST_FORWARD=PASS|HEAD=$Target"
+          } else {
+            Write-Host "CUTOVER_GIT_FAST_FORWARD=SKIPPED_ALREADY_TARGET|HEAD=$Target"
+          }
+
+          $recovery = Join-Path $ProjectRoot "scripts\recover-phase7c-runtime-ready-stable-deploy-local.ps1"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $recovery -ExpectedCommit $Target -TimeoutSeconds $TimeoutSeconds
+          if ($LASTEXITCODE -ne 0) { throw "Stable runtime recovery failed with exit code $LASTEXITCODE" }
+          Write-Host "CUTOVER_STABLE_RECOVERY=PASS"
+
+          $p3 = Join-Path $ProjectRoot "scripts\verify-phase7c-p3-production-acceptance-local.ps1"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p3 -ProjectRoot $ProjectRoot -ExpectedCommit $Target -ApiBaseUrl $ControlApiUrl
+          if ($LASTEXITCODE -ne 0) { throw "P3 acceptance failed with exit code $LASTEXITCODE" }
+          Write-Host "CUTOVER_P3=PASS"
+
+          $p4 = Join-Path $ProjectRoot "scripts\verify-phase7c-p4-production-acceptance-local.ps1"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p4 -ProjectRoot $ProjectRoot -ExpectedCommit $Target -ApiBaseUrl $ControlApiUrl
+          if ($LASTEXITCODE -ne 0) { throw "P4 acceptance failed with exit code $LASTEXITCODE" }
+          Write-Host "CUTOVER_P4=PASS"
+
+          $post = Assert-ControlSafety "FINAL" $ControlApiUrl $BridgeBase $BridgeHeaders
+          if (-not [bool]$post.life.running -or -not [bool]$post.life.ready) {
+            throw "Final lifecycle is not running+ready."
+          }
+          if ([string]$post.bridge.bridgeSessionId -ne $bridgeSession) {
+            throw "MT5 bridge session changed. expected=$bridgeSession actual=$($post.bridge.bridgeSessionId)"
+          }
+
+          $att = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/runtime-source-attestation/" -Method Get -TimeoutSec 10
+          if ([string]$att.overall -ne "EXACT_MATCH") { throw "Final runtime source is not EXACT_MATCH. actual=$($att.overall)" }
+          if ([string]$att.deployment.sourceCommit -ne $Target) { throw "Final deployment source commit mismatch." }
+          $components = @($att.components)
+          if ($components.Count -ne 8) { throw "Final attestation must contain 8 components. actual=$($components.Count)" }
+          foreach ($component in $components) {
+            if ([string]$component.verdict -ne "EXACT_MATCH" -or [string]$component.sourceCommit -ne $Target) {
+              throw "Final component mismatch: $($component.component) verdict=$($component.verdict) source=$($component.sourceCommit)"
+            }
+          }
+
+          $finalHead = (& $git -C $ProjectRoot rev-parse HEAD).Trim().ToLowerInvariant()
+          $finalDirty = @(& $git -C $ProjectRoot status --porcelain --untracked-files=normal)
+          if ($finalHead -ne $Target -or @($finalDirty | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -ne 0) {
+            throw "Final Git source identity invalid."
+          }
+
+          Write-Host "CUTOVER_FINAL_HEAD=$finalHead"
+          Write-Host "CUTOVER_FINAL_RUNTIME_SOURCE=8/8_EXACT"
+          Write-Host "CUTOVER_FINAL_MODE=PAUSE"
+          Write-Host "CUTOVER_FINAL_ARM=DISARMED"
+          Write-Host "CUTOVER_BRIDGE_SESSION_UNCHANGED=PASS"
+          Write-Host "CUTOVER_ORDER_MUTATION=NONE"
+          Write-Host "CUTOVER_POSITION_MUTATION=NONE"
+          Write-Host "CUTOVER_LIVE_TEST_ORDER=NONE"
+          Write-Host "CUTOVER_AUTO_ENABLE=NONE"
+          Write-Host "CUTOVER_STATUS=PASS"
