@@ -59,8 +59,6 @@ jobs:
 
           Import-Module ScheduledTasks -ErrorAction Stop
           $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-          $canonicalProcessCount = Get-Phase7CCanonicalTaskProcessCount -Task $task
-          $runningInstanceCount = Get-Phase7CRunningTaskInstanceCount -Name $TaskName
           $config = Get-Content -LiteralPath (Join-Path $ProductionRoot '.runtime\phase7c-executor-task-config.json') -Raw | ConvertFrom-Json
           $workDir = [string]$config.workDir
           if (-not [System.IO.Path]::IsPathRooted($workDir)) { $workDir = Join-Path $ProductionRoot $workDir }
@@ -80,8 +78,6 @@ jobs:
             Write-Host "RUNTIME_TUPLE_LIFECYCLE_BROKER_DESIRED=$([string]$life.broker.heartbeat.desiredExecutorState)"
           }
           Write-Host "RUNTIME_TUPLE_EXECUTOR_TASK_STATE=$([string]$task.State)"
-          Write-Host "RUNTIME_TUPLE_CANONICAL_PROCESS_COUNT=$canonicalProcessCount"
-          Write-Host "RUNTIME_TUPLE_RUNNING_INSTANCE_COUNT=$runningInstanceCount"
           Write-Host "RUNTIME_TUPLE_STATUS_READ_STATE=$([string]$generation.statusReadState)"
           Write-Host "RUNTIME_TUPLE_HEARTBEAT_READ_STATE=$([string]$generation.heartbeatReadState)"
           Write-Host "RUNTIME_TUPLE_BROKER_PROCESS_ALIVE=$([bool]$generation.brokerProcessAlive)"
