@@ -1,0 +1,156 @@
+name: OPS Phase7C Source Sync Read-Only Snapshot
+
+on:
+  push:
+    branches:
+      - ops/phase7c-source-sync-ff116b5e
+    paths:
+      - ".github/workflows/ops-phase7c-source-sync-readonly.yml"
+
+concurrency:
+  group: ops-phase7c-source-sync-readonly
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+    steps:
+      - name: Production source-sync read-only snapshot
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+
+          $ProjectRoot = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          if (-not (Test-Path -LiteralPath $ProjectRoot -PathType Container)) {
+            throw "PRODUCTION_ROOT_MISSING=$ProjectRoot"
+          }
+
+          $git = (Get-Command git -ErrorAction Stop).Source
+          $branch = (& $git -C $ProjectRoot branch --show-current).Trim()
+          $head = (& $git -C $ProjectRoot rev-parse HEAD).Trim().ToLowerInvariant()
+          $tree = (& $git -C $ProjectRoot rev-parse "HEAD^{tree}").Trim().ToLowerInvariant()
+          $dirty = @(& $git -C $ProjectRoot status --porcelain --untracked-files=normal)
+          $origin = (& $git -C $ProjectRoot remote get-url origin).Trim()
+
+          Write-Host "SNAPSHOT_BRANCH=$branch"
+          Write-Host "SNAPSHOT_HEAD=$head"
+          Write-Host "SNAPSHOT_TREE=$tree"
+          Write-Host "SNAPSHOT_DIRTY_COUNT=$(@($dirty | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count)"
+          Write-Host "SNAPSHOT_ORIGIN=$origin"
+
+          $configPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
+          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+          $controlApiUrl = ([string]$config.controlApiUrl).TrimEnd("/")
+          $workDirRaw = [string]$config.workDir
+          $workDir = if ([System.IO.Path]::IsPathRooted($workDirRaw)) {
+            [System.IO.Path]::GetFullPath($workDirRaw)
+          } else {
+            [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot $workDirRaw))
+          }
+
+          $mode = Invoke-RestMethod -Uri "$controlApiUrl/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 10
+          $arm = Invoke-RestMethod -Uri "$controlApiUrl/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri "$controlApiUrl/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 10
+          $att = Invoke-RestMethod -Uri "$controlApiUrl/api/v1/phase7c/runtime-source-attestation/" -Method Get -TimeoutSec 10
+
+          $alive = 0
+          if ($null -ne $life.processes) {
+            foreach ($p in @($life.processes.PSObject.Properties)) {
+              if ($null -ne $p.Value -and [bool]$p.Value.alive) { $alive++ }
+            }
+          }
+
+          Write-Host "SNAPSHOT_MODE=$([string]$mode.state.mode)"
+          Write-Host "SNAPSHOT_ARM=$([string]$arm.liveArmStatus)"
+          Write-Host "SNAPSHOT_LIVE_EXECUTION_ARMED=$([bool]$arm.liveExecutionArmed)"
+          Write-Host "SNAPSHOT_ACCOUNT_MODE=$([string]$life.accountMode.accountMode)"
+          Write-Host "SNAPSHOT_ACCOUNT_MODE_VALID=$([bool]$life.accountMode.valid)"
+          Write-Host "SNAPSHOT_LIFECYCLE_RUNNING=$([bool]$life.running)"
+          Write-Host "SNAPSHOT_LIFECYCLE_READY=$([bool]$life.ready)"
+          Write-Host "SNAPSHOT_ALIVE_EXECUTOR_COUNT=$alive"
+          if ($null -ne $life.broker) {
+            Write-Host "SNAPSHOT_BROKER_READY=$([bool]$life.broker.ready)"
+          }
+
+          Write-Host "SNAPSHOT_ATTESTATION_OVERALL=$([string]$att.overall)"
+          Write-Host "SNAPSHOT_DEPLOYMENT_ID=$([string]$att.deployment.deploymentId)"
+          Write-Host "SNAPSHOT_DEPLOYMENT_COMMIT=$([string]$att.deployment.sourceCommit)"
+          Write-Host "SNAPSHOT_DEPLOYMENT_TREE=$([string]$att.deployment.sourceTree)"
+          foreach ($component in @($att.components)) {
+            $reasons = @($component.reasonCodes | ForEach-Object { [string]$_ }) -join ","
+            Write-Host "SNAPSHOT_COMPONENT=$([string]$component.component)|VERDICT=$([string]$component.verdict)|SOURCE=$([string]$component.sourceCommit)|DEPLOYMENT=$([string]$component.deploymentId)|PID=$([string]$component.pid)|REASONS=$reasons"
+          }
+
+          Import-Module ScheduledTasks -ErrorAction Stop
+          $taskName = "XAUUSD-Phase7C-Executors"
+          $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+          $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
+          Write-Host "SNAPSHOT_TASK_STATE=$([string]$task.State)"
+          Write-Host "SNAPSHOT_TASK_LAST_RESULT=$([int64]$taskInfo.LastTaskResult)"
+
+          $ownershipLib = Join-Path $ProjectRoot "scripts\lib\phase7c-scheduled-task-ownership.ps1"
+          $runtimeLib = Join-Path $ProjectRoot "scripts\lib\phase7c-runtime-ownership-probe.ps1"
+          . $ownershipLib
+          . $runtimeLib
+
+          $runnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
+          $runnerSha = Get-Phase7CTrustedGitFileSha256 -ProjectRoot $ProjectRoot -Path $runnerPath
+          $ownership = Test-Phase7CExecutorTaskActionOwnership -Actions $task.Actions -ExpectedRunnerPath $runnerPath -ExpectedRunnerSha256 $runnerSha
+          $drift = @(Get-Phase7CExecutorTaskDrift -Task $task)
+          Write-Host "SNAPSHOT_TASK_OWNED=$([bool]$ownership.owned)"
+          Write-Host "SNAPSHOT_TASK_CANONICAL=$([bool]$ownership.canonical)"
+          Write-Host "SNAPSHOT_TASK_REPAIR_REQUIRED=$([bool]$ownership.repairRequired)"
+          Write-Host "SNAPSHOT_TASK_DRIFT=$($drift -join ',')"
+
+          $actions = @($task.Actions)
+          $canonicalProcesses = -1
+          $runningInstances = -1
+          if ($actions.Count -eq 1) {
+            try {
+              $tokens = @(ConvertFrom-Phase7CCommandLineTokens ([string]$actions[0].Arguments))
+              if ($tokens.Count -eq 5 -and $tokens[3].Equals("-EncodedCommand", [System.StringComparison]::OrdinalIgnoreCase)) {
+                $encodedToken = [string]$tokens[4]
+                $matches = @(
+                  Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
+                    Where-Object {
+                      -not [string]::IsNullOrWhiteSpace([string]$_.CommandLine) -and
+                      ([string]$_.CommandLine).Contains($encodedToken)
+                    }
+                )
+                $canonicalProcesses = [int]$matches.Count
+              }
+            } catch {}
+          }
+          try {
+            $service = New-Object -ComObject "Schedule.Service"
+            $service.Connect()
+            $root = $service.GetFolder("\")
+            $registered = $root.GetTask($taskName)
+            $runningInstances = [int]$registered.GetInstances(0).Count
+          } catch {}
+
+          Write-Host "SNAPSHOT_CANONICAL_TASK_PROCESS_COUNT=$canonicalProcesses"
+          Write-Host "SNAPSHOT_RUNNING_TASK_INSTANCE_COUNT=$runningInstances"
+
+          $generation = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $workDir
+          Write-Host "SNAPSHOT_STATUS_READ_STATE=$([string]$generation.statusReadState)"
+          Write-Host "SNAPSHOT_HEARTBEAT_READ_STATE=$([string]$generation.heartbeatReadState)"
+          Write-Host "SNAPSHOT_BROKER_STATUS_PID=$([string]$generation.statusBrokerPid)"
+          Write-Host "SNAPSHOT_BROKER_HEARTBEAT_PID=$([string]$generation.heartbeatBrokerPid)"
+          Write-Host "SNAPSHOT_BROKER_STATUS_PID_MATCH=$([bool]$generation.brokerStatusPidMatch)"
+          Write-Host "SNAPSHOT_BROKER_PROCESS_ALIVE=$([bool]$generation.brokerProcessAlive)"
+          Write-Host "SNAPSHOT_BROKER_HEARTBEAT_FRESH=$([bool]$generation.brokerHeartbeatFresh)"
+          Write-Host "SNAPSHOT_STARTUP_RUNNER_LOCK_STATE=$([string]$generation.startupRunnerLockState)"
+
+          Write-Host "SNAPSHOT_READ_ONLY=PASS"
+          Write-Host "SNAPSHOT_GIT_MUTATION=NONE"
+          Write-Host "SNAPSHOT_TASK_MUTATION=NONE"
+          Write-Host "SNAPSHOT_LIFECYCLE_MUTATION=NONE"
+          Write-Host "SNAPSHOT_ARM_MUTATION=NONE"
+          Write-Host "SNAPSHOT_ORDER_MUTATION=NONE"
+          Write-Host "SNAPSHOT_POSITION_MUTATION=NONE"
