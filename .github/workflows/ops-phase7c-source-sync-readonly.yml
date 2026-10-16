@@ -76,6 +76,29 @@ jobs:
           if ($null -ne $life.broker) {
             Write-Host "SNAPSHOT_BROKER_READY=$([bool]$life.broker.ready)"
           }
+          if ($null -ne $life.processes) {
+            foreach ($p in @($life.processes.PSObject.Properties)) {
+              $name = [string]$p.Name
+              $pidValue = 0
+              $aliveValue = $false
+              try { $pidValue = [int]$p.Value.pid } catch {}
+              try { $aliveValue = [bool]$p.Value.alive } catch {}
+              $marker = "NONE"
+              if ($pidValue -gt 0) {
+                try {
+                  $row = Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" -ErrorAction Stop
+                  $cmd = [string]$row.CommandLine
+                  if ($cmd -match "phase7c-supervisor") { $marker = "SUPERVISOR" }
+                  elseif ($cmd -match "phase7c-trend") { $marker = "TREND" }
+                  elseif ($cmd -match "phase7c-sideway") { $marker = "SIDEWAY" }
+                  elseif ($cmd -match "phase7c-telegram") { $marker = "TELEGRAM" }
+                  elseif ($cmd -match "regime-notifier") { $marker = "REGIME_NOTIFIER" }
+                  elseif ($cmd -match "phase7c") { $marker = "OTHER_PHASE7C" }
+                } catch {}
+              }
+              Write-Host "SNAPSHOT_PROCESS=$name|PID=$pidValue|ALIVE=$aliveValue|MARKER=$marker"
+            }
+          }
 
           Write-Host "SNAPSHOT_ATTESTATION_OVERALL=$([string]$att.overall)"
           Write-Host "SNAPSHOT_DEPLOYMENT_ID=$([string]$att.deployment.deploymentId)"
