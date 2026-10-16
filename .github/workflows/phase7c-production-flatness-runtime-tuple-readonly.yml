@@ -1,0 +1,92 @@
+name: Phase7C Production Flatness + Runtime Tuple Read-Only
+
+on:
+  push:
+    branches:
+      - ops/phase7c-production-sync-preflight-ff116b5e
+    paths:
+      - ".github/workflows/phase7c-production-flatness-runtime-tuple-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify flat broker and runtime tuple
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProductionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $ControlApi = 'http://127.0.0.1:3711'
+          $TaskName = 'XAUUSD-Phase7C-Executors'
+
+          function Read-BridgeArray([string]$Uri,[hashtable]$Headers) {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri $Uri -Headers $Headers -Method Get -TimeoutSec 5
+            $raw = ([string]$response.Content).Trim()
+            if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq '[]') { return @() }
+            $parsed = $raw | ConvertFrom-Json
+            if ($null -eq $parsed) { return @() }
+            return @($parsed | Where-Object { $null -ne $_ })
+          }
+
+          $mode = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 5
+          $modeValue = if ($null -ne $mode.state) { [string]$mode.state.mode } else { [string]$mode.mode }
+          $cap = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 5
+          $life = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 5
+          if ($modeValue -ne 'PAUSE') { throw "Tuple check requires PAUSE." }
+          if ([string]$cap.liveArmStatus -ne 'DISARMED' -or [bool]$cap.liveExecutionArmed) { throw "Tuple check requires DISARMED." }
+
+          $account = Get-Content -LiteralPath (Join-Path $ProductionRoot '.runtime\phase7c-account-mode.json') -Raw | ConvertFrom-Json
+          $envFile = [string]$account.envFile
+          if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProductionRoot $envFile }
+          . (Join-Path $ProductionRoot 'scripts\lib\phase7c-account-mode.ps1')
+          . (Join-Path $ProductionRoot 'scripts\lib\phase7c-scheduled-task-ownership.ps1')
+          . (Join-Path $ProductionRoot 'scripts\lib\phase7c-runtime-ownership-probe.ps1')
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+          $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+
+          $health = Invoke-RestMethod -Uri "$bridgeBase/health?reconnect=false" -Headers $headers -Method Get -TimeoutSec 5
+          if (-not [bool]$health.connected -or [string]$health.status -ne 'ok') { throw "Bridge not healthy." }
+          $positions = @(Read-BridgeArray -Uri "$bridgeBase/v1/positions?symbol=XAUUSD&reconnect=false" -Headers $headers)
+          $orders = @(Read-BridgeArray -Uri "$bridgeBase/v1/orders?symbol=XAUUSD&reconnect=false" -Headers $headers)
+
+          Import-Module ScheduledTasks -ErrorAction Stop
+          $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+          $canonicalProcessCount = Get-Phase7CCanonicalTaskProcessCount -Task $task
+          $runningInstanceCount = Get-Phase7CRunningTaskInstanceCount -Name $TaskName
+          $config = Get-Content -LiteralPath (Join-Path $ProductionRoot '.runtime\phase7c-executor-task-config.json') -Raw | ConvertFrom-Json
+          $workDir = [string]$config.workDir
+          if (-not [System.IO.Path]::IsPathRooted($workDir)) { $workDir = Join-Path $ProductionRoot $workDir }
+          $generation = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $workDir
+
+          Write-Host "RUNTIME_TUPLE_MODE=PAUSE"
+          Write-Host "RUNTIME_TUPLE_ARM=DISARMED"
+          Write-Host "RUNTIME_TUPLE_BRIDGE_STATUS=$([string]$health.status)"
+          Write-Host "RUNTIME_TUPLE_POSITION_COUNT=$($positions.Count)"
+          Write-Host "RUNTIME_TUPLE_PENDING_ORDER_COUNT=$($orders.Count)"
+          Write-Host "RUNTIME_TUPLE_FLAT=$($positions.Count -eq 0 -and $orders.Count -eq 0)"
+          Write-Host "RUNTIME_TUPLE_LIFECYCLE_RUNNING=$([bool]$life.running)"
+          Write-Host "RUNTIME_TUPLE_LIFECYCLE_READY=$([bool]$life.ready)"
+          if ($null -ne $life.broker -and $null -ne $life.broker.heartbeat) {
+            Write-Host "RUNTIME_TUPLE_LIFECYCLE_BROKER_READY=$([bool]$life.broker.ready)"
+            Write-Host "RUNTIME_TUPLE_LIFECYCLE_BROKER_HEARTBEAT_STATE=$([string]$life.broker.heartbeat.state)"
+            Write-Host "RUNTIME_TUPLE_LIFECYCLE_BROKER_DESIRED=$([string]$life.broker.heartbeat.desiredExecutorState)"
+          }
+          Write-Host "RUNTIME_TUPLE_EXECUTOR_TASK_STATE=$([string]$task.State)"
+          Write-Host "RUNTIME_TUPLE_CANONICAL_PROCESS_COUNT=$canonicalProcessCount"
+          Write-Host "RUNTIME_TUPLE_RUNNING_INSTANCE_COUNT=$runningInstanceCount"
+          Write-Host "RUNTIME_TUPLE_STATUS_READ_STATE=$([string]$generation.statusReadState)"
+          Write-Host "RUNTIME_TUPLE_HEARTBEAT_READ_STATE=$([string]$generation.heartbeatReadState)"
+          Write-Host "RUNTIME_TUPLE_BROKER_PROCESS_ALIVE=$([bool]$generation.brokerProcessAlive)"
+          Write-Host "RUNTIME_TUPLE_BROKER_HEARTBEAT_FRESH=$([bool]$generation.brokerHeartbeatFresh)"
+          Write-Host "RUNTIME_TUPLE_BROKER_STATUS_PID_MATCH=$([bool]$generation.brokerStatusPidMatch)"
+          Write-Host "RUNTIME_TUPLE_STARTUP_RUNNER_LOCK=$([string]$generation.startupRunnerLockState)"
+          Write-Host "RUNTIME_TUPLE_MUTATION=NONE"
+          Write-Host "RUNTIME_TUPLE_RESULT=PASS"
