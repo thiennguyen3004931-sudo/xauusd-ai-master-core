@@ -3,6 +3,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -73,6 +74,20 @@ describe("FileCustomerFollowerPositionRegistry", () => {
     const restarted = new FileCustomerFollowerPositionRegistry(file);
     await expect(restarted.get("master-a")).resolves.toBe("ticket-a");
     await expect(restarted.get("master-b")).resolves.toBe("ticket-b");
+  });
+
+  it("recovers a stale lock left behind by a crashed process", async () => {
+    const file = await tempFile();
+    await mkdir(path.dirname(file), { recursive: true });
+    const lockPath = file + ".lock";
+    await writeFile(lockPath, "stale", "utf8");
+    const stale = new Date(Date.now() - 60_000);
+    await utimes(lockPath, stale, stale);
+
+    const registry = new FileCustomerFollowerPositionRegistry(file);
+    await registry.set("master-stale", "ticket-stale");
+
+    await expect(registry.get("master-stale")).resolves.toBe("ticket-stale");
   });
 
   it("writes versioned deterministic JSON without leaking unrelated data", async () => {
