@@ -1,4 +1,10 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,8 +18,27 @@ async function tempFile() {
   return path.join(root, "state", "positions.json");
 }
 
+async function removeWithRetry(root: string): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    try {
+      await rm(root, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 8) {
+        await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  const pending = roots.splice(0);
+  for (const root of pending) {
+    await removeWithRetry(root);
+  }
 });
 
 describe("FileCustomerFollowerPositionRegistry", () => {
@@ -35,6 +60,21 @@ describe("FileCustomerFollowerPositionRegistry", () => {
     await expect(third.get("master-002")).resolves.toBe("ticket-9002");
   });
 
+  it("serializes concurrent writers without losing bindings", async () => {
+    const file = await tempFile();
+    const first = new FileCustomerFollowerPositionRegistry(file);
+    const second = new FileCustomerFollowerPositionRegistry(file);
+
+    await Promise.all([
+      first.set("master-a", "ticket-a"),
+      second.set("master-b", "ticket-b"),
+    ]);
+
+    const restarted = new FileCustomerFollowerPositionRegistry(file);
+    await expect(restarted.get("master-a")).resolves.toBe("ticket-a");
+    await expect(restarted.get("master-b")).resolves.toBe("ticket-b");
+  });
+
   it("writes versioned deterministic JSON without leaking unrelated data", async () => {
     const file = await tempFile();
     const registry = new FileCustomerFollowerPositionRegistry(file);
@@ -51,6 +91,7 @@ describe("FileCustomerFollowerPositionRegistry", () => {
 
   it("fails closed on corrupt or non-canonical persisted state", async () => {
     const file = await tempFile();
+    await mkdir(path.dirname(file), { recursive: true });
     await writeFile(
       file,
       JSON.stringify({
