@@ -1,0 +1,54 @@
+name: Phase7C Production Executor PID Identity Read-Only
+
+on:
+  push:
+    branches:
+      - ops/phase7c-production-sync-preflight-ff116b5e
+    paths:
+      - ".github/workflows/phase7c-production-executor-pid-identity-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Inspect executor PID file identities
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProductionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $runtime = Join-Path $ProductionRoot '.runtime\phase7c-executors'
+          $roles = @('supervisor','trend','sideway','telegram-mode','regime-notifier')
+          foreach ($role in $roles) {
+            $pidFile = Join-Path $runtime ($role + '.pid')
+            if (-not (Test-Path -LiteralPath $pidFile -PathType Leaf)) {
+              Write-Host "PID_IDENTITY_$($role.ToUpper().Replace('-','_'))_PID_FILE=MISSING"
+              continue
+            }
+            $pidText = (Get-Content -LiteralPath $pidFile -Raw).Trim()
+            $pidValue = 0
+            if (-not [int]::TryParse($pidText,[ref]$pidValue) -or $pidValue -le 0) {
+              Write-Host "PID_IDENTITY_$($role.ToUpper().Replace('-','_'))_PID_FILE=INVALID|RAW=$pidText"
+              continue
+            }
+            $rows = @(Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" -ErrorAction SilentlyContinue)
+            if ($rows.Count -eq 0) {
+              Write-Host "PID_IDENTITY_$($role.ToUpper().Replace('-','_'))=DEAD|PID=$pidValue"
+              continue
+            }
+            $p = $rows[0]
+            $cmd = ([string]$p.CommandLine).Replace('|','/').Replace([char]13,' ').Replace([char]10,' ')
+            if ($cmd.Length -gt 500) { $cmd = $cmd.Substring(0,500) }
+            Write-Host "PID_IDENTITY_$($role.ToUpper().Replace('-','_'))=ALIVE|PID=$pidValue|NAME=$([string]$p.Name)|PPID=$([string]$p.ParentProcessId)|CMD=$cmd"
+          }
+
+          $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 5
+          Write-Host "PID_IDENTITY_LIFECYCLE_RUNNING=$([bool]$life.running)"
+          Write-Host "PID_IDENTITY_LIFECYCLE_READY=$([bool]$life.ready)"
+          Write-Host 'PID_IDENTITY_MUTATION=NONE'
+          Write-Host 'PID_IDENTITY_RESULT=PASS'
