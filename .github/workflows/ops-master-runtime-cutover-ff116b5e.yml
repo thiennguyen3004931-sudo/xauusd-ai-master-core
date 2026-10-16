@@ -22,6 +22,14 @@ jobs:
       - name: Checkout ops helper source
         uses: actions/checkout@v4
 
+      - name: Reconcile current production runtime safely
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master\scripts\recover-phase7c-runtime-ready-stable-deploy-guarded-local.ps1" `
+            -ExpectedCommit "9329530c513aae88b18cd584136b3ae4da9622d4" `
+            -TimeoutSeconds 300
+          if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_RUNTIME_RECONCILIATION_FAILED" }
+
       - name: Canonical production source transition
         shell: powershell
         run: |
@@ -32,7 +40,7 @@ jobs:
             -ExpectedRemoteMainCommit "ff116b5e0c491163a11e33cb9e38fb6b503f0a1d" `
             -ExpectedHelperBlobSha1 "d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f" `
             -ExpectedInitialArm "DISARMED" `
-            -ExpectedInitialRuntimeState "STOPPED_LIFECYCLE" `
+            -ExpectedInitialRuntimeState "HEALTHY" `
             -TimeoutSeconds 300
           if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_SOURCE_TRANSITION_FAILED" }
 
