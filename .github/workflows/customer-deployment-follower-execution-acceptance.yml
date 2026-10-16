@@ -117,6 +117,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_RELEASE_IMPORT_FAILED" }
           Pop-Location
 
+      - name: Upload customer release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xauusd-customer-agent-v1
+          path: artifacts/customer-agent-release/customer-agent-v1.zip
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Diff hygiene
         run: git diff --check
 
