@@ -1,0 +1,103 @@
+name: Phase7C Production Current Runtime Guarded Recovery
+
+on:
+  push:
+    branches:
+      - ops/phase7c-production-sync-preflight-ff116b5e
+    paths:
+      - ".github/workflows/phase7c-production-current-runtime-guarded-recovery.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  recover-current-runtime:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+    steps:
+      - name: Checkout ops source
+        uses: actions/checkout@v4
+
+      - name: Normalize production branch and recover current runtime DISARMED
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $ProductionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $ExpectedCommit = '9329530c513aae88b18cd584136b3ae4da9622d4'
+          $ControlApi = 'http://127.0.0.1:3711'
+
+          function Read-BridgeArray([string]$Uri,[hashtable]$Headers) {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri $Uri -Headers $Headers -Method Get -TimeoutSec 5
+            $raw = ([string]$response.Content).Trim()
+            if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq '[]') { return @() }
+            $parsed = $raw | ConvertFrom-Json
+            if ($null -eq $parsed) { return @() }
+            return @($parsed | Where-Object { $null -ne $_ })
+          }
+
+          function Assert-PauseDisarmedFlat([string]$Stage) {
+            $mode = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 5
+            $modeValue = if ($null -ne $mode.state) { [string]$mode.state.mode } else { [string]$mode.mode }
+            $cap = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 5
+            if ($modeValue -ne 'PAUSE') { throw "$Stage requires PAUSE." }
+            if ([string]$cap.liveArmStatus -ne 'DISARMED' -or [bool]$cap.liveExecutionArmed) { throw "$Stage requires DISARMED." }
+
+            $account = Get-Content -LiteralPath (Join-Path $ProductionRoot '.runtime\phase7c-account-mode.json') -Raw | ConvertFrom-Json
+            $envFile = [string]$account.envFile
+            if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProductionRoot $envFile }
+            . (Join-Path $ProductionRoot 'scripts\lib\phase7c-account-mode.ps1')
+            $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+            $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+            $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+            $health = Invoke-RestMethod -Uri "$bridgeBase/health?reconnect=false" -Headers $headers -Method Get -TimeoutSec 5
+            if (-not [bool]$health.connected -or [string]$health.status -ne 'ok' -or [string]$health.accountMode -ne 'real') { throw "$Stage bridge not healthy LIVE/real." }
+            $positions = @(Read-BridgeArray -Uri "$bridgeBase/v1/positions?symbol=XAUUSD&reconnect=false" -Headers $headers)
+            $orders = @(Read-BridgeArray -Uri "$bridgeBase/v1/orders?symbol=XAUUSD&reconnect=false" -Headers $headers)
+            if ($positions.Count -ne 0 -or $orders.Count -ne 0) { throw "$Stage requires flat broker. positions=$($positions.Count) orders=$($orders.Count)" }
+            Write-Host "CURRENT_RECOVERY_$($Stage)_MODE=PAUSE"
+            Write-Host "CURRENT_RECOVERY_$($Stage)_ARM=DISARMED"
+            Write-Host "CURRENT_RECOVERY_$($Stage)_POSITIONS=0"
+            Write-Host "CURRENT_RECOVERY_$($Stage)_PENDING_ORDERS=0"
+          }
+
+          $git = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          $head = ([string](& $git -C $ProductionRoot rev-parse HEAD)).Trim().ToLowerInvariant()
+          $branchBefore = ([string](& $git -C $ProductionRoot branch --show-current)).Trim()
+          $dirty = @(& $git -C $ProductionRoot status --porcelain --untracked-files=normal)
+          if ($head -ne $ExpectedCommit) { throw "Production HEAD changed. expected=$ExpectedCommit actual=$head" }
+          if ($dirty.Count -ne 0) { throw "Production worktree dirty. count=$($dirty.Count)" }
+          if ($branchBefore -notin @('ci/consolidate-auto-reversal','main')) { throw "Unexpected production branch=$branchBefore" }
+
+          Assert-PauseDisarmedFlat 'PREFLIGHT'
+
+          if ($branchBefore -ne 'main') {
+            & $git -C $ProductionRoot checkout -B main $ExpectedCommit
+            if ($LASTEXITCODE -ne 0) { throw 'Could not normalize production checkout to main at same commit.' }
+          }
+          $branchAfter = ([string](& $git -C $ProductionRoot branch --show-current)).Trim()
+          $headAfter = ([string](& $git -C $ProductionRoot rev-parse HEAD)).Trim().ToLowerInvariant()
+          $dirtyAfter = @(& $git -C $ProductionRoot status --porcelain --untracked-files=normal)
+          if ($branchAfter -ne 'main' -or $headAfter -ne $ExpectedCommit -or $dirtyAfter.Count -ne 0) { throw 'Branch normalization postcondition failed.' }
+          Write-Host "CURRENT_RECOVERY_BRANCH_NORMALIZED=main"
+          Write-Host "CURRENT_RECOVERY_SOURCE_UNCHANGED=$ExpectedCommit"
+
+          $script = Join-Path $ProductionRoot 'scripts\recover-phase7c-runtime-ready-stable-deploy-guarded-local.ps1'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -ExpectedCommit $ExpectedCommit -TimeoutSeconds 180
+          if ($LASTEXITCODE -ne 0) { throw "Guarded runtime recovery failed with exit code $LASTEXITCODE" }
+
+          Assert-PauseDisarmedFlat 'FINAL'
+          $life = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 5
+          if (-not [bool]$life.running -or -not [bool]$life.ready) { throw 'Recovered lifecycle is not RUNNING+READY.' }
+          $att = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/runtime-source-attestation/" -Method Get -TimeoutSec 5
+          if ([string]$att.overall -ne 'EXACT_MATCH') { throw "Recovered attestation not exact. overall=$([string]$att.overall)" }
+          if ([string]$att.deployment.sourceCommit -ne $ExpectedCommit) { throw "Recovered deployment commit mismatch." }
+
+          Write-Host "CURRENT_RECOVERY_LIFECYCLE_RUNNING=True"
+          Write-Host "CURRENT_RECOVERY_LIFECYCLE_READY=True"
+          Write-Host "CURRENT_RECOVERY_ATTESTATION=EXACT_MATCH"
+          Write-Host "CURRENT_RECOVERY_FINAL_MODE=PAUSE"
+          Write-Host "CURRENT_RECOVERY_FINAL_ARM=DISARMED"
+          Write-Host "CURRENT_RECOVERY_ORDER_MUTATION=NONE"
+          Write-Host "CURRENT_RECOVERY_POSITION_MUTATION=NONE"
+          Write-Host "CURRENT_RECOVERY_RESULT=PASS"
