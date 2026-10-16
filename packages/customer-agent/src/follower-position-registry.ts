@@ -3,6 +3,7 @@ import {
   open,
   readFile,
   rename,
+  stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -76,6 +77,8 @@ async function renameWithRetry(source: string, target: string): Promise<void> {
   }
   throw lastError;
 }
+
+const STALE_LOCK_MS = 30_000;
 
 export class FileCustomerFollowerPositionRegistry
   implements CustomerFollowerPositionRegistry
@@ -171,6 +174,20 @@ export class FileCustomerFollowerPositionRegistry
         if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
           throw error;
         }
+
+        try {
+          const lock = await stat(this.lockPath);
+          if (Date.now() - lock.mtimeMs > STALE_LOCK_MS) {
+            await unlink(this.lockPath);
+            continue;
+          }
+        } catch (lockError) {
+          if ((lockError as NodeJS.ErrnoException)?.code === "ENOENT") {
+            continue;
+          }
+          throw lockError;
+        }
+
         if (attempt < 80) await delay(25);
       }
     }
