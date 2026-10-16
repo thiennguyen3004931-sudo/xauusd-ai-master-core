@@ -1,0 +1,74 @@
+name: Phase7C Production Broker Inventory Read-Only
+
+on:
+  push:
+    branches:
+      - ops/phase7c-production-sync-preflight-ff116b5e
+    paths:
+      - ".github/workflows/phase7c-production-broker-inventory-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inspect current XAUUSD position and pending order
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProductionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $ControlApi = 'http://127.0.0.1:3711'
+
+          $mode = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 5
+          $modeValue = if ($null -ne $mode.state) { [string]$mode.state.mode } else { [string]$mode.mode }
+          $cap = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 5
+          if ($modeValue -ne 'PAUSE') { throw "Inventory requires PAUSE." }
+          if ([string]$cap.liveArmStatus -ne 'DISARMED' -or [bool]$cap.liveExecutionArmed) { throw "Inventory requires DISARMED." }
+
+          $account = Get-Content -LiteralPath (Join-Path $ProductionRoot '.runtime\phase7c-account-mode.json') -Raw | ConvertFrom-Json
+          $envFile = [string]$account.envFile
+          if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProductionRoot $envFile }
+          . (Join-Path $ProductionRoot 'scripts\lib\phase7c-account-mode.ps1')
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+          $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+
+          $positions = @(Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD&reconnect=false" -Headers $headers -Method Get -TimeoutSec 5)
+          $orders = @(Invoke-RestMethod -Uri "$bridgeBase/v1/orders?symbol=XAUUSD&reconnect=false" -Headers $headers -Method Get -TimeoutSec 5)
+
+          Write-Host "BROKER_INVENTORY_MODE=PAUSE"
+          Write-Host "BROKER_INVENTORY_ARM=DISARMED"
+          Write-Host "BROKER_INVENTORY_POSITION_COUNT=$($positions.Count)"
+          Write-Host "BROKER_INVENTORY_PENDING_ORDER_COUNT=$($orders.Count)"
+
+          foreach ($p in $positions) {
+            $comment = ([string]$p.comment).Replace('|','/')
+            $line = "BROKER_POSITION|ticket=$([string]$p.ticket)|type=$([string]$p.type)|volume=$([string]$p.volume)|price_open=$([string]$p.price_open)|sl=$([string]$p.sl)|tp=$([string]$p.tp)|magic=$([string]$p.magic)|comment=$comment"
+            Write-Host $line
+          }
+          foreach ($o in $orders) {
+            $comment = ([string]$o.comment).Replace('|','/')
+            $line = "BROKER_PENDING|ticket=$([string]$o.ticket)|type=$([string]$o.type)|volume=$([string]$o.volume)|price=$([string]$o.price)|sl=$([string]$o.sl)|tp=$([string]$o.tp)|magic=$([string]$o.magic)|comment=$comment"
+            Write-Host $line
+          }
+
+          try {
+            $decision = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/decision-monitor?symbol=XAUUSD" -Method Get -TimeoutSec 8
+            if ($null -ne $decision.currentPosition) {
+              Write-Host "BROKER_INVENTORY_DECISION_CURRENT_POSITION_PRESENT=True"
+              Write-Host "BROKER_INVENTORY_DECISION_CURRENT_TICKET=$([string]$decision.currentPosition.ticket)"
+            } else {
+              Write-Host "BROKER_INVENTORY_DECISION_CURRENT_POSITION_PRESENT=False"
+            }
+          } catch {
+            Write-Host "BROKER_INVENTORY_DECISION_MONITOR=UNAVAILABLE"
+          }
+
+          Write-Host "BROKER_INVENTORY_MUTATION=NONE"
+          Write-Host "BROKER_INVENTORY_RESULT=PASS"
