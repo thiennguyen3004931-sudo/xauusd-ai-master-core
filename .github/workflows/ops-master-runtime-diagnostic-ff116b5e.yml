@@ -67,4 +67,25 @@ jobs:
               Write-Host "DIAG_FILE=$p|MISSING"
             }
           }
+          foreach ($pidValue in @(2256,27560,16832,18656,4548,6360)) {
+            try {
+              $row = Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" -ErrorAction Stop
+              if ($null -ne $row) {
+                Write-Host "DIAG_PROCESS=$pidValue|NAME=$($row.Name)|CMD=$($row.CommandLine)"
+              } else {
+                Write-Host "DIAG_PROCESS=$pidValue|MISSING"
+              }
+            } catch { Write-Host "DIAG_PROCESS=$pidValue|ERROR=$($_.Exception.Message)" }
+          }
+          try {
+            $service = New-Object -ComObject 'Schedule.Service'
+            $service.Connect()
+            $rootFolder = $service.GetFolder('\')
+            $registered = $rootFolder.GetTask('XAUUSD-Phase7C-Executors')
+            $instances = @($registered.GetInstances(0))
+            Write-Host "DIAG_TASK_INSTANCES=$($instances.Count)"
+            foreach ($instance in $instances) {
+              Write-Host "DIAG_TASK_INSTANCE_PID=$($instance.EnginePID)|STATE=$($instance.State)"
+            }
+          } catch { Write-Host "DIAG_TASK_INSTANCE_ERROR=$($_.Exception.Message)" }
           Write-Host "DIAG_MUTATION=NONE"
