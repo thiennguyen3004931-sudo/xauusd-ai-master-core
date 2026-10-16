@@ -59,6 +59,16 @@ jobs:
           $att = Invoke-RestMethod -Uri "$controlApiUrl/api/v1/phase7c/runtime-source-attestation/" -Method Get -TimeoutSec 10
 
           $alive = 0
+          $runtimePidRoot = Join-Path $workDir "phase7c-executors"
+          foreach ($pidName in @("trend","sideway")) {
+            $pidPath = Join-Path $runtimePidRoot "$pidName.pid"
+            $pidValue = 0
+            if (Test-Path -LiteralPath $pidPath -PathType Leaf) {
+              try { $pidValue = [int]((Get-Content -LiteralPath $pidPath -Raw).Trim()) } catch {}
+            }
+            Write-Host "SNAPSHOT_PIDFILE=$pidName|PID=$pidValue|PATH=$pidPath"
+          }
+
           if ($null -ne $life.processes) {
             foreach ($p in @($life.processes.PSObject.Properties)) {
               if ($null -ne $p.Value -and [bool]$p.Value.alive) { $alive++ }
@@ -96,7 +106,16 @@ jobs:
                   elseif ($cmd -match "phase7c") { $marker = "OTHER_PHASE7C" }
                 } catch {}
               }
-              Write-Host "SNAPSHOT_PROCESS=$name|PID=$pidValue|ALIVE=$aliveValue|MARKER=$marker"
+              $osName = "NONE"
+              $osPath = "NONE"
+              if ($pidValue -gt 0) {
+                try {
+                  $os = Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" -ErrorAction Stop
+                  $osName = [string]$os.Name
+                  $osPath = [string]$os.ExecutablePath
+                } catch {}
+              }
+              Write-Host "SNAPSHOT_PROCESS=$name|PID=$pidValue|ALIVE=$aliveValue|MARKER=$marker|OS_NAME=$osName|OS_PATH=$osPath"
             }
           }
 
