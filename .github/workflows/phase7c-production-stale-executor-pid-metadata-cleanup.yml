@@ -1,0 +1,138 @@
+name: Phase7C Production Stale Executor PID Metadata Cleanup
+
+on:
+  push:
+    branches:
+      - ops/phase7c-production-sync-preflight-ff116b5e
+    paths:
+      - ".github/workflows/phase7c-production-stale-executor-pid-metadata-cleanup.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Checkout ops source
+        uses: actions/checkout@v4
+      - name: Remove only proven stale executor PID metadata
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $ProductionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $ExpectedCommit = '9329530c513aae88b18cd584136b3ae4da9622d4'
+          $ControlApi = 'http://127.0.0.1:3711'
+          $RuntimeDir = Join-Path $ProductionRoot '.runtime\phase7c-executors'
+
+          function Read-BridgeArray([string]$Uri,[hashtable]$Headers) {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri $Uri -Headers $Headers -Method Get -TimeoutSec 5
+            $raw = ([string]$response.Content).Trim()
+            if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq '[]') { return @() }
+            $parsed = $raw | ConvertFrom-Json
+            if ($null -eq $parsed) { return @() }
+            return @($parsed | Where-Object { $null -ne $_ })
+          }
+
+          $git = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          $head = ([string](& $git -C $ProductionRoot rev-parse HEAD)).Trim().ToLowerInvariant()
+          $branchName = ([string](& $git -C $ProductionRoot branch --show-current)).Trim()
+          $dirty = @(& $git -C $ProductionRoot status --porcelain --untracked-files=normal)
+          if ($branchName -ne 'main' -or $head -ne $ExpectedCommit -or $dirty.Count -ne 0) {
+            throw "Source guard failed. branch=$branchName head=$head dirty=$($dirty.Count)"
+          }
+
+          $mode = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 5
+          $cap = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 5
+          $life = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 5
+          if ([string]$mode.state.mode -ne 'PAUSE') { throw 'Cleanup requires PAUSE.' }
+          if ([string]$cap.liveArmStatus -ne 'DISARMED' -or [bool]$cap.liveExecutionArmed) { throw 'Cleanup requires DISARMED.' }
+          if ([bool]$life.running -or [bool]$life.ready) { throw 'Cleanup requires lifecycle STOPPED.' }
+
+          $account = Get-Content -LiteralPath (Join-Path $ProductionRoot '.runtime\phase7c-account-mode.json') -Raw | ConvertFrom-Json
+          $envFile = [string]$account.envFile
+          if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProductionRoot $envFile }
+          . (Join-Path $ProductionRoot 'scripts\lib\phase7c-account-mode.ps1')
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+          $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+          $health = Invoke-RestMethod -Uri "$bridgeBase/health?reconnect=false" -Headers $headers -Method Get -TimeoutSec 5
+          if (-not [bool]$health.connected -or [string]$health.status -ne 'ok' -or [string]$health.accountMode -ne 'real') { throw 'Cleanup requires healthy LIVE/real bridge.' }
+          $positions = @(Read-BridgeArray -Uri "$bridgeBase/v1/positions?symbol=XAUUSD&reconnect=false" -Headers $headers)
+          $orders = @(Read-BridgeArray -Uri "$bridgeBase/v1/orders?symbol=XAUUSD&reconnect=false" -Headers $headers)
+          if ($positions.Count -ne 0 -or $orders.Count -ne 0) { throw "Cleanup requires flat XAUUSD. positions=$($positions.Count) orders=$($orders.Count)" }
+
+          $roleContracts = @(
+            [pscustomobject]@{ role='supervisor'; pid='supervisor.pid'; markers=@('run-phase7c-executors-local.ps1') },
+            [pscustomobject]@{ role='trend'; pid='trend.pid'; markers=@('run-phase7c-trend-controller-local.ps1','run-phase7c-trend-controller.mjs') },
+            [pscustomobject]@{ role='sideway'; pid='sideway.pid'; markers=@('run-phase7c-sideway-controller-local.ps1','run-phase7c-sideway-locked.mjs','run-phase7c-sideway-controller.mjs') },
+            [pscustomobject]@{ role='telegram'; pid='telegram-mode.pid'; markers=@('run-phase7c-telegram-mode-controller-local.ps1','run-phase7c-telegram-mode-controller.mjs') },
+            [pscustomobject]@{ role='regime-notifier'; pid='regime-notifier.pid'; markers=@('run-phase7c-regime-notifier-local.ps1','run-phase7c-regime-notifier.mjs') }
+          )
+
+          $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+          foreach ($contract in $roleContracts) {
+            $realMatches = @()
+            foreach ($process in $processes) {
+              $cmd = [string]$process.CommandLine
+              if ([string]::IsNullOrWhiteSpace($cmd)) { continue }
+              foreach ($marker in @($contract.markers)) {
+                if ($cmd.IndexOf([string]$marker,[System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                  $realMatches += $process
+                  break
+                }
+              }
+            }
+            if ($realMatches.Count -ne 0) {
+              $ids = @($realMatches | ForEach-Object { [string]$_.ProcessId }) -join ','
+              throw "Canonical role process still exists; metadata cleanup blocked. role=$($contract.role) pids=$ids"
+            }
+          }
+          Write-Host 'PID_METADATA_CLEANUP_CANONICAL_ROLE_PROCESSES=NONE'
+
+          foreach ($contract in $roleContracts) {
+            $pidPath = Join-Path $RuntimeDir ([string]$contract.pid)
+            if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) {
+              Write-Host "PID_METADATA_CLEANUP_$($contract.role.ToUpper().Replace('-','_'))=NO_PID_FILE"
+              continue
+            }
+            $raw = (Get-Content -LiteralPath $pidPath -Raw).Trim()
+            $pidValue = 0
+            if (-not [int]::TryParse($raw,[ref]$pidValue) -or $pidValue -le 0) {
+              throw "Invalid PID file; cleanup blocked. role=$($contract.role) raw=$raw"
+            }
+            $rows = @($processes | Where-Object { [int]$_.ProcessId -eq $pidValue })
+            if ($rows.Count -gt 1) { throw "Unexpected duplicate PID identity. role=$($contract.role) pid=$pidValue" }
+            if ($rows.Count -eq 1) {
+              $cmd = [string]$rows[0].CommandLine
+              foreach ($marker in @($contract.markers)) {
+                if (-not [string]::IsNullOrWhiteSpace($cmd) -and $cmd.IndexOf([string]$marker,[System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                  throw "PID still belongs to canonical role; cleanup blocked. role=$($contract.role) pid=$pidValue"
+                }
+              }
+              Write-Host "PID_METADATA_CLEANUP_$($contract.role.ToUpper().Replace('-','_'))_PID_REUSE=VERIFIED_UNRELATED|PID=$pidValue|PROCESS=$([string]$rows[0].Name)"
+            } else {
+              Write-Host "PID_METADATA_CLEANUP_$($contract.role.ToUpper().Replace('-','_'))_PID_STATE=DEAD|PID=$pidValue"
+            }
+            Remove-Item -LiteralPath $pidPath -Force -ErrorAction Stop
+            Write-Host "PID_METADATA_CLEANUP_$($contract.role.ToUpper().Replace('-','_'))=REMOVED_STALE_PID_FILE"
+          }
+
+          Start-Sleep -Milliseconds 300
+          $lifeAfter = Invoke-RestMethod -Uri "$ControlApi/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 5
+          $aliveAfter = @()
+          foreach ($prop in @($lifeAfter.processes.PSObject.Properties)) {
+            if ($null -ne $prop.Value -and [bool]$prop.Value.alive) { $aliveAfter += [string]$prop.Name }
+          }
+          if ($aliveAfter.Count -ne 0 -or [bool]$lifeAfter.running -or [bool]$lifeAfter.ready) {
+            throw "Post-cleanup lifecycle is not cleanly stopped. alive=$($aliveAfter -join ',') running=$($lifeAfter.running) ready=$($lifeAfter.ready)"
+          }
+          Write-Host 'PID_METADATA_CLEANUP_POST_LIFECYCLE=STOPPED_ZERO_ALIVE'
+          Write-Host 'PID_METADATA_CLEANUP_MODE=PAUSE'
+          Write-Host 'PID_METADATA_CLEANUP_ARM=DISARMED'
+          Write-Host 'PID_METADATA_CLEANUP_ORDER_MUTATION=NONE'
+          Write-Host 'PID_METADATA_CLEANUP_POSITION_MUTATION=NONE'
+          Write-Host 'PID_METADATA_CLEANUP_PROCESS_KILL=NONE'
+          Write-Host 'PID_METADATA_CLEANUP_RESULT=PASS'
