@@ -107,7 +107,7 @@ foreach ($file in $files) {
 $manifestPath = Join-Path $releaseDir "release-manifest.sha256"
 $manifestLines = @()
 foreach ($file in ($files | Sort-Object FullName)) {
-  $relative = [IO.Path]::GetRelativePath($releaseDir, $file.FullName).Replace("\", "/")
+  $relative = $file.FullName.Substring($releaseDir.Length).TrimStart([char[]]"\\/").Replace("\", "/")
   if ($relative -eq "release-manifest.sha256") { continue }
   $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
   $manifestLines += "$hash  $relative"
