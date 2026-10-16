@@ -22,13 +22,16 @@ jobs:
       - name: Checkout ops helper source
         uses: actions/checkout@v4
 
-      - name: Reconcile current production runtime safely
+      - name: Normalize stale PID reuse and restore canonical runtime
         shell: powershell
         run: |
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master\scripts\recover-phase7c-runtime-ready-stable-deploy-guarded-local.ps1" `
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\ops-normalize-stale-runtime-generation-ff116b5e.ps1 `
+            -ProjectRoot "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master" `
             -ExpectedCommit "9329530c513aae88b18cd584136b3ae4da9622d4" `
-            -TimeoutSeconds 300
-          if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_RUNTIME_RECONCILIATION_FAILED" }
+            -ExpectedTree "db5571e0f2a8e1790b4c24dd65d0c3978b056682" `
+            -ExpectedDeploymentId "338b75b60f6b4376bf986634533b8a47" `
+            -TimeoutSeconds 120
+          if ($LASTEXITCODE -ne 0) { throw "PID_REUSE_NORMALIZATION_FAILED" }
 
       - name: Canonical production source transition
         shell: powershell
