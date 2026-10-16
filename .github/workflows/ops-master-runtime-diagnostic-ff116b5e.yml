@@ -1,0 +1,70 @@
+name: OPS Master Runtime Diagnostic ff116b5e
+
+on:
+  push:
+    branches:
+      - ops/cutover-master-runtime-ff116b5e
+    paths:
+      - ".github/workflows/ops-master-runtime-diagnostic-ff116b5e.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - name: Production runtime diagnostic read-only
+        shell: powershell
+        run: |
+          $root = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          Set-Location $root
+          Write-Host "DIAG_HEAD=$(git rev-parse HEAD)"
+          try {
+            $l = Invoke-RestMethod -Uri "http://127.0.0.1:3711/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 8
+            Write-Host ("DIAG_LIFECYCLE=" + ($l | ConvertTo-Json -Depth 12 -Compress))
+          } catch { Write-Host "DIAG_LIFECYCLE_ERROR=$($_.Exception.Message)" }
+          try {
+            $a = Invoke-RestMethod -Uri "http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation" -Method Get -TimeoutSec 8
+            Write-Host ("DIAG_ATTESTATION=" + ($a | ConvertTo-Json -Depth 12 -Compress))
+          } catch { Write-Host "DIAG_ATTESTATION_ERROR=$($_.Exception.Message)" }
+          try {
+            $arm = Invoke-RestMethod -Uri "http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 8
+            Write-Host ("DIAG_ARM=" + ($arm | ConvertTo-Json -Depth 8 -Compress))
+          } catch { Write-Host "DIAG_ARM_ERROR=$($_.Exception.Message)" }
+          try {
+            $mode = Invoke-RestMethod -Uri "http://127.0.0.1:3711/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 8
+            Write-Host ("DIAG_MODE=" + ($mode | ConvertTo-Json -Depth 8 -Compress))
+          } catch { Write-Host "DIAG_MODE_ERROR=$($_.Exception.Message)" }
+          try {
+            $task = Get-ScheduledTask -TaskName "XAUUSD-Phase7C-Executors" -ErrorAction Stop
+            Write-Host "DIAG_TASK_STATE=$($task.State)"
+          } catch { Write-Host "DIAG_TASK_ERROR=$($_.Exception.Message)" }
+          $pidDir = Join-Path $root ".runtime\phase7c-executors"
+          foreach ($name in @("supervisor","trend","sideway","telegram","regime-notifier")) {
+            $p = Join-Path $pidDir "$name.pid"
+            if (Test-Path $p) {
+              $pidText = (Get-Content $p -Raw).Trim()
+              $alive = $false
+              if ($pidText -match '^\d+$') {
+                $alive = $null -ne (Get-Process -Id ([int]$pidText) -ErrorAction SilentlyContinue)
+              }
+              Write-Host "DIAG_PID_$($name.ToUpper())=$pidText|ALIVE=$alive"
+            } else {
+              Write-Host "DIAG_PID_$($name.ToUpper())=MISSING"
+            }
+          }
+          foreach ($p in @(
+            ".runtime\phase7c-lifecycle-broker\state\heartbeat.json",
+            ".runtime\phase7c-lifecycle-broker\state\status.json",
+            ".runtime\phase7c-source-deployment.json"
+          )) {
+            $full = Join-Path $root $p
+            if (Test-Path $full) {
+              Write-Host "DIAG_FILE=$p|CONTENT=$((Get-Content $full -Raw).Trim())"
+            } else {
+              Write-Host "DIAG_FILE=$p|MISSING"
+            }
+          }
+          Write-Host "DIAG_MUTATION=NONE"
