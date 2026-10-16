@@ -1,0 +1,141 @@
+name: OPS Phase7C Clear Proven Stale Executor PID Files
+
+on:
+  push:
+    branches:
+      - ops/phase7c-source-sync-ff116b5e
+    paths:
+      - ".github/workflows/ops-phase7c-clear-stale-executor-pids.yml"
+
+concurrency:
+  group: ops-phase7c-clear-stale-executor-pids
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  clear:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 8
+    steps:
+      - name: Clear only OS-proven stale trend/sideway PID files
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+
+          $ProjectRoot = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $ExpectedHead = "9329530c513aae88b18cd584136b3ae4da9622d4"
+          $ExpectedOrigin = "https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core"
+          $TaskName = "XAUUSD-Phase7C-Executors"
+
+          function Read-BridgeArray([string]$Uri, [hashtable]$Headers) {
+            $r = Invoke-WebRequest -Uri $Uri -Headers $Headers -Method Get -UseBasicParsing -TimeoutSec 10
+            $raw = ([string]$r.Content).Trim()
+            if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq "[]") { return @() }
+            return @($raw | ConvertFrom-Json | Where-Object { $null -ne $_ })
+          }
+
+          function Get-AliveNames($Life) {
+            $out = New-Object System.Collections.Generic.List[string]
+            foreach ($p in @($Life.processes.PSObject.Properties)) {
+              if ($null -ne $p.Value -and [bool]$p.Value.alive) { [void]$out.Add([string]$p.Name) }
+            }
+            return @($out | Sort-Object)
+          }
+
+          $git = (Get-Command git -ErrorAction Stop).Source
+          $branchNow = (& $git -C $ProjectRoot branch --show-current).Trim()
+          $head = (& $git -C $ProjectRoot rev-parse HEAD).Trim().ToLowerInvariant()
+          $dirty = @(& $git -C $ProjectRoot status --porcelain --untracked-files=normal)
+          $origin = (& $git -C $ProjectRoot remote get-url origin).Trim()
+          if ($branchNow -ne "main" -or $head -ne $ExpectedHead) { throw "Unexpected production source. branch=$branchNow head=$head" }
+          if (@($dirty | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -ne 0) { throw "Production worktree dirty." }
+          if ($origin -ne $ExpectedOrigin -and $origin -ne "$ExpectedOrigin.git") { throw "Unexpected origin: $origin" }
+
+          $configPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
+          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+          $ControlApiUrl = ([string]$config.controlApiUrl).TrimEnd("/")
+          $accountLib = Join-Path $ProjectRoot "scripts\lib\phase7c-account-mode.ps1"
+          $ownershipLib = Join-Path $ProjectRoot "scripts\lib\phase7c-scheduled-task-ownership.ps1"
+          $runtimeLib = Join-Path $ProjectRoot "scripts\lib\phase7c-runtime-ownership-probe.ps1"
+          . $accountLib
+          . $ownershipLib
+          . $runtimeLib
+
+          $workDirRaw = [string]$config.workDir
+          $WorkDir = if ([IO.Path]::IsPathRooted($workDirRaw)) { [IO.Path]::GetFullPath($workDirRaw) } else { [IO.Path]::GetFullPath((Join-Path $ProjectRoot $workDirRaw)) }
+          $envFileRaw = [string]$config.envFile
+          $EnvFile = if ([IO.Path]::IsPathRooted($envFileRaw)) { [IO.Path]::GetFullPath($envFileRaw) } else { [IO.Path]::GetFullPath((Join-Path $ProjectRoot $envFileRaw)) }
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $EnvFile -AccountMode "LIVE" -RequireTrading
+          $BridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $BridgeHeaders = @{ "x-mt5-api-key" = $envInfo.apiKey }
+
+          $mode = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 10
+          $arm = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 10
+          $bridge = Invoke-RestMethod -Uri "$BridgeBase/health" -Headers $BridgeHeaders -Method Get -TimeoutSec 10
+          if ([string]$mode.state.mode -ne "PAUSE") { throw "Cleanup requires PAUSE." }
+          if ([string]$arm.accountMode -ne "LIVE" -or [string]$arm.liveArmStatus -ne "DISARMED" -or [bool]$arm.liveExecutionArmed) { throw "Cleanup requires LIVE DISARMED." }
+          if ([bool]$life.running -or [bool]$life.ready) { throw "Cleanup requires stopped lifecycle." }
+          if (-not [bool]$bridge.connected -or [string]$bridge.status -ne "ok" -or [string]$bridge.accountMode -ne "real" -or [string]$bridge.configuredAccountMode -ne "LIVE") { throw "Bridge is not healthy LIVE/real." }
+          if (@(Read-BridgeArray "$BridgeBase/v1/positions?symbol=XAUUSD" $BridgeHeaders).Count -ne 0 -or @(Read-BridgeArray "$BridgeBase/v1/orders?symbol=XAUUSD" $BridgeHeaders).Count -ne 0) { throw "Cleanup requires flat XAUUSD." }
+
+          $alive = @(Get-AliveNames $life)
+          if (($alive -join ",") -ne "sideway,trend") { throw "Unexpected lifecycle alive set: $($alive -join ',')" }
+
+          Import-Module ScheduledTasks -ErrorAction Stop
+          $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+          $taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction Stop
+          if ([string]$task.State -ne "Ready" -or [int64]$taskInfo.LastTaskResult -eq 0) { throw "Cleanup requires failed/ready executor task. state=$($task.State) last=$($taskInfo.LastTaskResult)" }
+          $runnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
+          $runnerSha = Get-Phase7CTrustedGitFileSha256 -ProjectRoot $ProjectRoot -Path $runnerPath
+          $ownership = Test-Phase7CExecutorTaskActionOwnership -Actions $task.Actions -ExpectedRunnerPath $runnerPath -ExpectedRunnerSha256 $runnerSha
+          $drift = @(Get-Phase7CExecutorTaskDrift -Task $task)
+          if (-not [bool]$ownership.owned -or -not [bool]$ownership.canonical -or [bool]$ownership.repairRequired -or $drift.Count -ne 0) { throw "Executor task is not exact canonical." }
+
+          $generation = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
+          if ([string]$generation.statusReadState -ne "OK" -or [string]$generation.heartbeatReadState -ne "OK" -or -not [bool]$generation.brokerStatusPidMatch -or [bool]$generation.brokerProcessAlive -or [bool]$generation.brokerHeartbeatFresh -or [string]$generation.startupRunnerLockState -notin @("MISSING","RELEASED")) {
+            throw "Broker-dead generation proof failed. alive=$($generation.brokerProcessAlive) fresh=$($generation.brokerHeartbeatFresh) lock=$($generation.startupRunnerLockState)"
+          }
+
+          $runtimePidRoot = Join-Path $WorkDir "phase7c-executors"
+          foreach ($name in @("trend","sideway")) {
+            $lifePid = [int]$life.processes.PSObject.Properties[$name].Value.pid
+            $pidPath = Join-Path $runtimePidRoot "$name.pid"
+            if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw "$name PID file missing." }
+            $filePid = [int]((Get-Content -LiteralPath $pidPath -Raw).Trim())
+            if ($lifePid -le 0 -or $filePid -ne $lifePid) { throw "$name PID evidence mismatch." }
+            if ($null -ne (Get-Process -Id $lifePid -ErrorAction SilentlyContinue)) { throw "$name process exists according to Get-Process. pid=$lifePid" }
+            $cim = @(Get-CimInstance Win32_Process -Filter "ProcessId=$lifePid" -ErrorAction SilentlyContinue)
+            if ($cim.Count -ne 0) { throw "$name process exists according to CIM. pid=$lifePid" }
+            Write-Host "STALE_PID_PREFLIGHT=PASS|COMPONENT=$name|PID=$lifePid|OS_PROCESS=ABSENT"
+          }
+
+          foreach ($name in @("trend","sideway")) {
+            $pidPath = Join-Path $runtimePidRoot "$name.pid"
+            Remove-Item -LiteralPath $pidPath -Force -ErrorAction Stop
+            if (Test-Path -LiteralPath $pidPath) { throw "Failed to remove stale PID file: $pidPath" }
+            Write-Host "STALE_PID_REMOVED=PASS|COMPONENT=$name"
+          }
+
+          Start-Sleep -Milliseconds 500
+          $life2 = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 10
+          $alive2 = @(Get-AliveNames $life2)
+          if ([bool]$life2.running -or [bool]$life2.ready -or $alive2.Count -ne 0) {
+            throw "Lifecycle did not normalize after stale PID cleanup. running=$($life2.running) ready=$($life2.ready) alive=$($alive2 -join ',')"
+          }
+          $mode2 = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 10
+          $arm2 = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 10
+          if ([string]$mode2.state.mode -ne "PAUSE" -or [string]$arm2.liveArmStatus -ne "DISARMED" -or [bool]$arm2.liveExecutionArmed) { throw "Mode/ARM changed during PID cleanup." }
+          if (@(Read-BridgeArray "$BridgeBase/v1/positions?symbol=XAUUSD" $BridgeHeaders).Count -ne 0 -or @(Read-BridgeArray "$BridgeBase/v1/orders?symbol=XAUUSD" $BridgeHeaders).Count -ne 0) { throw "Broker flatness changed during PID cleanup." }
+
+          Write-Host "STALE_PID_CLEANUP_FINAL_LIFECYCLE_RUNNING=false"
+          Write-Host "STALE_PID_CLEANUP_FINAL_LIFECYCLE_READY=false"
+          Write-Host "STALE_PID_CLEANUP_FINAL_ALIVE_EXECUTORS=0"
+          Write-Host "STALE_PID_CLEANUP_FINAL_MODE=PAUSE"
+          Write-Host "STALE_PID_CLEANUP_FINAL_ARM=DISARMED"
+          Write-Host "STALE_PID_CLEANUP_ORDER_MUTATION=NONE"
+          Write-Host "STALE_PID_CLEANUP_POSITION_MUTATION=NONE"
+          Write-Host "STALE_PID_CLEANUP_STATUS=PASS"
