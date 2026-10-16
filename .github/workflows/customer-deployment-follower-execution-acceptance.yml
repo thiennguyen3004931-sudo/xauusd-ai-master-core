@@ -10,6 +10,7 @@ on:
       - "packages/installation-proof/**"
       - "customer-release/**"
       - "scripts/customer-follower-execution-e2e.test.mjs"
+      - "scripts/customer-mt5-follower-production-wiring-acceptance.test.mjs"
       - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
       - "scripts/package-customer-agent-release.ps1"
       - ".github/workflows/customer-deployment-follower-execution-acceptance.yml"
@@ -23,6 +24,7 @@ on:
       - "packages/installation-proof/**"
       - "customer-release/**"
       - "scripts/customer-follower-execution-e2e.test.mjs"
+      - "scripts/customer-mt5-follower-production-wiring-acceptance.test.mjs"
       - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
       - "scripts/package-customer-agent-release.ps1"
       - ".github/workflows/customer-deployment-follower-execution-acceptance.yml"
@@ -90,6 +92,9 @@ jobs:
       - name: Distribution and execution boundary
         run: node --test scripts/test-customer-deployment-follower-execution-boundary.mjs
 
+      - name: MT5 follower production wiring acceptance - simulated only
+        run: node --test scripts/customer-mt5-follower-production-wiring-acceptance.test.mjs
+
       - name: Build customer release package
         shell: powershell
         run: .\scripts\package-customer-agent-release.ps1 -SkipBuild
@@ -134,6 +139,7 @@ jobs:
           Write-Host 'CUSTOMER_DEPLOYMENT_PACKAGE=PASS'
           Write-Host 'FOLLOWER_EXECUTION_BOUNDARY=PASS'
           Write-Host 'SIGNED_COPY_COMMAND_TO_EXECUTOR_E2E=PASS'
+          Write-Host 'MT5_FOLLOWER_PRODUCTION_WIRING_SIMULATED=PASS'
           Write-Host 'STRICT_EXECUTION_PAYLOAD=PASS'
           Write-Host 'MASTER_SOURCE_INCLUDED=NO'
           Write-Host 'PRIVATE_KEY_INCLUDED=NO'
