@@ -1,0 +1,77 @@
+name: Phase7C Production Post-Recovery State Read-Only
+
+on:
+  push:
+    branches:
+      - ops/phase7c-production-sync-preflight-ff116b5e
+    paths:
+      - ".github/workflows/phase7c-production-post-recovery-state-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Inspect post-recovery production state
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProductionRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $ControlApi = 'http://127.0.0.1:3711'
+          $git = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          $head = ([string](& $git -C $ProductionRoot rev-parse HEAD)).Trim().ToLowerInvariant()
+          $branchName = ([string](& $git -C $ProductionRoot branch --show-current)).Trim()
+          $dirty = @(& $git -C $ProductionRoot status --porcelain --untracked-files=normal)
+          Write-Host "POST_RECOVERY_BRANCH=$branchName"
+          Write-Host "POST_RECOVERY_HEAD=$head"
+          Write-Host "POST_RECOVERY_DIRTY_COUNT=$($dirty.Count)"
+
+          function TryGet([string]$Path) {
+            try { return Invoke-RestMethod -Uri "$ControlApi$Path" -Method Get -TimeoutSec 5 } catch { return $null }
+          }
+          $mode = TryGet '/api/v1/phase7c/bot-mode'
+          $life = TryGet '/api/v1/phase7c/lifecycle'
+          $cap = TryGet '/api/v1/phase7c-live-arm-control/capability'
+          $att = TryGet '/api/v1/phase7c/runtime-source-attestation/'
+          Write-Host "POST_RECOVERY_CONTROL_API=$($null -ne $life)"
+          if ($null -ne $mode) { $mv = if ($null -ne $mode.state) { [string]$mode.state.mode } else { [string]$mode.mode }; Write-Host "POST_RECOVERY_MODE=$mv" }
+          if ($null -ne $cap) { Write-Host "POST_RECOVERY_ARM_STATUS=$([string]$cap.liveArmStatus)"; Write-Host "POST_RECOVERY_LIVE_EXECUTION_ARMED=$([bool]$cap.liveExecutionArmed)" }
+          if ($null -ne $life) {
+            Write-Host "POST_RECOVERY_LIFECYCLE_RUNNING=$([bool]$life.running)"
+            Write-Host "POST_RECOVERY_LIFECYCLE_READY=$([bool]$life.ready)"
+            if ($null -ne $life.broker) {
+              Write-Host "POST_RECOVERY_BROKER_READY=$([bool]$life.broker.ready)"
+              if ($null -ne $life.broker.heartbeat) {
+                Write-Host "POST_RECOVERY_BROKER_STATE=$([string]$life.broker.heartbeat.state)"
+                Write-Host "POST_RECOVERY_BROKER_DESIRED=$([string]$life.broker.heartbeat.desiredExecutorState)"
+                Write-Host "POST_RECOVERY_BROKER_PID=$([string]$life.broker.heartbeat.brokerPid)"
+              }
+            }
+            foreach ($name in @('supervisor','trend','sideway','telegram','regimeNotifier')) {
+              if ($null -ne $life.processes -and $null -ne $life.processes.$name) {
+                Write-Host "POST_RECOVERY_PROCESS_$($name.ToUpper())_ALIVE=$([bool]$life.processes.$name.alive)"
+                Write-Host "POST_RECOVERY_PROCESS_$($name.ToUpper())_PID=$([string]$life.processes.$name.pid)"
+              }
+            }
+          }
+          if ($null -ne $att) {
+            Write-Host "POST_RECOVERY_ATTESTATION_OVERALL=$([string]$att.overall)"
+            if ($null -ne $att.deployment) {
+              Write-Host "POST_RECOVERY_DEPLOYMENT_SOURCE_COMMIT=$([string]$att.deployment.sourceCommit)"
+              Write-Host "POST_RECOVERY_DEPLOYMENT_ID=$([string]$att.deployment.deploymentId)"
+            }
+            foreach ($c in @($att.components)) {
+              Write-Host "POST_RECOVERY_ATTEST_COMPONENT_$([string]$c.component)=$([string]$c.verdict)|PID=$([string]$c.pid)|ALIVE=$([bool]$c.alive)|SOURCE=$([string]$c.sourceCommit)"
+            }
+          }
+          Import-Module ScheduledTasks -ErrorAction Stop
+          foreach ($taskName in @('XAUUSD-Phase7C-Executors','XAUUSD-Phase7C-Bridge')) {
+            try { $task=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop; Write-Host "POST_RECOVERY_TASK_$($taskName)=$([string]$task.State)" } catch { Write-Host "POST_RECOVERY_TASK_$($taskName)=MISSING" }
+          }
+          Write-Host 'POST_RECOVERY_MUTATION=NONE'
+          Write-Host 'POST_RECOVERY_RESULT=PASS'
