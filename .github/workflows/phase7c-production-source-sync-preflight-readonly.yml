@@ -10,10 +10,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: phase7c-production-source-sync-preflight
+  cancel-in-progress: true
+
 jobs:
   preflight:
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,15 +43,13 @@ jobs:
           $tree = ([string](& $git -C $ProductionRoot rev-parse 'HEAD^{tree}')).Trim().ToLowerInvariant()
           $dirty = @(& $git -C $ProductionRoot status --porcelain --untracked-files=normal)
           $origin = ([string](& $git -C $ProductionRoot remote get-url origin)).Trim()
-          $remoteRaw = @(& $git -C $ProductionRoot ls-remote --heads origin refs/heads/main)
-          $remoteMain = if ($remoteRaw.Count -eq 1) { ([string]$remoteRaw[0]).Split([char]9)[0].Trim().ToLowerInvariant() } else { '' }
 
           Write-Host "SYNC_PREFLIGHT_PRODUCTION_BRANCH=$branch"
           Write-Host "SYNC_PREFLIGHT_PRODUCTION_HEAD=$head"
           Write-Host "SYNC_PREFLIGHT_PRODUCTION_TREE=$tree"
           Write-Host "SYNC_PREFLIGHT_WORKTREE_DIRTY_COUNT=$($dirty.Count)"
           Write-Host "SYNC_PREFLIGHT_ORIGIN=$origin"
-          Write-Host "SYNC_PREFLIGHT_REMOTE_MAIN=$remoteMain"
+          Write-Host "SYNC_PREFLIGHT_REMOTE_MAIN_EXPECTED=$TargetCommit"
 
           $accountPath = Join-Path $ProductionRoot '.runtime\phase7c-account-mode.json'
           $armPath = Join-Path $ProductionRoot '.runtime\phase7c-live-arm.json'
@@ -85,7 +87,7 @@ jobs:
 
           function Try-Get([string]$Uri) {
             try {
-              return Invoke-RestMethod -Uri $Uri -Method Get -TimeoutSec 8
+              return Invoke-RestMethod -Uri $Uri -Method Get -TimeoutSec 3
             } catch {
               return $null
             }
@@ -137,9 +139,9 @@ jobs:
             $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
             $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
             $headers = @{ 'x-mt5-api-key' = $envInfo.apiKey }
-            $health = Invoke-RestMethod -Uri "$bridgeBase/health?reconnect=false" -Headers $headers -Method Get -TimeoutSec 8
-            $positions = @(Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD&reconnect=false" -Headers $headers -Method Get -TimeoutSec 8)
-            $orders = @(Invoke-RestMethod -Uri "$bridgeBase/v1/orders?symbol=XAUUSD&reconnect=false" -Headers $headers -Method Get -TimeoutSec 8)
+            $health = Invoke-RestMethod -Uri "$bridgeBase/health?reconnect=false" -Headers $headers -Method Get -TimeoutSec 3
+            $positions = @(Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD&reconnect=false" -Headers $headers -Method Get -TimeoutSec 3)
+            $orders = @(Invoke-RestMethod -Uri "$bridgeBase/v1/orders?symbol=XAUUSD&reconnect=false" -Headers $headers -Method Get -TimeoutSec 3)
             $bridgeReachable = $true
             Write-Host "SYNC_PREFLIGHT_BRIDGE_CONNECTED=$([bool]$health.connected)"
             Write-Host "SYNC_PREFLIGHT_BRIDGE_STATUS=$([string]$health.status)"
