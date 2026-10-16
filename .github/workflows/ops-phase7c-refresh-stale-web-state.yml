@@ -53,8 +53,8 @@ jobs:
             return $table
           }
 
-          function Test-Descendant([int]$Pid, [int]$Ancestor, [hashtable]$Table) {
-            $cursor = $Pid
+          function Test-Descendant([int]$ProcessId, [int]$Ancestor, [hashtable]$Table) {
+            $cursor = $ProcessId
             for ($i = 0; $i -lt 32; $i++) {
               if ($cursor -eq $Ancestor) { return $true }
               if (-not $Table.ContainsKey($cursor)) { return $false }
@@ -83,13 +83,13 @@ jobs:
             throw "Port $Port did not release."
           }
 
-          function Wait-ProcessExit([int]$Pid, [int]$Seconds) {
+          function Wait-ProcessExit([int]$ProcessId, [int]$Seconds) {
             $deadline = (Get-Date).AddSeconds($Seconds)
             do {
-              if ($null -eq (Get-Process -Id $Pid -ErrorAction SilentlyContinue)) { return }
+              if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
               Start-Sleep -Milliseconds 250
             } while ((Get-Date) -lt $deadline)
-            throw "Process $Pid did not exit."
+            throw "Process $ProcessId did not exit."
           }
 
           function Wait-WebReady([int]$Seconds) {
