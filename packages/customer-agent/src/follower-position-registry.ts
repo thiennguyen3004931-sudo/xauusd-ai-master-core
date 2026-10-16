@@ -1,5 +1,13 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  open,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { CustomerFollowerPositionRegistry } from "./mt5-follower-executor.js";
 
 interface RegistryFile {
@@ -13,20 +21,46 @@ function canonical(value: unknown): value is string {
 
 function parseRegistry(text: string): Map<string, string> {
   const parsed = JSON.parse(text) as Partial<RegistryFile>;
-  if (parsed.version !== 1 || parsed.bindings === null || typeof parsed.bindings !== "object") {
+  if (
+    parsed.version !== 1 ||
+    parsed.bindings === null ||
+    typeof parsed.bindings !== "object" ||
+    Array.isArray(parsed.bindings)
+  ) {
     throw new Error("FOLLOWER_POSITION_REGISTRY_INVALID");
   }
+
   const map = new Map<string, string>();
-  for (const [masterPositionRef, followerTicket] of Object.entries(parsed.bindings)) {
+  for (const [masterPositionRef, followerTicket] of Object.entries(
+    parsed.bindings,
+  )) {
     if (!canonical(masterPositionRef) || !canonical(followerTicket)) {
-      throw new Error("FOLLOWER_POSITION_REGISTRY_INVALID");
-    }
-    if (map.has(masterPositionRef)) {
       throw new Error("FOLLOWER_POSITION_REGISTRY_INVALID");
     }
     map.set(masterPositionRef, followerTicket);
   }
   return map;
+}
+
+function serializeRegistry(bindings: ReadonlyMap<string, string>): string {
+  return (
+    JSON.stringify(
+      {
+        version: 1,
+        bindings: Object.fromEntries(
+          [...bindings.entries()].sort(([left], [right]) =>
+            left.localeCompare(right),
+          ),
+        ),
+      } satisfies RegistryFile,
+      null,
+      2,
+    ) + "\n"
+  );
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function renameWithRetry(source: string, target: string): Promise<void> {
@@ -37,9 +71,7 @@ async function renameWithRetry(source: string, target: string): Promise<void> {
       return;
     } catch (error) {
       lastError = error;
-      if (attempt < 8) {
-        await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
-      }
+      if (attempt < 8) await delay(25 * attempt);
     }
   }
   throw lastError;
@@ -48,74 +80,125 @@ async function renameWithRetry(source: string, target: string): Promise<void> {
 export class FileCustomerFollowerPositionRegistry
   implements CustomerFollowerPositionRegistry
 {
-  private loaded = false;
-  private bindings = new Map<string, string>();
-  private writeChain: Promise<void> = Promise.resolve();
+  private readonly lockPath: string;
 
   constructor(private readonly filePath: string) {
     if (!canonical(filePath)) {
       throw new TypeError("filePath must be a canonical non-blank string");
     }
+    this.lockPath = filePath + ".lock";
   }
 
   async get(masterPositionRef: string): Promise<string | undefined> {
-    await this.ensureLoaded();
-    return this.bindings.get(masterPositionRef);
+    if (!canonical(masterPositionRef)) {
+      throw new TypeError(
+        "masterPositionRef must be a canonical non-blank string",
+      );
+    }
+    const bindings = await this.readLatest();
+    return bindings.get(masterPositionRef);
   }
 
   async set(masterPositionRef: string, followerTicket: string): Promise<void> {
     if (!canonical(masterPositionRef) || !canonical(followerTicket)) {
-      throw new TypeError("position binding values must be canonical non-blank strings");
+      throw new TypeError(
+        "position binding values must be canonical non-blank strings",
+      );
     }
-    await this.ensureLoaded();
-    this.bindings.set(masterPositionRef, followerTicket);
-    await this.persist();
+
+    await this.mutate((bindings) => {
+      bindings.set(masterPositionRef, followerTicket);
+    });
   }
 
   async delete(masterPositionRef: string): Promise<void> {
     if (!canonical(masterPositionRef)) {
-      throw new TypeError("masterPositionRef must be a canonical non-blank string");
+      throw new TypeError(
+        "masterPositionRef must be a canonical non-blank string",
+      );
     }
-    await this.ensureLoaded();
-    this.bindings.delete(masterPositionRef);
-    await this.persist();
+
+    await this.mutate((bindings) => {
+      bindings.delete(masterPositionRef);
+    });
   }
 
-  private async ensureLoaded(): Promise<void> {
-    if (this.loaded) return;
+  private async readLatest(): Promise<Map<string, string>> {
     try {
-      this.bindings = parseRegistry(await readFile(this.filePath, "utf8"));
+      return parseRegistry(await readFile(this.filePath, "utf8"));
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
-        this.bindings = new Map();
-      } else {
-        throw error;
+        return new Map();
       }
+      throw error;
     }
-    this.loaded = true;
   }
 
-  private async persist(): Promise<void> {
-    const snapshot = JSON.stringify(
-      {
-        version: 1,
-        bindings: Object.fromEntries(
-          [...this.bindings.entries()].sort(([left], [right]) =>
-            left.localeCompare(right),
-          ),
-        ),
-      } satisfies RegistryFile,
-      null,
-      2,
-    ) + "\n";
+  private async mutate(
+    change: (bindings: Map<string, string>) => void,
+  ): Promise<void> {
+    await mkdir(path.dirname(this.filePath), { recursive: true });
 
-    this.writeChain = this.writeChain.then(async () => {
-      await mkdir(path.dirname(this.filePath), { recursive: true });
-      const tempPath = this.filePath + ".tmp";
-      await writeFile(tempPath, snapshot, { encoding: "utf8", mode: 0o600 });
+    const release = await this.acquireLock();
+    try {
+      const current = await this.readLatest();
+      const next = new Map(current);
+      change(next);
+      await this.persist(next);
+    } finally {
+      await release();
+    }
+  }
+
+  private async acquireLock(): Promise<() => Promise<void>> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= 80; attempt += 1) {
+      try {
+        const handle = await open(this.lockPath, "wx", 0o600);
+        return async () => {
+          await handle.close();
+          try {
+            await unlink(this.lockPath);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+              throw error;
+            }
+          }
+        };
+      } catch (error) {
+        lastError = error;
+        if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
+          throw error;
+        }
+        if (attempt < 80) await delay(25);
+      }
+    }
+
+    throw new Error(
+      "FOLLOWER_POSITION_REGISTRY_LOCK_TIMEOUT",
+      { cause: lastError },
+    );
+  }
+
+  private async persist(bindings: ReadonlyMap<string, string>): Promise<void> {
+    const tempPath =
+      this.filePath + "." + process.pid + "." + randomUUID() + ".tmp";
+
+    try {
+      await writeFile(tempPath, serializeRegistry(bindings), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
       await renameWithRetry(tempPath, this.filePath);
-    });
-
-    await this.writeChain;
+    } finally {
+      try {
+        await unlink(tempPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+          throw error;
+        }
+      }
+    }
   }
 }
