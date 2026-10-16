@@ -1,0 +1,47 @@
+name: OPS Master Runtime Source Cutover ff116b5e
+
+on:
+  push:
+    branches:
+      - ops/cutover-master-runtime-ff116b5e
+    paths:
+      - ".github/workflows/ops-master-runtime-cutover-ff116b5e.yml"
+
+concurrency:
+  group: ops-master-runtime-cutover
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout ops helper source
+        uses: actions/checkout@v4
+
+      - name: Canonical production source transition
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\rollout-phase7c-production-source-transition-local.ps1 `
+            -ProjectRoot "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master" `
+            -ExpectedCurrentCommit "9329530c513aae88b18cd584136b3ae4da9622d4" `
+            -TargetCommit "ff116b5e0c491163a11e33cb9e38fb6b503f0a1d" `
+            -ExpectedRemoteMainCommit "ff116b5e0c491163a11e33cb9e38fb6b503f0a1d" `
+            -ExpectedHelperBlobSha1 "d8fb26409df5ddecdf5353ab0fdf42cbd8d3500f" `
+            -ExpectedInitialArm "DISARMED" `
+            -ExpectedInitialRuntimeState "STOPPED_LIFECYCLE" `
+            -TimeoutSeconds 300
+          if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_SOURCE_TRANSITION_FAILED" }
+
+      - name: Safety summary
+        shell: powershell
+        run: |
+          Write-Host 'TARGET_MAIN=ff116b5e0c491163a11e33cb9e38fb6b503f0a1d'
+          Write-Host 'EXPECTED_FINAL_MODE=PAUSE'
+          Write-Host 'EXPECTED_FINAL_ARM=DISARMED'
+          Write-Host 'ORDER_MUTATION=NONE'
+          Write-Host 'POSITION_MUTATION=NONE'
+          Write-Host 'LIVE_TEST_ORDER=NONE'
