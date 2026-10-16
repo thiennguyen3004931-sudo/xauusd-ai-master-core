@@ -1,0 +1,233 @@
+name: OPS Phase7C Refresh Stale Web Lifecycle State
+
+on:
+  push:
+    branches:
+      - ops/phase7c-source-sync-ff116b5e
+    paths:
+      - ".github/workflows/ops-phase7c-refresh-stale-web-state.yml"
+
+concurrency:
+  group: ops-phase7c-refresh-stale-web-state
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+    steps:
+      - name: Guarded Web/API refresh for stale stopped-lifecycle process map
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+
+          $ProjectRoot = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master"
+          $ExpectedHead = "9329530c513aae88b18cd584136b3ae4da9622d4"
+          $ExpectedOrigin = "https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core"
+          $WebTask = "XAUUSD-Phase7B-Web"
+          $ApiPort = 3711
+          $WebPort = 5717
+
+          function Read-BridgeArray([string]$Uri, [hashtable]$Headers) {
+            $r = Invoke-WebRequest -Uri $Uri -Headers $Headers -Method Get -UseBasicParsing -TimeoutSec 10
+            $raw = ([string]$r.Content).Trim()
+            if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq "[]") { return @() }
+            return @($raw | ConvertFrom-Json | Where-Object { $null -ne $_ })
+          }
+
+          function Get-SingleListenerPid([int]$Port, [string]$Label) {
+            $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+            if ($listeners.Count -ne 1) { throw "$Label requires exactly one listener on port $Port. current=$($listeners.Count)" }
+            return [int]$listeners[0].OwningProcess
+          }
+
+          function Get-ProcessTable {
+            $table = @{}
+            foreach ($p in @(Get-CimInstance Win32_Process -ErrorAction Stop)) {
+              $table[[int]$p.ProcessId] = $p
+            }
+            return $table
+          }
+
+          function Test-Descendant([int]$Pid, [int]$Ancestor, [hashtable]$Table) {
+            $cursor = $Pid
+            for ($i = 0; $i -lt 32; $i++) {
+              if ($cursor -eq $Ancestor) { return $true }
+              if (-not $Table.ContainsKey($cursor)) { return $false }
+              $parent = [int]$Table[$cursor].ParentProcessId
+              if ($parent -le 0 -or $parent -eq $cursor) { return $false }
+              $cursor = $parent
+            }
+            return $false
+          }
+
+          function Get-AliveLifecycleNames($Life) {
+            $names = New-Object System.Collections.Generic.List[string]
+            if ($null -eq $Life.processes) { throw "Lifecycle process map is unavailable." }
+            foreach ($p in @($Life.processes.PSObject.Properties)) {
+              if ($null -ne $p.Value -and [bool]$p.Value.alive) { [void]$names.Add([string]$p.Name) }
+            }
+            return @($names)
+          }
+
+          function Wait-PortReleased([int]$Port, [int]$Seconds) {
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            do {
+              if (@(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue).Count -eq 0) { return }
+              Start-Sleep -Milliseconds 250
+            } while ((Get-Date) -lt $deadline)
+            throw "Port $Port did not release."
+          }
+
+          function Wait-ProcessExit([int]$Pid, [int]$Seconds) {
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            do {
+              if ($null -eq (Get-Process -Id $Pid -ErrorAction SilentlyContinue)) { return }
+              Start-Sleep -Milliseconds 250
+            } while ((Get-Date) -lt $deadline)
+            throw "Process $Pid did not exit."
+          }
+
+          function Wait-WebReady([int]$Seconds) {
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            $last = "not probed"
+            do {
+              try {
+                $api = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7b-demo" -Method Get -TimeoutSec 4
+                $web = Invoke-WebRequest -Uri "http://127.0.0.1:$WebPort/phase7b-ops" -Method Get -UseBasicParsing -TimeoutSec 4
+                if ($null -ne $api -and $web.StatusCode -ge 200 -and $web.StatusCode -lt 400) { return }
+              } catch { $last = $_.Exception.Message }
+              Start-Sleep -Milliseconds 500
+            } while ((Get-Date) -lt $deadline)
+            throw "Web/API did not become ready. last=$last"
+          }
+
+          $git = (Get-Command git -ErrorAction Stop).Source
+          $branchNow = (& $git -C $ProjectRoot branch --show-current).Trim()
+          $head = (& $git -C $ProjectRoot rev-parse HEAD).Trim().ToLowerInvariant()
+          $dirty = @(& $git -C $ProjectRoot status --porcelain --untracked-files=normal)
+          $origin = (& $git -C $ProjectRoot remote get-url origin).Trim()
+          if ($branchNow -ne "main" -or $head -ne $ExpectedHead) { throw "Unexpected production source. branch=$branchNow head=$head" }
+          if (@($dirty | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -ne 0) { throw "Production worktree is dirty." }
+          if ($origin -ne $ExpectedOrigin -and $origin -ne "$ExpectedOrigin.git") { throw "Unexpected origin: $origin" }
+
+          $config = Get-Content -LiteralPath (Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json") -Raw | ConvertFrom-Json
+          $ControlApiUrl = ([string]$config.controlApiUrl).TrimEnd("/")
+          $accountLib = Join-Path $ProjectRoot "scripts\lib\phase7c-account-mode.ps1"
+          . $accountLib
+          $envFileRaw = [string]$config.envFile
+          $EnvFile = if ([IO.Path]::IsPathRooted($envFileRaw)) { [IO.Path]::GetFullPath($envFileRaw) } else { [IO.Path]::GetFullPath((Join-Path $ProjectRoot $envFileRaw)) }
+          $envInfo = Assert-Phase7CAccountEnv -EnvFile $EnvFile -AccountMode "LIVE" -RequireTrading
+          $BridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
+          $BridgeHeaders = @{ "x-mt5-api-key" = $envInfo.apiKey }
+
+          $mode = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 10
+          $arm = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 10
+          $life = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 10
+          $bridge = Invoke-RestMethod -Uri "$BridgeBase/health" -Headers $BridgeHeaders -Method Get -TimeoutSec 10
+          $positions = @(Read-BridgeArray "$BridgeBase/v1/positions?symbol=XAUUSD" $BridgeHeaders)
+          $orders = @(Read-BridgeArray "$BridgeBase/v1/orders?symbol=XAUUSD" $BridgeHeaders)
+
+          if ([string]$mode.state.mode -ne "PAUSE") { throw "Refresh requires PAUSE." }
+          if ([string]$arm.liveArmStatus -ne "DISARMED" -or [bool]$arm.liveExecutionArmed -or [string]$arm.accountMode -ne "LIVE") { throw "Refresh requires LIVE DISARMED." }
+          if ([bool]$life.running -or [bool]$life.ready) { throw "Refresh requires stopped/not-ready lifecycle." }
+          if (-not [bool]$bridge.connected -or [string]$bridge.status -ne "ok" -or [string]$bridge.accountMode -ne "real" -or [string]$bridge.configuredAccountMode -ne "LIVE") { throw "Bridge is not healthy LIVE/real." }
+          if ($positions.Count -ne 0 -or $orders.Count -ne 0) { throw "Refresh requires flat XAUUSD." }
+
+          $aliveNames = @(Get-AliveLifecycleNames $life | Sort-Object)
+          if (($aliveNames -join ",") -ne "sideway,trend") { throw "Unexpected stale alive set: $($aliveNames -join ',')" }
+
+          $runtimePidRoot = Join-Path ([string]$config.workDir) "phase7c-executors"
+          if (-not [IO.Path]::IsPathRooted($runtimePidRoot)) { $runtimePidRoot = [IO.Path]::GetFullPath((Join-Path $ProjectRoot $runtimePidRoot)) }
+          foreach ($name in @("trend","sideway")) {
+            $lifePid = [int]$life.processes.PSObject.Properties[$name].Value.pid
+            $pidPath = Join-Path $runtimePidRoot "$name.pid"
+            if (-not (Test-Path -LiteralPath $pidPath -PathType Leaf)) { throw "$name pid file missing." }
+            $filePid = [int]((Get-Content -LiteralPath $pidPath -Raw).Trim())
+            if ($lifePid -le 0 -or $lifePid -ne $filePid) { throw "$name stale PID evidence mismatch. lifecycle=$lifePid file=$filePid" }
+            if ($null -ne (Get-Process -Id $lifePid -ErrorAction SilentlyContinue)) { throw "$name PID is actually alive; stale-state refresh blocked. pid=$lifePid" }
+            Write-Host "WEB_REFRESH_STALE_EXECUTOR_PROOF=PASS|COMPONENT=$name|PID=$lifePid|OS_PROCESS=ABSENT"
+          }
+
+          Import-Module ScheduledTasks -ErrorAction Stop
+          $webTaskBefore = Get-ScheduledTask -TaskName $WebTask -ErrorAction Stop
+          if ([string]$webTaskBefore.State -ne "Running") { throw "Web task must already be Running. state=$($webTaskBefore.State)" }
+          $actions = @($webTaskBefore.Actions)
+          if ($actions.Count -ne 1) { throw "Web task must have exactly one action." }
+          $actionText = "$([string]$actions[0].Execute) $([string]$actions[0].Arguments)"
+          $expectedRunner = Join-Path $ProjectRoot "scripts\run-phase7b-web-autostart.ps1"
+          if ($actionText.IndexOf($expectedRunner, [StringComparison]::OrdinalIgnoreCase) -lt 0 -or $actionText -match "(?i)-EncodedCommand") {
+            throw "Web task action is not canonical direct runner."
+          }
+
+          $att = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/runtime-source-attestation/" -Method Get -TimeoutSec 10
+          $webRecord = @($att.components | Where-Object { [string]$_.component -eq "web" })
+          if ($webRecord.Count -ne 1 -or [int]$webRecord[0].pid -le 0) { throw "Web attestation is unavailable." }
+          $oldWebRunnerPid = [int]$webRecord[0].pid
+          $oldWebProc = Get-CimInstance Win32_Process -Filter "ProcessId=$oldWebRunnerPid" -ErrorAction Stop
+          if ([string]$oldWebProc.CommandLine -notmatch "(?i)run-phase7b-web-autostart\.ps1") { throw "Attested Web runner ancestry marker missing." }
+
+          $table = Get-ProcessTable
+          $oldApiPid = Get-SingleListenerPid $ApiPort "API"
+          $oldWebListenerPid = Get-SingleListenerPid $WebPort "Web"
+          if (-not (Test-Descendant $oldApiPid $oldWebRunnerPid $table) -or -not (Test-Descendant $oldWebListenerPid $oldWebRunnerPid $table)) {
+            throw "API/Web listeners are not descendants of attested Web runner."
+          }
+
+          $bridgeSession = [string]$bridge.bridgeSessionId
+          $bridgePid = Get-SingleListenerPid ([int]$envInfo.bridgePort) "Bridge"
+          Write-Host "WEB_REFRESH_PREFLIGHT=PASS|WEB_RUNNER_PID=$oldWebRunnerPid|API_PID=$oldApiPid|WEB_PID=$oldWebListenerPid|BRIDGE_PID=$bridgePid"
+
+          Stop-ScheduledTask -TaskName $WebTask -ErrorAction Stop
+          Wait-ProcessExit $oldWebRunnerPid 30
+          Wait-PortReleased $ApiPort 30
+          Wait-PortReleased $WebPort 30
+          Write-Host "WEB_REFRESH_TASK_STOP=PASS"
+
+          $bridgeDuring = Invoke-RestMethod -Uri "$BridgeBase/health" -Headers $BridgeHeaders -Method Get -TimeoutSec 10
+          $bridgePidDuring = Get-SingleListenerPid ([int]$envInfo.bridgePort) "Bridge"
+          if ([string]$bridgeDuring.bridgeSessionId -ne $bridgeSession -or $bridgePidDuring -ne $bridgePid) { throw "Bridge identity changed during Web refresh." }
+          if (@(Read-BridgeArray "$BridgeBase/v1/positions?symbol=XAUUSD" $BridgeHeaders).Count -ne 0 -or @(Read-BridgeArray "$BridgeBase/v1/orders?symbol=XAUUSD" $BridgeHeaders).Count -ne 0) { throw "Broker flatness changed during Web refresh." }
+
+          Start-ScheduledTask -TaskName $WebTask -ErrorAction Stop
+          Wait-WebReady 90
+          Write-Host "WEB_REFRESH_TASK_START=PASS"
+
+          $mode2 = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 10
+          $arm2 = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 10
+          $life2 = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 10
+          $bridge2 = Invoke-RestMethod -Uri "$BridgeBase/health" -Headers $BridgeHeaders -Method Get -TimeoutSec 10
+          $bridgePid2 = Get-SingleListenerPid ([int]$envInfo.bridgePort) "Bridge"
+          if ([string]$mode2.state.mode -ne "PAUSE" -or [string]$arm2.liveArmStatus -ne "DISARMED" -or [bool]$arm2.liveExecutionArmed) { throw "Mode/ARM changed during Web refresh." }
+          if ([string]$bridge2.bridgeSessionId -ne $bridgeSession -or $bridgePid2 -ne $bridgePid) { throw "Bridge changed during Web refresh." }
+          if ([bool]$life2.running -or [bool]$life2.ready) { throw "Lifecycle unexpectedly started during Web refresh." }
+          $aliveAfter = @(Get-AliveLifecycleNames $life2)
+          if ($aliveAfter.Count -ne 0) { throw "Lifecycle process map remains stale after Web refresh. alive=$($aliveAfter -join ',')" }
+          if (@(Read-BridgeArray "$BridgeBase/v1/positions?symbol=XAUUSD" $BridgeHeaders).Count -ne 0 -or @(Read-BridgeArray "$BridgeBase/v1/orders?symbol=XAUUSD" $BridgeHeaders).Count -ne 0) { throw "Broker flatness changed after Web refresh." }
+
+          $att2 = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/runtime-source-attestation/" -Method Get -TimeoutSec 10
+          foreach ($componentName in @("api","web")) {
+            $rows = @($att2.components | Where-Object { [string]$_.component -eq $componentName })
+            if ($rows.Count -ne 1 -or [string]$rows[0].verdict -ne "EXACT_MATCH" -or [string]$rows[0].sourceCommit -ne $ExpectedHead) {
+              throw "$componentName source attestation is not exact current production source. verdict=$([string]$rows[0].verdict) source=$([string]$rows[0].sourceCommit)"
+            }
+          }
+
+          $webTaskAfter = Get-ScheduledTask -TaskName $WebTask -ErrorAction Stop
+          if ([string]$webTaskAfter.State -ne "Running") { throw "Web task did not remain Running." }
+          $actionTextAfter = "$([string]$webTaskAfter.Actions[0].Execute) $([string]$webTaskAfter.Actions[0].Arguments)"
+          if ($actionTextAfter -ne $actionText) { throw "Web task definition changed." }
+
+          Write-Host "WEB_REFRESH_FINAL_LIFECYCLE_RUNNING=false"
+          Write-Host "WEB_REFRESH_FINAL_LIFECYCLE_READY=false"
+          Write-Host "WEB_REFRESH_FINAL_ALIVE_EXECUTORS=0"
+          Write-Host "WEB_REFRESH_FINAL_MODE=PAUSE"
+          Write-Host "WEB_REFRESH_FINAL_ARM=DISARMED"
+          Write-Host "WEB_REFRESH_BRIDGE_UNCHANGED=PASS"
+          Write-Host "WEB_REFRESH_ORDER_MUTATION=NONE"
+          Write-Host "WEB_REFRESH_POSITION_MUTATION=NONE"
+          Write-Host "WEB_REFRESH_STATUS=PASS"
