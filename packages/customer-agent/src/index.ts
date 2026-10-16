@@ -4,4 +4,3 @@ export * from "./copy-follower.js";
 
 export * from "./follower-execution.js";
 export * from "./mt5-follower-executor.js";
-export * from "./follower-position-registry.js";
