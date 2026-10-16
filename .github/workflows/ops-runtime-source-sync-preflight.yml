@@ -1,0 +1,103 @@
+name: Ops Runtime Source Sync Preflight
+
+on:
+  push:
+    branches:
+      - ops/runtime-source-sync-preflight
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-runtime-source-sync-preflight
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+    steps:
+      - name: Checkout control source
+        uses: actions/checkout@v4
+
+      - name: Read-only production runtime classification
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $prodRoot = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $target = 'ff116b5e0c491163a11e33cb9e38fb6b503f0a1d'
+          $taskName = 'XAUUSD-Phase7C-Executors'
+
+          Write-Host 'OPS_RUNTIME_SYNC_PREFLIGHT_READ_ONLY=TRUE'
+          Write-Host 'OPS_RUNTIME_SYNC_PREFLIGHT_GIT_MUTATION=NONE'
+          Write-Host 'OPS_RUNTIME_SYNC_PREFLIGHT_MODE_MUTATION=NONE'
+          Write-Host 'OPS_RUNTIME_SYNC_PREFLIGHT_ARM_MUTATION=NONE'
+          Write-Host 'OPS_RUNTIME_SYNC_PREFLIGHT_ORDER_MUTATION=NONE'
+          Write-Host 'OPS_RUNTIME_SYNC_PREFLIGHT_POSITION_MUTATION=NONE'
+
+          if (-not (Test-Path -LiteralPath $prodRoot -PathType Container)) { throw "PRODUCTION_ROOT_MISSING=$prodRoot" }
+
+          $git = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          $localBranch = ([string](& $git -C $prodRoot branch --show-current)).Trim()
+          $head = ([string](& $git -C $prodRoot rev-parse HEAD)).Trim().ToLowerInvariant()
+          $dirty = @(& $git -C $prodRoot status --porcelain --untracked-files=normal)
+          $origin = ([string](& $git -C $prodRoot remote get-url origin)).Trim()
+
+          Write-Host "OPS_RUNTIME_SYNC_LOCAL_BRANCH=$localBranch"
+          Write-Host "OPS_RUNTIME_SYNC_LOCAL_HEAD=$head"
+          Write-Host "OPS_RUNTIME_SYNC_LOCAL_DIRTY_COUNT=$($dirty.Count)"
+          Write-Host "OPS_RUNTIME_SYNC_ORIGIN=$origin"
+          Write-Host "OPS_RUNTIME_SYNC_TARGET_COMMIT=$target"
+
+          $configPath = Join-Path $prodRoot '.runtime\phase7c-executor-task-config.json'
+          if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw "TASK_CONFIG_MISSING=$configPath" }
+          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+          $controlApiUrl = ([string]$config.controlApiUrl).TrimEnd('/')
+          Write-Host "OPS_RUNTIME_SYNC_TASK_CONFIG_VERSION=$($config.version)"
+          Write-Host "OPS_RUNTIME_SYNC_TASK_CONFIG_ACCOUNT_MODE=$($config.accountMode)"
+          Write-Host "OPS_RUNTIME_SYNC_TASK_CONFIG_LIVE_ENABLED=$($config.liveExecutionEnabled)"
+          Write-Host "OPS_RUNTIME_SYNC_TASK_CONFIG_ARMED=$($config.armed)"
+          Write-Host "OPS_RUNTIME_SYNC_CONTROL_API=$controlApiUrl"
+
+          $mode = Invoke-RestMethod -Uri "$controlApiUrl/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 12
+          $arm = Invoke-RestMethod -Uri "$controlApiUrl/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 12
+          $lifecycle = Invoke-RestMethod -Uri "$controlApiUrl/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 12
+          $attestation = Invoke-RestMethod -Uri "$controlApiUrl/api/v1/phase7c/runtime-source-attestation" -Method Get -TimeoutSec 12
+
+          Write-Host "OPS_RUNTIME_SYNC_MODE=$($mode.state.mode)"
+          Write-Host "OPS_RUNTIME_SYNC_ARM_STATUS=$($arm.liveArmStatus)"
+          Write-Host "OPS_RUNTIME_SYNC_LIVE_EXECUTION_ARMED=$($arm.liveExecutionArmed)"
+          Write-Host "OPS_RUNTIME_SYNC_ACCOUNT_MODE=$($arm.accountMode)"
+          Write-Host "OPS_RUNTIME_SYNC_LIFECYCLE_RUNNING=$($lifecycle.running)"
+          Write-Host "OPS_RUNTIME_SYNC_LIFECYCLE_READY=$($lifecycle.ready)"
+          Write-Host "OPS_RUNTIME_SYNC_ATTESTATION_OVERALL=$($attestation.overall)"
+          if ($null -ne $attestation.deployment) {
+            Write-Host "OPS_RUNTIME_SYNC_DEPLOYMENT_COMMIT=$($attestation.deployment.sourceCommit)"
+            Write-Host "OPS_RUNTIME_SYNC_DEPLOYMENT_TREE=$($attestation.deployment.sourceTree)"
+            Write-Host "OPS_RUNTIME_SYNC_DEPLOYMENT_ID=$($attestation.deployment.deploymentId)"
+          }
+
+          foreach ($component in @($attestation.components)) {
+            $reasons = @($component.reasonCodes | ForEach-Object { [string]$_ }) -join ','
+            Write-Host ("OPS_RUNTIME_SYNC_COMPONENT={0}|VERDICT={1}|ALIVE={2}|PID={3}|SOURCE={4}|DEPLOYMENT={5}|REASONS={6}" -f $component.component,$component.verdict,$component.alive,$component.pid,$component.sourceCommit,$component.deploymentId,$reasons)
+          }
+
+          Import-Module ScheduledTasks -ErrorAction Stop
+          $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+          $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop
+          Write-Host "OPS_RUNTIME_SYNC_TASK_STATE=$($task.State)"
+          Write-Host "OPS_RUNTIME_SYNC_TASK_LAST_RESULT=$($taskInfo.LastTaskResult)"
+
+          $alive = 0
+          if ($null -ne $lifecycle.processes) {
+            foreach ($prop in @($lifecycle.processes.PSObject.Properties)) {
+              if ($null -ne $prop.Value -and [bool]$prop.Value.alive) { $alive++ }
+            }
+          }
+          Write-Host "OPS_RUNTIME_SYNC_ALIVE_EXECUTOR_COUNT=$alive"
+
+          & "$prodRoot\scripts\inspect-phase7c-live-runtime-local.ps1" -WorkDir "$prodRoot\.runtime" -ExpectedRuntime LIVE -ExpectedMode PAUSE -Symbol XAUUSD -TimeoutSec 8
+
+          Write-Host 'OPS_RUNTIME_SYNC_PREFLIGHT_STATUS=PASS'
