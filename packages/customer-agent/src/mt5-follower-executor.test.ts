@@ -33,6 +33,8 @@ function bridge(): CustomerMt5BridgePort & {
         tradingEnabled: true,
         terminalTradeAllowed: true,
         expertTradeAllowed: true,
+        accountLogin: 770001,
+        server: "Broker-Real",
       };
     },
     async quote() {
@@ -101,7 +103,10 @@ describe("CustomerMt5FollowerExecutor", () => {
   it("opens once with command idempotency and binds the follower ticket", async () => {
     const port = bridge();
     const registry = new InMemoryCustomerFollowerPositionRegistry();
-    const executor = new CustomerMt5FollowerExecutor(port, registry);
+    const executor = new CustomerMt5FollowerExecutor(port, registry, {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+    });
 
     await executor.execute(openRequest);
 
@@ -127,7 +132,10 @@ describe("CustomerMt5FollowerExecutor", () => {
   it("updates SL/TP, partially closes, then fully closes by bound ticket", async () => {
     const port = bridge();
     const registry = new InMemoryCustomerFollowerPositionRegistry();
-    const executor = new CustomerMt5FollowerExecutor(port, registry);
+    const executor = new CustomerMt5FollowerExecutor(port, registry, {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+    });
 
     await executor.execute(openRequest);
     await executor.execute({
@@ -170,10 +178,19 @@ describe("CustomerMt5FollowerExecutor", () => {
 
   it("fails closed when MT5 health or binding evidence is missing", async () => {
     const disconnected = bridge();
-    disconnected.health = async () => ({ connected: false });
+    disconnected.health = async () => ({
+      connected: false,
+      tradingEnabled: false,
+      terminalTradeAllowed: false,
+      expertTradeAllowed: false,
+    });
     const executor = new CustomerMt5FollowerExecutor(
       disconnected,
       new InMemoryCustomerFollowerPositionRegistry(),
+      {
+        expectedMt5Login: 770001,
+        expectedBrokerServer: "Broker-Real",
+      },
     );
 
     await expect(executor.execute(openRequest)).rejects.toThrow(
@@ -184,6 +201,10 @@ describe("CustomerMt5FollowerExecutor", () => {
     const noBindingExecutor = new CustomerMt5FollowerExecutor(
       connected,
       new InMemoryCustomerFollowerPositionRegistry(),
+      {
+        expectedMt5Login: 770001,
+        expectedBrokerServer: "Broker-Real",
+      },
     );
     await expect(
       noBindingExecutor.execute({
@@ -196,10 +217,59 @@ describe("CustomerMt5FollowerExecutor", () => {
     ).rejects.toThrow("FOLLOWER_POSITION_BINDING_MISSING");
   });
 
+  it("fails closed when bridge account or server identity does not match", async () => {
+    const wrongAccount = bridge();
+    wrongAccount.health = async () => ({
+      connected: true,
+      tradingEnabled: true,
+      terminalTradeAllowed: true,
+      expertTradeAllowed: true,
+      accountLogin: 770002,
+      server: "Broker-Real",
+    });
+    const wrongAccountExecutor = new CustomerMt5FollowerExecutor(
+      wrongAccount,
+      new InMemoryCustomerFollowerPositionRegistry(),
+      {
+        expectedMt5Login: 770001,
+        expectedBrokerServer: "Broker-Real",
+      },
+    );
+    await expect(wrongAccountExecutor.execute(openRequest)).rejects.toThrow(
+      "FOLLOWER_MT5_ACCOUNT_MISMATCH",
+    );
+    expect(wrongAccount.calls).toHaveLength(0);
+
+    const wrongServer = bridge();
+    wrongServer.health = async () => ({
+      connected: true,
+      tradingEnabled: true,
+      terminalTradeAllowed: true,
+      expertTradeAllowed: true,
+      accountLogin: 770001,
+      server: "Broker-Other",
+    });
+    const wrongServerExecutor = new CustomerMt5FollowerExecutor(
+      wrongServer,
+      new InMemoryCustomerFollowerPositionRegistry(),
+      {
+        expectedMt5Login: 770001,
+        expectedBrokerServer: "Broker-Real",
+      },
+    );
+    await expect(wrongServerExecutor.execute(openRequest)).rejects.toThrow(
+      "FOLLOWER_MT5_SERVER_MISMATCH",
+    );
+    expect(wrongServer.calls).toHaveLength(0);
+  });
+
   it("rejects invalid partial-close volume without sending a broker mutation", async () => {
     const port = bridge();
     const registry = new InMemoryCustomerFollowerPositionRegistry();
-    const executor = new CustomerMt5FollowerExecutor(port, registry);
+    const executor = new CustomerMt5FollowerExecutor(port, registry, {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+    });
 
     await executor.execute(openRequest);
     const before = port.calls.length;

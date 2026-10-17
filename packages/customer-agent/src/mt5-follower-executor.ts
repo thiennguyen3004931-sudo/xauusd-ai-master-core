@@ -6,9 +6,11 @@ import type {
 export interface CustomerMt5BridgePort {
   health(): Promise<{
     connected: boolean;
-    tradingEnabled?: boolean;
-    terminalTradeAllowed?: boolean;
-    expertTradeAllowed?: boolean;
+    tradingEnabled: boolean;
+    terminalTradeAllowed: boolean;
+    expertTradeAllowed: boolean;
+    accountLogin?: number;
+    server?: string;
   }>;
   quote(symbol: string): Promise<{ bid: number; ask: number }>;
   placeOrder(request: {
@@ -83,9 +85,22 @@ export interface CustomerMt5FollowerExecutorConfig {
   readonly magicNumber: number;
   readonly comment: string;
   readonly requireTradingEnabled: boolean;
+  readonly expectedMt5Login: number;
+  readonly expectedBrokerServer: string;
 }
 
-const DEFAULT_CONFIG: CustomerMt5FollowerExecutorConfig = Object.freeze({
+type CustomerMt5FollowerExecutorInputConfig = Pick<
+  CustomerMt5FollowerExecutorConfig,
+  "expectedMt5Login" | "expectedBrokerServer"
+> &
+  Partial<
+    Omit<
+      CustomerMt5FollowerExecutorConfig,
+      "expectedMt5Login" | "expectedBrokerServer"
+    >
+  >;
+
+const DEFAULT_CONFIG = Object.freeze({
   deviationPoints: 30,
   magicNumber: 770701,
   comment: "xauusd-copy-follower",
@@ -106,7 +121,7 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
   constructor(
     private readonly bridge: CustomerMt5BridgePort,
     private readonly registry: CustomerFollowerPositionRegistry,
-    config: Partial<CustomerMt5FollowerExecutorConfig> = {},
+    config: CustomerMt5FollowerExecutorInputConfig,
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     if (
@@ -120,6 +135,21 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
     }
     if (!this.config.comment.trim()) {
       throw new TypeError("comment must be non-blank");
+    }
+    if (
+      !Number.isSafeInteger(this.config.expectedMt5Login) ||
+      this.config.expectedMt5Login <= 0
+    ) {
+      throw new TypeError("expectedMt5Login must be a positive safe integer");
+    }
+    if (
+      !this.config.expectedBrokerServer ||
+      this.config.expectedBrokerServer.trim() !==
+        this.config.expectedBrokerServer
+    ) {
+      throw new TypeError(
+        "expectedBrokerServer must be a canonical non-blank string",
+      );
     }
   }
 
@@ -150,15 +180,24 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
 
   private async assertBridgeReady(): Promise<void> {
     const health = await this.bridge.health();
-    if (!health.connected) fail("FOLLOWER_MT5_DISCONNECTED");
-    if (this.config.requireTradingEnabled && health.tradingEnabled === false) {
+    if (health.connected !== true) fail("FOLLOWER_MT5_DISCONNECTED");
+    if (
+      this.config.requireTradingEnabled &&
+      health.tradingEnabled !== true
+    ) {
       fail("FOLLOWER_MT5_TRADING_DISABLED");
     }
-    if (health.terminalTradeAllowed === false) {
+    if (health.terminalTradeAllowed !== true) {
       fail("FOLLOWER_MT5_TERMINAL_TRADE_NOT_ALLOWED");
     }
-    if (health.expertTradeAllowed === false) {
+    if (health.expertTradeAllowed !== true) {
       fail("FOLLOWER_MT5_EXPERT_TRADE_NOT_ALLOWED");
+    }
+    if (health.accountLogin !== this.config.expectedMt5Login) {
+      fail("FOLLOWER_MT5_ACCOUNT_MISMATCH");
+    }
+    if (health.server !== this.config.expectedBrokerServer) {
+      fail("FOLLOWER_MT5_SERVER_MISMATCH");
     }
   }
 

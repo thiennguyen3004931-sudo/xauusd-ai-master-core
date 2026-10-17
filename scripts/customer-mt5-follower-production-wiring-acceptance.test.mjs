@@ -31,6 +31,8 @@ test("signed COPY_FOLLOWER command reaches simulated MT5 bridge through producti
         tradingEnabled: true,
         terminalTradeAllowed: true,
         expertTradeAllowed: true,
+        accountLogin: 770001,
+        server: "Broker-Real",
       };
     },
     async quote() {
@@ -75,6 +77,10 @@ test("signed COPY_FOLLOWER command reaches simulated MT5 bridge through producti
   const executor = new CustomerMt5FollowerExecutor(
     bridge,
     new InMemoryCustomerFollowerPositionRegistry(),
+    {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+    },
   );
   const adapter = new CustomerFollowerExecutionAdapter(executor);
 
@@ -163,6 +169,8 @@ test("durable follower registry survives executor restart in simulated productio
         tradingEnabled: true,
         terminalTradeAllowed: true,
         expertTradeAllowed: true,
+        accountLogin: 770001,
+        server: "Broker-Real",
       };
     },
     async quote() {
@@ -196,6 +204,10 @@ test("durable follower registry survives executor restart in simulated productio
     const restartedExecutor = new CustomerMt5FollowerExecutor(
       bridge,
       restartedRegistry,
+      {
+        expectedMt5Login: 770001,
+        expectedBrokerServer: "Broker-Real",
+      },
     );
 
     await restartedExecutor.execute({
@@ -216,4 +228,66 @@ test("durable follower registry survives executor restart in simulated productio
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+
+test("production wiring rejects simulated MT5 identity mismatch before mutation", async () => {
+  const mutations = [];
+  const bridge = {
+    async health() {
+      return {
+        connected: true,
+        tradingEnabled: true,
+        terminalTradeAllowed: true,
+        expertTradeAllowed: true,
+        accountLogin: 770999,
+        server: "Broker-Real",
+      };
+    },
+    async quote() {
+      mutations.push("QUOTE");
+      return { bid: 4199.5, ask: 4200.5 };
+    },
+    async placeOrder() {
+      mutations.push("OPEN");
+      throw new Error("must not reach placeOrder");
+    },
+    async modifyPosition() {
+      mutations.push("MODIFY");
+      throw new Error("must not reach modifyPosition");
+    },
+    async closePosition() {
+      mutations.push("CLOSE");
+      throw new Error("must not reach closePosition");
+    },
+    async openPositions() {
+      mutations.push("POSITIONS");
+      return [];
+    },
+  };
+
+  const executor = new CustomerMt5FollowerExecutor(
+    bridge,
+    new InMemoryCustomerFollowerPositionRegistry(),
+    {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+    },
+  );
+
+  await assert.rejects(
+    executor.execute({
+      action: "POSITION_OPEN",
+      commandId: "identity-deny-001",
+      sequence: 1,
+      symbol: "XAUUSD",
+      masterPositionRef: "master-identity-deny-001",
+      side: "BUY",
+      volume: 0.12,
+      stopLoss: 4190,
+      takeProfit: 4220,
+    }),
+    /FOLLOWER_MT5_ACCOUNT_MISMATCH/,
+  );
+  assert.deepEqual(mutations, []);
 });
