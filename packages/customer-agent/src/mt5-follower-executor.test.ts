@@ -275,7 +275,7 @@ describe("CustomerMt5FollowerExecutor", () => {
     expect(wrongServer.calls).toHaveLength(0);
   });
 
-  it("does not bind an accepted order until the position is confirmed open", async () => {
+  it("retains accepted ticket ownership when the position is not yet confirmed open", async () => {
     const port = bridge();
     port.placeOrder = async (request) => {
       port.calls.push({ kind: "placeOrder", value: request });
@@ -297,7 +297,7 @@ describe("CustomerMt5FollowerExecutor", () => {
     await expect(executor.execute(openRequest)).rejects.toThrow(
       "FOLLOWER_POSITION_OPEN_NOT_CONFIRMED",
     );
-    await expect(registry.get("master-1")).resolves.toBeUndefined();
+    await expect(registry.get("master-1")).resolves.toBe("9001");
   });
 
   it("accepts delayed position visibility within the reconciliation window", async () => {
@@ -370,6 +370,50 @@ describe("CustomerMt5FollowerExecutor", () => {
     ).rejects.toThrow("FOLLOWER_POSITION_CLOSE_NOT_CONFIRMED");
 
     await expect(registry.get("master-1")).resolves.toBe("9001");
+  });
+
+  it("waits through a stale partial-close snapshot until remaining volume matches", async () => {
+    const port = bridge();
+    const registry = new InMemoryCustomerFollowerPositionRegistry();
+    const executor = new CustomerMt5FollowerExecutor(port, registry, {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+      reconcileAttempts: 3,
+      reconcileDelayMs: 0,
+    });
+
+    await executor.execute(openRequest);
+
+    let partialPolls = 0;
+    const originalOpenPositions = port.openPositions.bind(port);
+    port.closePosition = async (ticket, volume, commandId) => {
+      port.calls.push({
+        kind: "closePosition",
+        value: { ticket, volume, commandId },
+      });
+      return { success: true };
+    };
+    port.openPositions = async (symbol) => {
+      partialPolls += 1;
+      if (partialPolls === 1) {
+        return originalOpenPositions(symbol);
+      }
+      const position = port.positions.find((item) => item.ticket === "9001");
+      if (position) position.volume = 0.08;
+      return originalOpenPositions(symbol);
+    };
+
+    await executor.execute({
+      action: "PARTIAL_CLOSE",
+      commandId: "cmd-partial-delayed",
+      sequence: 2,
+      symbol: "XAUUSD",
+      masterPositionRef: "master-1",
+      volume: 0.04,
+    });
+
+    expect(partialPolls).toBe(2);
+    expect(port.positions[0]?.volume).toBe(0.08);
   });
 
   it("rejects a partial close when remaining broker volume is not reconciled", async () => {
