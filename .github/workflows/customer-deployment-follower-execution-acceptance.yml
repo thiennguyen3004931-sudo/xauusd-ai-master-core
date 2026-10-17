@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "packages/customer-agent/**"
+      - "packages/customer-follower-state/**"
       - "packages/copy-protocol/**"
       - "packages/installation-proof/**"
       - "customer-release/**"
@@ -20,6 +21,7 @@ on:
       - main
     paths:
       - "packages/customer-agent/**"
+      - "packages/customer-follower-state/**"
       - "packages/copy-protocol/**"
       - "packages/installation-proof/**"
       - "customer-release/**"
@@ -79,12 +81,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "INSTALLATION_PROOF_BUILD_FAILED" }
           pnpm --filter @xauusd/customer-agent build
           if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_AGENT_BUILD_FAILED" }
+          pnpm --filter @xauusd/customer-follower-state build
+          if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_FOLLOWER_STATE_BUILD_FAILED" }
 
       - name: Customer agent unit tests
         run: pnpm --filter @xauusd/customer-agent test
 
       - name: Customer agent typecheck
         run: pnpm --filter @xauusd/customer-agent typecheck
+
+      - name: Customer follower state tests
+        run: pnpm --filter @xauusd/customer-follower-state test
+
+      - name: Customer follower state typecheck
+        run: pnpm --filter @xauusd/customer-follower-state typecheck
 
       - name: Simulated follower execution E2E
         run: node --test scripts/customer-follower-execution-e2e.test.mjs
@@ -140,6 +150,7 @@ jobs:
           Write-Host 'FOLLOWER_EXECUTION_BOUNDARY=PASS'
           Write-Host 'SIGNED_COPY_COMMAND_TO_EXECUTOR_E2E=PASS'
           Write-Host 'MT5_FOLLOWER_PRODUCTION_WIRING_SIMULATED=PASS'
+          Write-Host 'FOLLOWER_DURABLE_OWNERSHIP_RESTART=PASS'
           Write-Host 'STRICT_EXECUTION_PAYLOAD=PASS'
           Write-Host 'MASTER_SOURCE_INCLUDED=NO'
           Write-Host 'PRIVATE_KEY_INCLUDED=NO'

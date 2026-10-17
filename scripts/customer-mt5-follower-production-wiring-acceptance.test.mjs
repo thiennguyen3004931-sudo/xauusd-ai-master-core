@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { signCopyCommand } from "../packages/copy-protocol/dist/index.js";
 import {
@@ -9,6 +12,7 @@ import {
   CustomerMt5FollowerExecutor,
   InMemoryCustomerFollowerPositionRegistry,
 } from "../packages/customer-agent/dist/index.js";
+import { FileCustomerFollowerPositionRegistry } from "../packages/customer-follower-state/dist/index.js";
 
 const NOW = 100_000_000;
 
@@ -135,5 +139,81 @@ test("production wiring remains simulated and source-only", async () => {
       false,
       "production wiring source contains forbidden direct LIVE integration marker: " + forbidden,
     );
+  }
+});
+
+
+test("durable follower registry survives executor restart in simulated production wiring", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "xauusd-follower-wiring-"));
+  const stateFile = path.join(root, "state", "positions.json");
+
+  const positions = [{
+    ticket: "F91001",
+    symbol: "XAUUSD",
+    volume: 0.12,
+    stopLoss: 4190,
+    takeProfit: 4220,
+  }];
+  const mutations = [];
+
+  const bridge = {
+    async health() {
+      return {
+        connected: true,
+        tradingEnabled: true,
+        terminalTradeAllowed: true,
+        expertTradeAllowed: true,
+      };
+    },
+    async quote() {
+      return { bid: 4199.5, ask: 4200.5 };
+    },
+    async placeOrder() {
+      throw new Error("unexpected OPEN after restart");
+    },
+    async modifyPosition(ticket, stopLoss, takeProfit, commandId) {
+      mutations.push({ action: "MODIFY", ticket, stopLoss, takeProfit, commandId });
+      const position = positions.find((item) => item.ticket === ticket);
+      if (position) {
+        position.stopLoss = stopLoss;
+        position.takeProfit = takeProfit;
+      }
+      return { success: true };
+    },
+    async closePosition() {
+      throw new Error("unexpected CLOSE");
+    },
+    async openPositions(symbol) {
+      return positions.filter((position) => !symbol || position.symbol === symbol);
+    },
+  };
+
+  try {
+    const firstRegistry = new FileCustomerFollowerPositionRegistry(stateFile);
+    await firstRegistry.set("master-restart-001", "F91001");
+
+    const restartedRegistry = new FileCustomerFollowerPositionRegistry(stateFile);
+    const restartedExecutor = new CustomerMt5FollowerExecutor(
+      bridge,
+      restartedRegistry,
+    );
+
+    await restartedExecutor.execute({
+      commandId: "restart-sl-001",
+      symbol: "XAUUSD",
+      action: "STOP_LOSS_UPDATE",
+      masterPositionRef: "master-restart-001",
+      stopLoss: 4195,
+    });
+
+    assert.equal(mutations.length, 1);
+    assert.equal(mutations[0].ticket, "F91001");
+    assert.equal(mutations[0].stopLoss, 4195);
+    assert.equal(
+      await restartedRegistry.get("master-restart-001"),
+      "F91001",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
