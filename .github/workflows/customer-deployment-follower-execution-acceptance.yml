@@ -9,6 +9,7 @@ on:
       - "packages/customer-follower-state/**"
       - "packages/customer-mt5-broker-port-adapter/**"
       - "packages/customer-follower-runtime/**"
+      - "packages/customer-real-bridge-binding/**"
       - "packages/copy-protocol/**"
       - "packages/installation-proof/**"
       - "customer-release/**"
@@ -17,6 +18,7 @@ on:
       - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
       - "scripts/test-customer-mt5-broker-port-adapter-boundary.mjs"
       - "scripts/test-customer-follower-runtime-boundary.mjs"
+      - "scripts/test-customer-real-bridge-binding-boundary.mjs"
       - "scripts/package-customer-agent-release.ps1"
       - ".github/workflows/customer-deployment-follower-execution-acceptance.yml"
       - "pnpm-lock.yaml"
@@ -28,6 +30,7 @@ on:
       - "packages/customer-follower-state/**"
       - "packages/customer-mt5-broker-port-adapter/**"
       - "packages/customer-follower-runtime/**"
+      - "packages/customer-real-bridge-binding/**"
       - "packages/copy-protocol/**"
       - "packages/installation-proof/**"
       - "customer-release/**"
@@ -36,6 +39,7 @@ on:
       - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
       - "scripts/test-customer-mt5-broker-port-adapter-boundary.mjs"
       - "scripts/test-customer-follower-runtime-boundary.mjs"
+      - "scripts/test-customer-real-bridge-binding-boundary.mjs"
       - "scripts/package-customer-agent-release.ps1"
       - ".github/workflows/customer-deployment-follower-execution-acceptance.yml"
       - "pnpm-lock.yaml"
@@ -97,6 +101,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_MT5_BROKER_PORT_ADAPTER_BUILD_FAILED" }
           pnpm --filter @xauusd/customer-follower-runtime build
           if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_FOLLOWER_RUNTIME_BUILD_FAILED" }
+          pnpm --filter @xauusd/customer-real-bridge-binding build
+          if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_REAL_BRIDGE_BINDING_BUILD_FAILED" }
 
       - name: Customer agent unit tests
         run: pnpm --filter @xauusd/customer-agent test
@@ -127,6 +133,15 @@ jobs:
 
       - name: Customer follower runtime boundary
         run: node --test scripts/test-customer-follower-runtime-boundary.mjs
+
+      - name: Customer real bridge binding tests
+        run: pnpm --filter @xauusd/customer-real-bridge-binding test
+
+      - name: Customer real bridge binding typecheck
+        run: pnpm --filter @xauusd/customer-real-bridge-binding typecheck
+
+      - name: Customer real bridge binding boundary
+        run: node --test scripts/test-customer-real-bridge-binding-boundary.mjs
 
       - name: Simulated follower execution E2E
         run: node --test scripts/customer-follower-execution-e2e.test.mjs
@@ -185,7 +200,8 @@ jobs:
           Write-Host 'FOLLOWER_DURABLE_OWNERSHIP_RESTART=PASS'
           Write-Host 'CUSTOMER_MT5_BROKER_PORT_ADAPTER_SIMULATED=PASS'
           Write-Host 'CUSTOMER_FOLLOWER_RUNTIME_COMPOSITION_SIMULATED=PASS'
-          Write-Host 'REAL_CUSTOMER_MT5_BRIDGE_BINDING=NONE'
+          Write-Host 'REAL_CUSTOMER_MT5_BRIDGE_BINDING_CONTRACT=PASS'
+          Write-Host 'REAL_CUSTOMER_MT5_BRIDGE_CONNECTION=NONE'
           Write-Host 'STRICT_EXECUTION_PAYLOAD=PASS'
           Write-Host 'MASTER_SOURCE_INCLUDED=NO'
           Write-Host 'PRIVATE_KEY_INCLUDED=NO'
