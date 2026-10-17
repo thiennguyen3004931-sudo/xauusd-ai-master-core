@@ -87,6 +87,8 @@ export interface CustomerMt5FollowerExecutorConfig {
   readonly requireTradingEnabled: boolean;
   readonly expectedMt5Login: number;
   readonly expectedBrokerServer: string;
+  readonly reconcileAttempts: number;
+  readonly reconcileDelayMs: number;
 }
 
 type CustomerMt5FollowerExecutorInputConfig = Pick<
@@ -105,6 +107,8 @@ const DEFAULT_CONFIG = Object.freeze({
   magicNumber: 770701,
   comment: "xauusd-copy-follower",
   requireTradingEnabled: true,
+  reconcileAttempts: 4,
+  reconcileDelayMs: 250,
 });
 
 function fail(code: string, detail?: string): never {
@@ -113,6 +117,15 @@ function fail(code: string, detail?: string): never {
 
 function finitePositive(value: number): boolean {
   return Number.isFinite(value) && value > 0;
+}
+
+function volumeMatches(actual: number, expected: number): boolean {
+  return Math.abs(actual - expected) <= 1e-8;
+}
+
+async function delay(ms: number): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
@@ -150,6 +163,18 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
       throw new TypeError(
         "expectedBrokerServer must be a canonical non-blank string",
       );
+    }
+    if (
+      !Number.isInteger(this.config.reconcileAttempts) ||
+      this.config.reconcileAttempts < 1
+    ) {
+      throw new TypeError("reconcileAttempts must be a positive integer");
+    }
+    if (
+      !Number.isInteger(this.config.reconcileDelayMs) ||
+      this.config.reconcileDelayMs < 0
+    ) {
+      throw new TypeError("reconcileDelayMs must be a non-negative integer");
     }
   }
 
@@ -234,6 +259,13 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
 
     const ticket = response.position?.ticket ?? response.ticket;
     if (!ticket) fail("FOLLOWER_POSITION_OPEN_TICKET_MISSING");
+
+    const confirmed = await this.findOpenPosition(ticket, request.symbol);
+    if (!confirmed) fail("FOLLOWER_POSITION_OPEN_NOT_CONFIRMED");
+    if (!volumeMatches(confirmed.volume, request.volume)) {
+      fail("FOLLOWER_POSITION_OPEN_VOLUME_MISMATCH");
+    }
+
     await this.registry.set(request.masterPositionRef, ticket);
   }
 
@@ -285,6 +317,16 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
       request.commandId,
     );
     if (!result.success) fail("FOLLOWER_PARTIAL_CLOSE_FAILED", result.message);
+
+    const confirmed = await this.findOpenPosition(
+      position.ticket,
+      request.symbol,
+    );
+    if (!confirmed) fail("FOLLOWER_PARTIAL_CLOSE_NOT_CONFIRMED");
+    const expectedVolume = position.volume - request.volume;
+    if (!volumeMatches(confirmed.volume, expectedVolume)) {
+      fail("FOLLOWER_PARTIAL_CLOSE_VOLUME_MISMATCH");
+    }
   }
 
   private async fullClose(
@@ -300,17 +342,54 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
       request.commandId,
     );
     if (!result.success) fail("FOLLOWER_POSITION_CLOSE_FAILED", result.message);
+
+    const closed = await this.waitUntilPositionClosed(
+      position.ticket,
+      request.symbol,
+    );
+    if (!closed) fail("FOLLOWER_POSITION_CLOSE_NOT_CONFIRMED");
+
     await this.registry.delete(request.masterPositionRef);
   }
 
   private async resolveOpenPosition(masterPositionRef: string, symbol: string) {
     const ticket = await this.registry.get(masterPositionRef);
     if (!ticket) fail("FOLLOWER_POSITION_BINDING_MISSING");
-    const positions = await this.bridge.openPositions(symbol);
-    const position = positions.find(
-      (candidate) => candidate.ticket === ticket && candidate.symbol === symbol,
-    );
+    const position = await this.findOpenPosition(ticket, symbol);
     if (!position) fail("FOLLOWER_POSITION_NOT_OPEN");
     return position;
+  }
+
+  private async findOpenPosition(ticket: string, symbol: string) {
+    for (let attempt = 1; attempt <= this.config.reconcileAttempts; attempt += 1) {
+      const positions = await this.bridge.openPositions(symbol);
+      const position = positions.find(
+        (candidate) =>
+          candidate.ticket === ticket && candidate.symbol === symbol,
+      );
+      if (position) return position;
+      if (attempt < this.config.reconcileAttempts) {
+        await delay(this.config.reconcileDelayMs);
+      }
+    }
+    return undefined;
+  }
+
+  private async waitUntilPositionClosed(
+    ticket: string,
+    symbol: string,
+  ): Promise<boolean> {
+    for (let attempt = 1; attempt <= this.config.reconcileAttempts; attempt += 1) {
+      const positions = await this.bridge.openPositions(symbol);
+      const position = positions.find(
+        (candidate) =>
+          candidate.ticket === ticket && candidate.symbol === symbol,
+      );
+      if (!position) return true;
+      if (attempt < this.config.reconcileAttempts) {
+        await delay(this.config.reconcileDelayMs);
+      }
+    }
+    return false;
   }
 }
