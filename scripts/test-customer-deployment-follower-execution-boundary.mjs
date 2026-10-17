@@ -102,6 +102,7 @@ test("release packager allowlists only customer distribution packages", async ()
     '"execution-engine"',
     '"mt5-broker"',
     '"customer-mt5-broker-port-adapter"',
+    '"customer-follower-runtime"',
   ]) {
     const packageBlock = source.slice(
       source.indexOf("$packages = @("),
