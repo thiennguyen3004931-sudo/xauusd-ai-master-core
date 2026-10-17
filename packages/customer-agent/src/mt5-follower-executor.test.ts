@@ -106,6 +106,8 @@ describe("CustomerMt5FollowerExecutor", () => {
     const executor = new CustomerMt5FollowerExecutor(port, registry, {
       expectedMt5Login: 770001,
       expectedBrokerServer: "Broker-Real",
+      reconcileAttempts: 2,
+      reconcileDelayMs: 0,
     });
 
     await executor.execute(openRequest);
@@ -135,6 +137,8 @@ describe("CustomerMt5FollowerExecutor", () => {
     const executor = new CustomerMt5FollowerExecutor(port, registry, {
       expectedMt5Login: 770001,
       expectedBrokerServer: "Broker-Real",
+      reconcileAttempts: 2,
+      reconcileDelayMs: 0,
     });
 
     await executor.execute(openRequest);
@@ -190,6 +194,8 @@ describe("CustomerMt5FollowerExecutor", () => {
       {
         expectedMt5Login: 770001,
         expectedBrokerServer: "Broker-Real",
+        reconcileAttempts: 2,
+        reconcileDelayMs: 0,
       },
     );
 
@@ -204,6 +210,8 @@ describe("CustomerMt5FollowerExecutor", () => {
       {
         expectedMt5Login: 770001,
         expectedBrokerServer: "Broker-Real",
+        reconcileAttempts: 2,
+        reconcileDelayMs: 0,
       },
     );
     await expect(
@@ -233,6 +241,8 @@ describe("CustomerMt5FollowerExecutor", () => {
       {
         expectedMt5Login: 770001,
         expectedBrokerServer: "Broker-Real",
+        reconcileAttempts: 2,
+        reconcileDelayMs: 0,
       },
     );
     await expect(wrongAccountExecutor.execute(openRequest)).rejects.toThrow(
@@ -255,6 +265,8 @@ describe("CustomerMt5FollowerExecutor", () => {
       {
         expectedMt5Login: 770001,
         expectedBrokerServer: "Broker-Real",
+        reconcileAttempts: 2,
+        reconcileDelayMs: 0,
       },
     );
     await expect(wrongServerExecutor.execute(openRequest)).rejects.toThrow(
@@ -263,12 +275,142 @@ describe("CustomerMt5FollowerExecutor", () => {
     expect(wrongServer.calls).toHaveLength(0);
   });
 
+  it("does not bind an accepted order until the position is confirmed open", async () => {
+    const port = bridge();
+    port.placeOrder = async (request) => {
+      port.calls.push({ kind: "placeOrder", value: request });
+      return {
+        accepted: true,
+        status: "FILLED",
+        ticket: "9001",
+        message: "accepted but not visible",
+      };
+    };
+    const registry = new InMemoryCustomerFollowerPositionRegistry();
+    const executor = new CustomerMt5FollowerExecutor(port, registry, {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+      reconcileAttempts: 2,
+      reconcileDelayMs: 0,
+    });
+
+    await expect(executor.execute(openRequest)).rejects.toThrow(
+      "FOLLOWER_POSITION_OPEN_NOT_CONFIRMED",
+    );
+    await expect(registry.get("master-1")).resolves.toBeUndefined();
+  });
+
+  it("accepts delayed position visibility within the reconciliation window", async () => {
+    const port = bridge();
+    const registry = new InMemoryCustomerFollowerPositionRegistry();
+    let polls = 0;
+
+    port.placeOrder = async (request) => {
+      port.calls.push({ kind: "placeOrder", value: request });
+      port.positions.push({
+        ticket: "9001",
+        symbol: request.symbol,
+        volume: request.volume,
+        stopLoss: request.stopLoss,
+        takeProfit: request.takeProfit,
+      });
+      return {
+        accepted: true,
+        status: "FILLED",
+        ticket: "9001",
+        message: "ok",
+      };
+    };
+    port.openPositions = async (symbol) => {
+      polls += 1;
+      if (polls === 1) return [];
+      return port.positions.filter((item) => !symbol || item.symbol === symbol);
+    };
+
+    const executor = new CustomerMt5FollowerExecutor(port, registry, {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+      reconcileAttempts: 2,
+      reconcileDelayMs: 0,
+    });
+
+    await executor.execute(openRequest);
+
+    expect(polls).toBe(2);
+    await expect(registry.get("master-1")).resolves.toBe("9001");
+  });
+
+  it("keeps ownership when a full close is not confirmed", async () => {
+    const port = bridge();
+    const registry = new InMemoryCustomerFollowerPositionRegistry();
+    const executor = new CustomerMt5FollowerExecutor(port, registry, {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+      reconcileAttempts: 2,
+      reconcileDelayMs: 0,
+    });
+
+    await executor.execute(openRequest);
+    port.closePosition = async (ticket, volume, commandId) => {
+      port.calls.push({
+        kind: "closePosition",
+        value: { ticket, volume, commandId },
+      });
+      return { success: true };
+    };
+
+    await expect(
+      executor.execute({
+        action: "POSITION_CLOSE",
+        commandId: "cmd-close-unconfirmed",
+        sequence: 2,
+        symbol: "XAUUSD",
+        masterPositionRef: "master-1",
+      }),
+    ).rejects.toThrow("FOLLOWER_POSITION_CLOSE_NOT_CONFIRMED");
+
+    await expect(registry.get("master-1")).resolves.toBe("9001");
+  });
+
+  it("rejects a partial close when remaining broker volume is not reconciled", async () => {
+    const port = bridge();
+    const registry = new InMemoryCustomerFollowerPositionRegistry();
+    const executor = new CustomerMt5FollowerExecutor(port, registry, {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+      reconcileAttempts: 2,
+      reconcileDelayMs: 0,
+    });
+
+    await executor.execute(openRequest);
+    port.closePosition = async (ticket, volume, commandId) => {
+      port.calls.push({
+        kind: "closePosition",
+        value: { ticket, volume, commandId },
+      });
+      return { success: true };
+    };
+
+    await expect(
+      executor.execute({
+        action: "PARTIAL_CLOSE",
+        commandId: "cmd-partial-unreconciled",
+        sequence: 2,
+        symbol: "XAUUSD",
+        masterPositionRef: "master-1",
+        volume: 0.04,
+      }),
+    ).rejects.toThrow("FOLLOWER_PARTIAL_CLOSE_VOLUME_MISMATCH");
+  });
+
   it("rejects invalid partial-close volume without sending a broker mutation", async () => {
     const port = bridge();
     const registry = new InMemoryCustomerFollowerPositionRegistry();
     const executor = new CustomerMt5FollowerExecutor(port, registry, {
       expectedMt5Login: 770001,
       expectedBrokerServer: "Broker-Real",
+      reconcileAttempts: 2,
+      reconcileDelayMs: 0,
     });
 
     await executor.execute(openRequest);
