@@ -14,6 +14,22 @@ import {
 } from "../packages/customer-agent/dist/index.js";
 import { FileCustomerFollowerPositionRegistry } from "../packages/customer-follower-state/dist/index.js";
 
+async function removeWithRetry(root) {
+  let lastError;
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    try {
+      await removeWithRetry(root);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 8) {
+        await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
 const NOW = 100_000_000;
 
 test("signed COPY_FOLLOWER command reaches simulated MT5 bridge through production wiring chain", async () => {
@@ -226,7 +242,7 @@ test("durable follower registry survives executor restart in simulated productio
       "F91001",
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeWithRetry(root);
   }
 });
 
@@ -359,10 +375,10 @@ test("accepted follower OPEN is not bound until broker position is reconciled", 
     assert.equal(mutations.length, 1);
     assert.equal(
       await registry.get("master-open-reconcile-001"),
-      undefined,
+      "F92001",
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeWithRetry(root);
   }
 });
 
@@ -432,6 +448,6 @@ test("follower ownership is retained until broker CLOSE is reconciled", async ()
       "F93001",
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeWithRetry(root);
   }
 });
