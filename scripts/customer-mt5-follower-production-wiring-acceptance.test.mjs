@@ -291,3 +291,147 @@ test("production wiring rejects simulated MT5 identity mismatch before mutation"
   );
   assert.deepEqual(mutations, []);
 });
+
+
+test("accepted follower OPEN is not bound until broker position is reconciled", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "xauusd-follower-open-reconcile-"));
+  const stateFile = path.join(root, "state", "positions.json");
+  const registry = new FileCustomerFollowerPositionRegistry(stateFile);
+  const mutations = [];
+
+  const bridge = {
+    async health() {
+      return {
+        connected: true,
+        tradingEnabled: true,
+        terminalTradeAllowed: true,
+        expertTradeAllowed: true,
+        accountLogin: 770001,
+        server: "Broker-Real",
+      };
+    },
+    async quote() {
+      return { bid: 4199.5, ask: 4200.5 };
+    },
+    async placeOrder(request) {
+      mutations.push({ action: "OPEN", request });
+      return {
+        accepted: true,
+        status: "FILLED",
+        ticket: "F92001",
+        message: "accepted but not visible",
+      };
+    },
+    async modifyPosition() {
+      throw new Error("unexpected MODIFY");
+    },
+    async closePosition() {
+      throw new Error("unexpected CLOSE");
+    },
+    async openPositions() {
+      return [];
+    },
+  };
+
+  try {
+    const executor = new CustomerMt5FollowerExecutor(bridge, registry, {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+      reconcileAttempts: 2,
+      reconcileDelayMs: 0,
+    });
+
+    await assert.rejects(
+      executor.execute({
+        action: "POSITION_OPEN",
+        commandId: "open-reconcile-deny-001",
+        sequence: 1,
+        symbol: "XAUUSD",
+        masterPositionRef: "master-open-reconcile-001",
+        side: "BUY",
+        volume: 0.12,
+        stopLoss: 4190,
+        takeProfit: 4220,
+      }),
+      /FOLLOWER_POSITION_OPEN_NOT_CONFIRMED/,
+    );
+
+    assert.equal(mutations.length, 1);
+    assert.equal(
+      await registry.get("master-open-reconcile-001"),
+      undefined,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("follower ownership is retained until broker CLOSE is reconciled", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "xauusd-follower-close-reconcile-"));
+  const stateFile = path.join(root, "state", "positions.json");
+  const registry = new FileCustomerFollowerPositionRegistry(stateFile);
+  await registry.set("master-close-reconcile-001", "F93001");
+
+  const positions = [{
+    ticket: "F93001",
+    symbol: "XAUUSD",
+    volume: 0.12,
+    stopLoss: 4190,
+    takeProfit: 4220,
+  }];
+
+  const bridge = {
+    async health() {
+      return {
+        connected: true,
+        tradingEnabled: true,
+        terminalTradeAllowed: true,
+        expertTradeAllowed: true,
+        accountLogin: 770001,
+        server: "Broker-Real",
+      };
+    },
+    async quote() {
+      return { bid: 4199.5, ask: 4200.5 };
+    },
+    async placeOrder() {
+      throw new Error("unexpected OPEN");
+    },
+    async modifyPosition() {
+      throw new Error("unexpected MODIFY");
+    },
+    async closePosition() {
+      return { success: true };
+    },
+    async openPositions(symbol) {
+      return positions.filter((position) => !symbol || position.symbol === symbol);
+    },
+  };
+
+  try {
+    const executor = new CustomerMt5FollowerExecutor(bridge, registry, {
+      expectedMt5Login: 770001,
+      expectedBrokerServer: "Broker-Real",
+      reconcileAttempts: 2,
+      reconcileDelayMs: 0,
+    });
+
+    await assert.rejects(
+      executor.execute({
+        action: "POSITION_CLOSE",
+        commandId: "close-reconcile-deny-001",
+        sequence: 2,
+        symbol: "XAUUSD",
+        masterPositionRef: "master-close-reconcile-001",
+      }),
+      /FOLLOWER_POSITION_CLOSE_NOT_CONFIRMED/,
+    );
+
+    assert.equal(
+      await registry.get("master-close-reconcile-001"),
+      "F93001",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
