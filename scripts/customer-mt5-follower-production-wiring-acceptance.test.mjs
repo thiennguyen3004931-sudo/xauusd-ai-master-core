@@ -18,7 +18,7 @@ async function removeWithRetry(root) {
   let lastError;
   for (let attempt = 1; attempt <= 8; attempt += 1) {
     try {
-      await removeWithRetry(root);
+      await rm(root, { recursive: true, force: true });
       return;
     } catch (error) {
       lastError = error;
