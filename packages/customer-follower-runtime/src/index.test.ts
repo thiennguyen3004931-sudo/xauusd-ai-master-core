@@ -13,9 +13,25 @@ async function tempStateFile() {
   return path.join(root, "state", "positions.json");
 }
 
+async function removeWithRetry(root: string): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    try {
+      await rm(root, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 8) {
+        await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
 afterEach(async () => {
   for (const root of roots.splice(0)) {
-    await rm(root, { recursive: true, force: true });
+    await removeWithRetry(root);
   }
 });
 
