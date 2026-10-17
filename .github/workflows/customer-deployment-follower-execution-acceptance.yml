@@ -9,6 +9,7 @@ on:
       - "packages/customer-follower-state/**"
       - "packages/customer-mt5-broker-port-adapter/**"
       - "packages/customer-follower-runtime/**"
+      - "packages/customer-mt5-binding-contract/**"
       - "packages/copy-protocol/**"
       - "packages/installation-proof/**"
       - "customer-release/**"
@@ -17,6 +18,7 @@ on:
       - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
       - "scripts/test-customer-mt5-broker-port-adapter-boundary.mjs"
       - "scripts/test-customer-follower-runtime-boundary.mjs"
+      - "scripts/test-customer-mt5-binding-contract-boundary.mjs"
       - "scripts/package-customer-agent-release.ps1"
       - ".github/workflows/customer-deployment-follower-execution-acceptance.yml"
       - "pnpm-lock.yaml"
@@ -28,6 +30,7 @@ on:
       - "packages/customer-follower-state/**"
       - "packages/customer-mt5-broker-port-adapter/**"
       - "packages/customer-follower-runtime/**"
+      - "packages/customer-mt5-binding-contract/**"
       - "packages/copy-protocol/**"
       - "packages/installation-proof/**"
       - "customer-release/**"
@@ -36,6 +39,7 @@ on:
       - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
       - "scripts/test-customer-mt5-broker-port-adapter-boundary.mjs"
       - "scripts/test-customer-follower-runtime-boundary.mjs"
+      - "scripts/test-customer-mt5-binding-contract-boundary.mjs"
       - "scripts/package-customer-agent-release.ps1"
       - ".github/workflows/customer-deployment-follower-execution-acceptance.yml"
       - "pnpm-lock.yaml"
@@ -97,6 +101,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_MT5_BROKER_PORT_ADAPTER_BUILD_FAILED" }
           pnpm --filter @xauusd/customer-follower-runtime build
           if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_FOLLOWER_RUNTIME_BUILD_FAILED" }
+          pnpm --filter @xauusd/customer-mt5-binding-contract build
+          if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_MT5_BINDING_CONTRACT_BUILD_FAILED" }
 
       - name: Customer agent unit tests
         run: pnpm --filter @xauusd/customer-agent test
@@ -127,6 +133,15 @@ jobs:
 
       - name: Customer follower runtime boundary
         run: node --test scripts/test-customer-follower-runtime-boundary.mjs
+
+      - name: Customer MT5 binding contract tests
+        run: pnpm --filter @xauusd/customer-mt5-binding-contract test
+
+      - name: Customer MT5 binding contract typecheck
+        run: pnpm --filter @xauusd/customer-mt5-binding-contract typecheck
+
+      - name: Customer MT5 binding contract boundary
+        run: node --test scripts/test-customer-mt5-binding-contract-boundary.mjs
 
       - name: Simulated follower execution E2E
         run: node --test scripts/customer-follower-execution-e2e.test.mjs
@@ -185,6 +200,7 @@ jobs:
           Write-Host 'FOLLOWER_DURABLE_OWNERSHIP_RESTART=PASS'
           Write-Host 'CUSTOMER_MT5_BROKER_PORT_ADAPTER_SIMULATED=PASS'
           Write-Host 'CUSTOMER_FOLLOWER_RUNTIME_COMPOSITION_SIMULATED=PASS'
+          Write-Host 'CUSTOMER_MT5_BINDING_CONTRACT=PASS'
           Write-Host 'REAL_CUSTOMER_MT5_BRIDGE_BINDING=NONE'
           Write-Host 'STRICT_EXECUTION_PAYLOAD=PASS'
           Write-Host 'MASTER_SOURCE_INCLUDED=NO'
