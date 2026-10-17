@@ -260,13 +260,21 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
     const ticket = response.position?.ticket ?? response.ticket;
     if (!ticket) fail("FOLLOWER_POSITION_OPEN_TICKET_MISSING");
 
-    const confirmed = await this.findOpenPosition(ticket, request.symbol);
-    if (!confirmed) fail("FOLLOWER_POSITION_OPEN_NOT_CONFIRMED");
-    if (!volumeMatches(confirmed.volume, request.volume)) {
-      fail("FOLLOWER_POSITION_OPEN_VOLUME_MISMATCH");
-    }
-
+    // The broker has accepted a concrete ticket. Persist ownership before
+    // reconciliation so a temporarily invisible live position is never orphaned.
     await this.registry.set(request.masterPositionRef, ticket);
+
+    const reconciliation = await this.waitForPositionVolume(
+      ticket,
+      request.symbol,
+      request.volume,
+    );
+    if (!reconciliation.position) {
+      if (reconciliation.seen) {
+        fail("FOLLOWER_POSITION_OPEN_VOLUME_MISMATCH");
+      }
+      fail("FOLLOWER_POSITION_OPEN_NOT_CONFIRMED");
+    }
   }
 
   private async updateStopLoss(
@@ -318,14 +326,17 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
     );
     if (!result.success) fail("FOLLOWER_PARTIAL_CLOSE_FAILED", result.message);
 
-    const confirmed = await this.findOpenPosition(
+    const expectedVolume = position.volume - request.volume;
+    const reconciliation = await this.waitForPositionVolume(
       position.ticket,
       request.symbol,
+      expectedVolume,
     );
-    if (!confirmed) fail("FOLLOWER_PARTIAL_CLOSE_NOT_CONFIRMED");
-    const expectedVolume = position.volume - request.volume;
-    if (!volumeMatches(confirmed.volume, expectedVolume)) {
-      fail("FOLLOWER_PARTIAL_CLOSE_VOLUME_MISMATCH");
+    if (!reconciliation.position) {
+      if (reconciliation.seen) {
+        fail("FOLLOWER_PARTIAL_CLOSE_VOLUME_MISMATCH");
+      }
+      fail("FOLLOWER_PARTIAL_CLOSE_NOT_CONFIRMED");
     }
   }
 
@@ -373,6 +384,31 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
       }
     }
     return undefined;
+  }
+
+  private async waitForPositionVolume(
+    ticket: string,
+    symbol: string,
+    expectedVolume: number,
+  ): Promise<{ position: Awaited<ReturnType<CustomerMt5BridgePort["openPositions"]>>[number] | undefined; seen: boolean }> {
+    let seen = false;
+    for (let attempt = 1; attempt <= this.config.reconcileAttempts; attempt += 1) {
+      const positions = await this.bridge.openPositions(symbol);
+      const position = positions.find(
+        (candidate) =>
+          candidate.ticket === ticket && candidate.symbol === symbol,
+      );
+      if (position) {
+        seen = true;
+        if (volumeMatches(position.volume, expectedVolume)) {
+          return { position, seen };
+        }
+      }
+      if (attempt < this.config.reconcileAttempts) {
+        await delay(this.config.reconcileDelayMs);
+      }
+    }
+    return { position: undefined, seen };
   }
 
   private async waitUntilPositionClosed(
