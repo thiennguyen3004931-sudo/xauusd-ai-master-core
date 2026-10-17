@@ -87,8 +87,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_AGENT_BUILD_FAILED" }
           pnpm --filter @xauusd/customer-follower-state build
           if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_FOLLOWER_STATE_BUILD_FAILED" }
-          pnpm --filter @xauusd/mt5-broker build
-          if ($LASTEXITCODE -ne 0) { throw "MT5_BROKER_BUILD_FAILED" }
+          pnpm --filter @xauusd/mt5-broker... build
+          if ($LASTEXITCODE -ne 0) { throw "MT5_BROKER_DEPENDENCY_GRAPH_BUILD_FAILED" }
           pnpm --filter @xauusd/customer-mt5-broker-port-adapter build
           if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_MT5_BROKER_PORT_ADAPTER_BUILD_FAILED" }
 
