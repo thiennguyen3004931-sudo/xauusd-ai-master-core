@@ -319,14 +319,13 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
     if (!finitePositive(request.volume) || request.volume >= position.volume) {
       fail("FOLLOWER_PARTIAL_CLOSE_VOLUME_INVALID");
     }
+    const expectedVolume = position.volume - request.volume;
     const result = await this.bridge.closePosition(
       position.ticket,
       request.volume,
       request.commandId,
     );
     if (!result.success) fail("FOLLOWER_PARTIAL_CLOSE_FAILED", result.message);
-
-    const expectedVolume = position.volume - request.volume;
     const reconciliation = await this.waitForPositionVolume(
       position.ticket,
       request.symbol,
