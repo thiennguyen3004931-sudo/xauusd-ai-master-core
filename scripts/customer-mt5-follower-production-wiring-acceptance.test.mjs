@@ -198,15 +198,14 @@ test("durable follower registry survives executor restart in simulated productio
       restartedRegistry,
     );
 
-    const result = await restartedExecutor.execute({
+    await restartedExecutor.execute({
       commandId: "restart-sl-001",
       symbol: "XAUUSD",
       action: "STOP_LOSS_UPDATE",
       masterPositionRef: "master-restart-001",
-      payload: { stopLoss: 4195 },
+      stopLoss: 4195,
     });
 
-    assert.equal(result.ok, true);
     assert.equal(mutations.length, 1);
     assert.equal(mutations[0].ticket, "F91001");
     assert.equal(mutations[0].stopLoss, 4195);
