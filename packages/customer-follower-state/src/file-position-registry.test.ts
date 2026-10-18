@@ -3,6 +3,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  unlink,
   utimes,
   writeFile,
 } from "node:fs/promises";
@@ -88,6 +89,41 @@ describe("FileCustomerFollowerPositionRegistry", () => {
     await registry.set("master-stale", "ticket-stale");
 
     await expect(registry.get("master-stale")).resolves.toBe("ticket-stale");
+  });
+
+  it("does not let a stale owner's release remove its replacement lock", async () => {
+    const file = await tempFile();
+    const registry = new FileCustomerFollowerPositionRegistry(file);
+    const internal = registry as unknown as {
+      acquireLock: () => Promise<() => Promise<void>>;
+    };
+    let releaseFirst: (() => Promise<void>) | undefined;
+    let releaseSecond: (() => Promise<void>) | undefined;
+
+    try {
+      releaseFirst = await internal.acquireLock();
+      const lockPath = file + ".lock";
+      const stale = new Date(Date.now() - 60_000);
+      await utimes(lockPath, stale, stale);
+
+      releaseSecond = await internal.acquireLock();
+      const replacementToken = await readFile(lockPath, "utf8");
+      expect(replacementToken).not.toBe("");
+
+      await releaseFirst();
+      releaseFirst = undefined;
+
+      await expect(readFile(lockPath, "utf8")).resolves.toBe(replacementToken);
+
+      await releaseSecond();
+      releaseSecond = undefined;
+      await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      if (releaseSecond) await releaseSecond().catch(() => undefined);
+      if (releaseFirst) await releaseFirst().catch(() => undefined);
+    }
   });
 
   it("writes versioned deterministic JSON without leaking unrelated data", async () => {
