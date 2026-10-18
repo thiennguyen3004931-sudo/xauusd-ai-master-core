@@ -84,12 +84,14 @@ export class FileCustomerFollowerPositionRegistry
   implements CustomerFollowerPositionRegistry
 {
   private readonly lockPath: string;
+  private readonly guardPath: string;
 
   constructor(private readonly filePath: string) {
     if (!canonical(filePath)) {
       throw new TypeError("filePath must be a canonical non-blank string");
     }
     this.lockPath = filePath + ".lock";
+    this.guardPath = this.lockPath + ".guard";
   }
 
   async get(masterPositionRef: string): Promise<string | undefined> {
@@ -157,12 +159,120 @@ export class FileCustomerFollowerPositionRegistry
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= 80; attempt += 1) {
+      const ownerToken = randomUUID();
       try {
         const handle = await open(this.lockPath, "wx", 0o600);
+        try {
+          await handle.writeFile(ownerToken, "utf8");
+          await handle.sync();
+        } catch (error) {
+          await handle.close();
+          throw error;
+        }
+
+        return async () => {
+          await handle.close();
+          await this.withLockPathGuard(async () => {
+            let currentToken: string;
+            try {
+              currentToken = await readFile(this.lockPath, "utf8");
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+                return;
+              }
+              throw error;
+            }
+
+            // A stale-lock recovery may have replaced this lock. Only its
+            // owner may remove it; never unlink a replacement owner's lock.
+            if (currentToken !== ownerToken) return;
+            try {
+              await unlink(this.lockPath);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+                throw error;
+              }
+            }
+          });
+        };
+      } catch (error) {
+        lastError = error;
+        if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
+          throw error;
+        }
+
+        const reclaimed = await this.reclaimStaleLock();
+        if (reclaimed) continue;
+        if (attempt < 80) await delay(25);
+      }
+    }
+
+    throw new Error("FOLLOWER_POSITION_REGISTRY_LOCK_TIMEOUT", {
+      cause: lastError,
+    });
+  }
+
+  private async reclaimStaleLock(): Promise<boolean> {
+    let reclaimed = false;
+
+    // Release and stale recovery share this short guard so a stale check
+    // cannot race an owner's release and unlink a newly acquired lock.
+    await this.withLockPathGuard(async () => {
+      let lock;
+      try {
+        lock = await stat(this.lockPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return;
+        throw error;
+      }
+
+      if (Date.now() - lock.mtimeMs <= STALE_LOCK_MS) return;
+
+      try {
+        await unlink(this.lockPath);
+        reclaimed = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+          throw error;
+        }
+      }
+    });
+
+    return reclaimed;
+  }
+
+  private async withLockPathGuard<T>(
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const releaseGuard = await this.acquireGuard();
+    try {
+      return await action();
+    } finally {
+      await releaseGuard();
+    }
+  }
+
+  private async acquireGuard(): Promise<() => Promise<void>> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= 80; attempt += 1) {
+      const guardToken = randomUUID();
+      try {
+        const handle = await open(this.guardPath, "wx", 0o600);
+        try {
+          await handle.writeFile(guardToken, "utf8");
+          await handle.sync();
+        } catch (error) {
+          await handle.close();
+          throw error;
+        }
+
         return async () => {
           await handle.close();
           try {
-            await unlink(this.lockPath);
+            const currentToken = await readFile(this.guardPath, "utf8");
+            if (currentToken !== guardToken) return;
+            await unlink(this.guardPath);
           } catch (error) {
             if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
               throw error;
@@ -176,26 +286,33 @@ export class FileCustomerFollowerPositionRegistry
         }
 
         try {
-          const lock = await stat(this.lockPath);
-          if (Date.now() - lock.mtimeMs > STALE_LOCK_MS) {
-            await unlink(this.lockPath);
+          const guard = await stat(this.guardPath);
+          if (Date.now() - guard.mtimeMs > STALE_LOCK_MS) {
+            const tokenBefore = await readFile(this.guardPath, "utf8");
+            const verifiedStat = await stat(this.guardPath);
+            const tokenAfter = await readFile(this.guardPath, "utf8");
+            if (
+              Date.now() - verifiedStat.mtimeMs > STALE_LOCK_MS &&
+              tokenBefore === tokenAfter
+            ) {
+              await unlink(this.guardPath);
+              continue;
+            }
+          }
+        } catch (guardError) {
+          if ((guardError as NodeJS.ErrnoException)?.code === "ENOENT") {
             continue;
           }
-        } catch (lockError) {
-          if ((lockError as NodeJS.ErrnoException)?.code === "ENOENT") {
-            continue;
-          }
-          throw lockError;
+          throw guardError;
         }
 
         if (attempt < 80) await delay(25);
       }
     }
 
-    throw new Error(
-      "FOLLOWER_POSITION_REGISTRY_LOCK_TIMEOUT",
-      { cause: lastError },
-    );
+    throw new Error("FOLLOWER_POSITION_REGISTRY_GUARD_TIMEOUT", {
+      cause: lastError,
+    });
   }
 
   private async persist(bindings: ReadonlyMap<string, string>): Promise<void> {
