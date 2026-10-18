@@ -18,6 +18,7 @@ Phase7C supports isolated DEMO and LIVE MT5 profiles. Account selection, LIVE AR
 
 - [Web + MT5 synchronized dashboard and DEMO E2E](PHASE7C-WEB-MT5-SYNC-DEMO-E2E.md)
 - [Portable deployment to another Windows PC](docs/PORTABLE-DEPLOYMENT.md)
+- [Customer handoff and operations guide](customer-release/README.md)
 - [Development from a phone with GitHub Codespaces](docs/MOBILE-DEVELOPMENT.md)
 
 ## Portable source package
