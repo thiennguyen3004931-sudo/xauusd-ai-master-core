@@ -3,6 +3,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  unlink,
   utimes,
   writeFile,
 } from "node:fs/promises";
@@ -80,7 +81,11 @@ describe("FileCustomerFollowerPositionRegistry", () => {
     const file = await tempFile();
     await mkdir(path.dirname(file), { recursive: true });
     const lockPath = file + ".lock";
-    await writeFile(lockPath, "stale", "utf8");
+    await writeFile(
+      lockPath,
+      JSON.stringify({ version: 1, pid: 2_147_483_647, token: "stale" }),
+      "utf8",
+    );
     const stale = new Date(Date.now() - 60_000);
     await utimes(lockPath, stale, stale);
 
@@ -88,6 +93,66 @@ describe("FileCustomerFollowerPositionRegistry", () => {
     await registry.set("master-stale", "ticket-stale");
 
     await expect(registry.get("master-stale")).resolves.toBe("ticket-stale");
+  });
+
+  it("does not let a stale owner's release remove its replacement lock", async () => {
+    const file = await tempFile();
+    await mkdir(path.dirname(file), { recursive: true });
+    const registry = new FileCustomerFollowerPositionRegistry(file);
+    const internal = registry as unknown as {
+      acquireLock: () => Promise<() => Promise<void>>;
+    };
+    let release: (() => Promise<void>) | undefined;
+
+    try {
+      release = await internal.acquireLock();
+      const lockPath = file + ".lock";
+      await unlink(lockPath);
+      await writeFile(
+        lockPath,
+        JSON.stringify({
+          version: 1,
+          pid: process.pid,
+          token: "replacement-owner",
+        }),
+        "utf8",
+      );
+
+      await release();
+      release = undefined;
+
+      const replacement = JSON.parse(await readFile(lockPath, "utf8")) as {
+        token: string;
+      };
+      expect(replacement.token).toBe("replacement-owner");
+    } finally {
+      if (release) await release().catch(() => undefined);
+    }
+  });
+
+  it("does not reclaim a stale lock while its owner process is still alive", async () => {
+    const file = await tempFile();
+    await mkdir(path.dirname(file), { recursive: true });
+    const registry = new FileCustomerFollowerPositionRegistry(file);
+    const internal = registry as unknown as {
+      acquireLock: () => Promise<() => Promise<void>>;
+      reclaimStaleLock: () => Promise<boolean>;
+    };
+    let release: (() => Promise<void>) | undefined;
+
+    try {
+      release = await internal.acquireLock();
+      const lockPath = file + ".lock";
+      const stale = new Date(Date.now() - 60_000);
+      await utimes(lockPath, stale, stale);
+
+      await expect(internal.reclaimStaleLock()).resolves.toBe(false);
+      expect(JSON.parse(await readFile(lockPath, "utf8"))).toMatchObject({
+        pid: process.pid,
+      });
+    } finally {
+      if (release) await release().catch(() => undefined);
+    }
   });
 
   it("writes versioned deterministic JSON without leaking unrelated data", async () => {
