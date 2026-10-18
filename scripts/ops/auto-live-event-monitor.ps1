@@ -116,6 +116,60 @@ function Invoke-GitHubJson {
   return Invoke-RestMethod @params
 }
 
+
+function Write-BridgeFailureState {
+  param([string]$FailureCategory)
+
+  $repo = $env:GITHUB_REPOSITORY
+  if ([string]::IsNullOrWhiteSpace($repo)) { throw 'GITHUB_REPOSITORY is missing' }
+  $issueUri = "https://api.github.com/repos/$repo/issues/$IssueNumber"
+  $failureIssue = Invoke-GitHubJson -Method Get -Uri $issueUri
+  $pattern = '(?m)^<!-- XAUUSD_AUTO_LIVE_MONITOR_STATE_JSON:(.*) -->$'
+  $match = [regex]::Match([string]$failureIssue.body, $pattern)
+  if (-not $match.Success) { throw 'AUTO_LIVE_MONITOR_STATE_MARKER_MISSING' }
+  $previous = $match.Groups[1].Value | ConvertFrom-Json
+
+  if ([string](Get-ObjectProperty $previous 'bridgeReadStatus') -eq 'FAILED') {
+    Write-Host 'MONITOR_BRIDGE_INCIDENT=ALREADY_RECORDED'
+    return
+  }
+
+  $failedAt = [DateTime]::UtcNow.ToString('o')
+  $lastObservedAt = [string](Get-ObjectProperty $previous 'observedAt')
+  $comment = @"
+## AUTO LIVE monitor bridge read failure
+
+- **Event:** BRIDGE_READ_FAILED
+- **Observed at (UTC):** $failedAt
+- **Failure category:** $FailureCategory
+- **Last complete observation:** $lastObservedAt
+
+The monitor could not complete a fresh production observation. The issue's existing bot mode, ARM, positions, pending orders, and strategy fields were **not refreshed** and must be treated as historical, not as current live status.
+
+~~~text
+BRIDGE_READ_STATUS=FAILED
+BRIDGE_FAILURE_CATEGORY=$FailureCategory
+PRODUCTION_READ_ONLY=TRUE
+PRODUCTION_HTTP_METHODS=GET_ONLY
+MODE_MUTATION=NONE
+ARM_MUTATION=NONE
+ACCOUNT_SWITCH=NONE
+ORDER_MUTATION=NONE
+POSITION_MUTATION=NONE
+LIVE_TEST_ORDER=NONE
+~~~
+"@
+  Invoke-GitHubJson -Method Post -Uri "$issueUri/comments" -Body @{ body = $comment } | Out-Null
+
+  $previous | Add-Member -NotePropertyName bridgeReadStatus -NotePropertyValue 'FAILED' -Force
+  $previous | Add-Member -NotePropertyName bridgeFailureObservedAt -NotePropertyValue $failedAt -Force
+  $stateJson = $previous | ConvertTo-Json -Depth 12 -Compress
+  $newMarker = "<!-- XAUUSD_AUTO_LIVE_MONITOR_STATE_JSON:$stateJson -->"
+  $newBody = [regex]::Replace([string]$failureIssue.body, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $newMarker })
+  Invoke-GitHubJson -Method Patch -Uri $issueUri -Body @{ body = $newBody } | Out-Null
+  Write-Host 'MONITOR_BRIDGE_INCIDENT=RECORDED'
+}
+
 $accountPath = Join-Path $ProductionRoot '.runtime\phase7c-account-mode.json'
 $lib = Join-Path $ProductionRoot 'scripts\lib\phase7c-account-mode.ps1'
 . $lib
@@ -127,9 +181,34 @@ $envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -Require
 $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
 $bridgeHeaders = @{ 'x-mt5-api-key' = $envInfo.apiKey }
 
-$positions = @(Read-BridgeArray -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $bridgeHeaders)
-$orders = @(Read-BridgeArray -Uri "$bridgeBase/v1/orders?symbol=XAUUSD" -Headers $bridgeHeaders)
-$bridgeHealth = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers $bridgeHeaders -Method Get -TimeoutSec 10
+$bridgeFailureCategory = ''
+$bridgeFailureErrorType = ''
+try {
+  $positions = @(Read-BridgeArray -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $bridgeHeaders)
+  $orders = @(Read-BridgeArray -Uri "$bridgeBase/v1/orders?symbol=XAUUSD" -Headers $bridgeHeaders)
+  $bridgeHealth = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers $bridgeHeaders -Method Get -TimeoutSec 10
+} catch {
+  $bridgeFailureErrorType = $_.Exception.GetType().Name
+  if ([string]$_.Exception.Message -match '(?i)(unable to connect|connection refused|actively refused|timed out|could not establish)') {
+    $bridgeFailureCategory = 'CONNECTIVITY_FAILURE'
+  } else {
+    $bridgeFailureCategory = 'READ_FAILURE'
+  }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($bridgeFailureCategory)) {
+  Write-Host 'MONITOR_BRIDGE_READ_STATUS=FAILED'
+  Write-Host "MONITOR_BRIDGE_FAILURE_CATEGORY=$bridgeFailureCategory"
+  Write-Host "MONITOR_BRIDGE_ERROR_TYPE=$bridgeFailureErrorType"
+  Write-Host 'MONITOR_PRODUCTION_HTTP_METHODS=GET_ONLY'
+  if (-not $Notify) {
+    Write-Host 'MONITOR_NOTIFY=FALSE'
+    Write-Host 'MONITOR_REPOSITORY_MUTATION=NONE'
+    throw "AUTO_LIVE_BRIDGE_READ_FAILED: $bridgeFailureCategory"
+  }
+  Write-BridgeFailureState -FailureCategory $bridgeFailureCategory
+  throw "AUTO_LIVE_BRIDGE_READ_FAILED: $bridgeFailureCategory"
+}
 
 $life = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c/lifecycle' -Method Get -TimeoutSec 10
 $cap = Invoke-RestMethod -Uri 'http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability' -Method Get -TimeoutSec 10
@@ -188,6 +267,8 @@ $recommendedMode = [string](Get-ObjectProperty $regime 'recommendedMode')
 $state = [ordered]@{
   version = 1
   observedAt = [DateTime]::UtcNow.ToString('o')
+  bridgeReadStatus = 'OK'
+  bridgeFailureObservedAt = ''
   expectedSourceCommit = $ExpectedSourceCommit
   sourceCommit = $sourceCommit
   productionHead = $productionHead
@@ -236,6 +317,7 @@ Write-Host "MONITOR_PENDING_ORDER_COUNT=$($orders.Count)"
 Write-Host "MONITOR_MANAGEMENT_EVIDENCE_COUNT=$($managementPairs.Count)"
 Write-Host "MONITOR_OWNERSHIP_EVIDENCE_COUNT=$($ownershipPairs.Count)"
 Write-Host "MONITOR_OWNERSHIP_ALERT_COUNT=$($ownershipAlertLines.Count)"
+Write-Host "MONITOR_BRIDGE_READ_STATUS=OK"
 Write-Host "MONITOR_PRODUCTION_HTTP_METHODS=GET_ONLY"
 
 if (-not $Notify) {
@@ -260,6 +342,10 @@ function Prev {
 }
 
 $events = New-Object 'System.Collections.Generic.List[string]'
+
+if ([string](Prev 'bridgeReadStatus') -eq 'FAILED') {
+  $events.Add("BRIDGE_READ_RECOVERED: previous failure observed at $([string](Prev 'bridgeFailureObservedAt'))")
+}
 
 if ([string](Prev 'regime') -ne $currentRegime -or
     [string](Prev 'recommendedMode') -ne $recommendedMode -or
@@ -343,7 +429,7 @@ $stateJson = $state | ConvertTo-Json -Depth 12 -Compress
 $newMarker = "<!-- XAUUSD_AUTO_LIVE_MONITOR_STATE_JSON:$stateJson -->"
 
 $comparisonNames = @(
-  'expectedSourceCommit','sourceCommit','productionHead','botMode','accountMode','lifecycleRunning','lifecycleReady',
+  'bridgeReadStatus','bridgeFailureObservedAt','expectedSourceCommit','sourceCommit','productionHead','botMode','accountMode','lifecycleRunning','lifecycleReady',
   'telegramReady','telegramStatus','mt5Status','armStatus','liveExecutionArmed',
   'runtimeSourceOverall','sourceComponentMismatches','regime','recommendedMode','effectiveStrategy',
   'positionCount','pendingOrderCount','positionSignature','pendingOrderSignature',
