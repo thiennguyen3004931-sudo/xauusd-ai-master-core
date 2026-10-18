@@ -14,7 +14,12 @@ export interface CustomerFollowerRuntimeOptions {
   readonly executor?: Partial<
     Pick<
       CustomerMt5FollowerExecutorConfig,
-      "deviationPoints" | "magicNumber" | "comment" | "requireTradingEnabled"
+      | "deviationPoints"
+      | "magicNumber"
+      | "comment"
+      | "requireTradingEnabled"
+      | "reconcileAttempts"
+      | "reconcileDelayMs"
     >
   >;
 }
