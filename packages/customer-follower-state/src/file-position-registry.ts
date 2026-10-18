@@ -227,13 +227,13 @@ export class FileCustomerFollowerPositionRegistry
       // no-overwrite operation on the same filesystem.
       await link(claimPath, filePath);
     } catch (error) {
-      await unlinkIfExists(claimPath);
+      await unlinkIfExists(claimPath).catch(() => undefined);
       if ((error as NodeJS.ErrnoException)?.code === "EEXIST") return false;
       throw error;
     }
 
     // The published lock has its own hard link, so the private claim can go.
-    await unlinkIfExists(claimPath);
+    await unlinkIfExists(claimPath).catch(() => undefined);
     return true;
   }
 
@@ -272,7 +272,7 @@ export class FileCustomerFollowerPositionRegistry
                 return;
               }
               await unlinkIfExists(this.lockPath);
-              await unlinkIfExists(this.claimPath(this.lockPath, current));
+              await unlinkIfExists(this.claimPath(this.lockPath, current)).catch(() => undefined);
             });
           };
         }
@@ -321,7 +321,7 @@ export class FileCustomerFollowerPositionRegistry
       if (Date.now() - verifiedStat.mtimeMs <= STALE_LOCK_MS) return;
 
       await unlinkIfExists(this.lockPath);
-      await unlinkIfExists(this.claimPath(this.lockPath, record));
+      await unlinkIfExists(this.claimPath(this.lockPath, record)).catch(() => undefined);
       reclaimed = true;
     });
 
@@ -356,7 +356,7 @@ export class FileCustomerFollowerPositionRegistry
               return;
             }
             await unlinkIfExists(this.guardPath);
-            await unlinkIfExists(this.claimPath(this.guardPath, current));
+            await unlinkIfExists(this.claimPath(this.guardPath, current)).catch(() => undefined);
           };
         }
       } catch (error) {
@@ -417,7 +417,7 @@ export class FileCustomerFollowerPositionRegistry
       if (Date.now() - verifiedStat.mtimeMs <= STALE_LOCK_MS) return false;
 
       await unlinkIfExists(this.guardPath);
-      await unlinkIfExists(this.claimPath(this.guardPath, record));
+      await unlinkIfExists(this.claimPath(this.guardPath, record)).catch(() => undefined);
       return true;
     } finally {
       const reaperRecord = await this.readLockRecord(this.guardReaperPath);
@@ -426,7 +426,7 @@ export class FileCustomerFollowerPositionRegistry
         reaperRecord.pid === process.pid
       ) {
         await unlinkIfExists(this.guardReaperPath);
-        await unlinkIfExists(this.claimPath(this.guardReaperPath, reaperRecord));
+        await unlinkIfExists(this.claimPath(this.guardReaperPath, reaperRecord)).catch(() => undefined);
       }
     }
   }
