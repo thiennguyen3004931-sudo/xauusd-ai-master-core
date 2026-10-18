@@ -74,7 +74,11 @@ Assert-Literal $Monitor 'MONITOR_PRODUCTION_MUTATION=NONE' 'runtime production s
 $NotifyGuardIndex = $Monitor.IndexOf('if (-not $Notify)', [System.StringComparison]::Ordinal)
 $IssueReadIndex = $Monitor.IndexOf('$issue = Invoke-GitHubJson -Method Get', [System.StringComparison]::Ordinal)
 if ($NotifyGuardIndex -lt 0 -or $IssueReadIndex -lt 0 -or $NotifyGuardIndex -ge $IssueReadIndex) {
-  throw 'Notify=false guard must exit before any GitHub issue persistence path.'
+  throw 'Notify=false guard must exit before normal state persistence.'
+}
+$BridgeFailureCallIndex = $Monitor.IndexOf('Write-BridgeFailureState -FailureCategory $bridgeFailureCategory', [System.StringComparison]::Ordinal)
+if ($NotifyGuardIndex -lt 0 -or $BridgeFailureCallIndex -lt 0 -or $NotifyGuardIndex -ge $BridgeFailureCallIndex) {
+  throw 'Bridge failure persistence must be guarded by Notify=true.'
 }
 
 Assert-Literal $Monitor 'Read-BridgeArray -Uri "$bridgeBase/v1/positions?symbol=XAUUSD"' 'position read endpoint'
@@ -104,12 +108,16 @@ foreach ($EventMarker in @(
   'LIFECYCLE_NOT_READY',
   'MT5_NOT_HEALTHY',
   'RUNTIME_SOURCE_DRIFT',
-  'AUTO_LIVE_STATE_CHANGED'
+  'AUTO_LIVE_STATE_CHANGED',
+  'BRIDGE_READ_FAILED',
+  'BRIDGE_READ_RECOVERED'
 )) {
   Assert-Literal $Monitor $EventMarker "event marker $EventMarker"
 }
 
 foreach ($StateField in @(
+  'bridgeReadStatus',
+  'bridgeFailureObservedAt',
   'expectedSourceCommit',
   'sourceCommit',
   'productionHead',
@@ -141,18 +149,32 @@ $GitHubCalls = [regex]::Matches(
   $Monitor,
   '(?m)^\s*(?:\$[A-Za-z_][A-Za-z0-9_]*\s*=\s*)?Invoke-GitHubJson\s+-Method\s+(Get|Post|Patch|Put|Delete)\s+-Uri\s+([^\r\n]+)'
 )
-if ($GitHubCalls.Count -ne 3) {
-  throw "Expected exactly 3 GitHub issue persistence calls, found $($GitHubCalls.Count)."
+if ($GitHubCalls.Count -ne 6) {
+  throw "Expected 6 GitHub issue persistence calls across normal and bridge-failure paths, found $($GitHubCalls.Count)."
 }
 
 $Methods = @($GitHubCalls | ForEach-Object { $_.Groups[1].Value })
-if (($Methods -join ',') -ne 'Get,Post,Patch') {
+if (($Methods -join ',') -ne 'Get,Post,Patch,Get,Post,Patch') {
   throw "Unexpected GitHub persistence methods: $($Methods -join ',')"
 }
 
 Assert-Literal $Monitor 'Invoke-GitHubJson -Method Get -Uri $issueUri' 'issue state read'
 Assert-Literal $Monitor 'Invoke-GitHubJson -Method Post -Uri "$issueUri/comments"' 'event comment append'
 Assert-Literal $Monitor 'Invoke-GitHubJson -Method Patch -Uri $issueUri' 'state marker update'
+Assert-Literal $Monitor 'function Write-BridgeFailureState' 'bridge failure persistence handler'
+Assert-Literal $Monitor 'MONITOR_BRIDGE_READ_STATUS=FAILED' 'bridge read failure status'
+Assert-Literal $Monitor 'MONITOR_BRIDGE_INCIDENT=ALREADY_RECORDED' 'bridge failure deduplication'
+Assert-Literal $Monitor "bridgeReadStatus = 'OK'" 'successful bridge observation state'
+Assert-Literal $Monitor "BRIDGE_READ_RECOVERED: previous failure observed at" 'bridge recovery event'
+$FailureHandlerStart = $Monitor.IndexOf('function Write-BridgeFailureState', [System.StringComparison]::Ordinal)
+$FailureHandlerEnd = $Monitor.IndexOf('$accountPath =', $FailureHandlerStart, [System.StringComparison]::Ordinal)
+if ($FailureHandlerStart -lt 0 -or $FailureHandlerEnd -le $FailureHandlerStart) {
+  throw 'Bridge failure handler boundaries could not be located.'
+}
+$FailureHandler = $Monitor.Substring($FailureHandlerStart, $FailureHandlerEnd - $FailureHandlerStart)
+Assert-NotMatch $FailureHandler '(?m)^\s*(?:observedAt|botMode|armStatus|positionCount|pendingOrderCount)\s*=' 'bridge failure must not overwrite last full bot snapshot'
+Assert-Literal $FailureHandler "Add-Member -NotePropertyName bridgeReadStatus -NotePropertyValue 'FAILED'" 'bridge failure state persistence'
+Assert-Literal $FailureHandler 'The issue''s existing bot mode, ARM, positions, pending orders, and strategy fields were **not refreshed**' 'historical snapshot warning'
 Assert-NotMatch $Monitor 'Invoke-GitHubJson\s+-Method\s+(?:Put|Delete)' 'unexpected GitHub mutation method'
 
 Write-Host 'AUTO_LIVE_MONITOR_SOURCE_CONTRACT=PASS'
