@@ -51,6 +51,7 @@ jobs:
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-auto-live-event-monitor-source.ps1
 
       - name: Run read-only production monitor
+        if: github.event_name != 'pull_request'
         shell: powershell
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
