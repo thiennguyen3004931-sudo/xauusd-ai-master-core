@@ -6,22 +6,22 @@ Status values: `PASS`, `FAIL`, `BLOCKED`, or `N/A`. Explain every `FAIL`, `BLOCK
 
 ## 1. Verified package evidence
 
-The following values identify the customer package built and verified by CI on 2026-10-18. Re-check and replace this section when using a different package.
+The following values identify the customer package built and verified by CI on 2026-10-19. Re-check and replace this section when using a different package.
 
 | Field | Verified value |
 |---|---|
 | Package version | `1.0.0` |
-| Source commit | `fff59552a3a77424a1a05f1b93b72a78231d88bc` |
-| Workflow run | [39102617736](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39102617736) |
-| GitHub artifact ID | `12127436985` |
+| Source commit | `23bbf69556861593ec55b044778ed274635e3cfb` |
+| Workflow run | [39280213885](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39280213885) |
+| GitHub artifact ID | `12202345738` |
 | GitHub artifact name | `xauusd-customer-agent-v1` |
-| GitHub artifact archive SHA-256 | `0b10a15fbea8af92180e0c0de2d21d2073ceb8afaceaefc92ae3dc6136d1eff1` |
-| Downloaded customer ZIP SHA-256 | `68fefca59de9f7373c063d1afaf95fb17bce593b81b7a6cd79aace144625cef5` |
+| GitHub artifact archive SHA-256 | `307b24daf198c9a57b9a5992e705e63cf878130e5208e1174cca36f7d04ba2be` |
+| Downloaded customer ZIP SHA-256 | `a893f5296db9932bc729fa84b5f1e8ab0c70e0cc50258dd501a084a8e1ef6945` |
 | Customer ZIP internal manifest | 20 entries verified; all hashes matched |
-| Artifact expiry | 2026-11-17 06:08:53 UTC |
+| Artifact expiry | 2026-11-18 16:03:18 UTC |
 | Official GitHub Release | Not created; this is a CI artifact, not a tagged release |
 
-The two SHA-256 values refer to different files: the GitHub Actions artifact archive and the downloaded customer package ZIP. Do not interchange them. Verify the checksum of the exact file received before extraction.
+The two SHA-256 values refer to different files: the GitHub Actions artifact archive and the downloaded customer package ZIP. Do not interchange them. Verify the checksum of the exact file received before extraction. The inner ZIP hash identifies the package contained inside the downloaded outer artifact archive.
 
 ## 2. Customer and installation scope
 
