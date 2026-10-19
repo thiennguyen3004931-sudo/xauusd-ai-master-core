@@ -89,6 +89,8 @@ This means the Customer API Gateway accepted the activation request. It does **n
 
 Record the result for each customer without recording tokens, passwords, private keys, or other secrets.
 
+Use [`acceptance-record.template.md`](./acceptance-record.template.md) to record package evidence, installation/binding checks, the execution safety boundary, blockers, and separate operator/customer sign-off. Keep completed customer-specific records in the approved access-controlled record system; do not commit completed records or secrets to this repository.
+
 - [ ] Package version, source commit and artifact/run ID recorded.
 - [ ] Customer identity and product mode confirmed.
 - [ ] Installation ID/public key registered; private key remains local.
