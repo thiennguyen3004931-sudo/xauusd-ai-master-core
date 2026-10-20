@@ -6,19 +6,19 @@ Status values: `PASS`, `FAIL`, `BLOCKED`, or `N/A`. Explain every `FAIL`, `BLOCK
 
 ## 1. Verified package evidence
 
-The following values identify the customer package built and verified by CI on 2026-10-20. Re-check and replace this section when using a different package.
+The following values identify the customer package built and verified by post-merge CI on 2026-10-20. Re-check and replace this section when using a different package.
 
 | Field | Verified value |
 |---|---|
 | Package version | `1.0.0` |
-| Source commit | `660d36824b56cb8bd4d6d40d30f622f2027ef3ed` |
-| Workflow run | [39372963702](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39372963702) |
-| GitHub artifact ID | `12242630188` |
+| Source commit | `4f782bad506f1bac94b8b3f3c6bcf273630da3aa` |
+| Workflow run | [39382168563](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39372963702) |
+| GitHub artifact ID | `12246257825` |
 | GitHub artifact name | `xauusd-customer-agent-v1` |
-| GitHub artifact archive SHA-256 | `553f5b6284f29a21ce0ea9d6e48621880323aeec5076ddb89356c50172c69fa3` |
-| Downloaded customer ZIP SHA-256 | `1a03911b925b5b55af782b43c213908bdb1627ae30226b0e9b21b7fe67c7afa1` |
+| GitHub artifact archive SHA-256 | `60d46e962db98bd1b992ed7711b07275f1a63a4a652f628d1d806644fc8db0bf` |
+| Downloaded customer ZIP SHA-256 | `909cadca1c3c630698d8a5b54b6f32a4318beee862fcf8c0bdb0ed2b7dcbc50f` |
 | Customer ZIP internal manifest | 20 entries verified; all hashes matched (rechecked from artifact 12242630188) |
-| Artifact expiry | 2026-11-19 05:09:53 UTC |
+| Artifact expiry | 2026-11-19 06:57:07 UTC |
 | Official GitHub Release | Not created; this is a CI artifact, not a tagged release |
 
 The two SHA-256 values refer to different files: the GitHub Actions artifact archive and the downloaded customer package ZIP. Do not interchange them. Verify the checksum of the exact file received before extraction. The inner ZIP hash identifies the package contained inside the downloaded outer artifact archive.
