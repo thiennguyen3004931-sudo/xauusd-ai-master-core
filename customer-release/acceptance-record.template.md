@@ -12,7 +12,7 @@ The following values identify the customer package built and verified by CI on 2
 |---|---|
 | Package version | `1.0.0` |
 | Source commit | `956236364a1da5c48a16cea63fc325a9af06199c` |
-| Workflow run | [39352527997](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39347115030) |
+| Workflow run | [39352527997](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39352527997) |
 | GitHub artifact ID | `12233868784` |
 | GitHub artifact name | `xauusd-customer-agent-v1` |
 | GitHub artifact archive SHA-256 | `31796bd1efa8e5f0e4b90e4aa0d2eea0e8a2ee25a2edd05f2cf45d661a122276` |
