@@ -12,12 +12,12 @@ The following values identify the customer package built and verified by post-me
 |---|---|
 | Package version | `1.0.0` |
 | Source commit | `4f782bad506f1bac94b8b3f3c6bcf273630da3aa` |
-| Workflow run | [39382168563](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39372963702) |
+| Workflow run | [39382168563](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39382168563) |
 | GitHub artifact ID | `12246257825` |
 | GitHub artifact name | `xauusd-customer-agent-v1` |
 | GitHub artifact archive SHA-256 | `60d46e962db98bd1b992ed7711b07275f1a63a4a652f628d1d806644fc8db0bf` |
 | Downloaded customer ZIP SHA-256 | `909cadca1c3c630698d8a5b54b6f32a4318beee862fcf8c0bdb0ed2b7dcbc50f` |
-| Customer ZIP internal manifest | 20 entries verified; all hashes matched (rechecked from artifact 12242630188) |
+| Customer ZIP internal manifest | 20 entries verified; all hashes matched (rechecked from artifact 12246257825) |
 | Artifact expiry | 2026-11-19 06:57:07 UTC |
 | Official GitHub Release | Not created; this is a CI artifact, not a tagged release |
 
