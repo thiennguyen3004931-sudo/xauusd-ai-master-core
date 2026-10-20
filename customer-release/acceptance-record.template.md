@@ -11,14 +11,14 @@ The following values identify the customer package built and verified by CI on 2
 | Field | Verified value |
 |---|---|
 | Package version | `1.0.0` |
-| Source commit | `957d0020e1f1279b7ef7e4b443c65c57c84bbf7a` |
-| Workflow run | [39347115030](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39347115030) |
-| GitHub artifact ID | `12232406615` |
+| Source commit | `956236364a1da5c48a16cea63fc325a9af06199c` |
+| Workflow run | [39352527997](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39347115030) |
+| GitHub artifact ID | `12233868784` |
 | GitHub artifact name | `xauusd-customer-agent-v1` |
-| GitHub artifact archive SHA-256 | `03530cac73053e68e1e413b64bc2acae83dcb20828c4b57dd124b01467d507ab` |
-| Downloaded customer ZIP SHA-256 | `91dbfaee5cb0dcee7122c18704047b1a8326c0a22e36a25de5be737ba7cea03c` |
-| Customer ZIP internal manifest | 20 entries verified; all hashes matched |
-| Artifact expiry | 2026-11-19 00:37:32 UTC |
+| GitHub artifact archive SHA-256 | `31796bd1efa8e5f0e4b90e4aa0d2eea0e8a2ee25a2edd05f2cf45d661a122276` |
+| Downloaded customer ZIP SHA-256 | `dd3b7b6461016109c22e3d70d6b37180dcd783a2ecdf5437daf89ea5f711d82c` |
+| Customer ZIP internal manifest | 20 entries verified; all hashes matched (rechecked from artifact 12233868784) |
+| Artifact expiry | 2026-11-19 01:35:06 UTC |
 | Official GitHub Release | Not created; this is a CI artifact, not a tagged release |
 
 The two SHA-256 values refer to different files: the GitHub Actions artifact archive and the downloaded customer package ZIP. Do not interchange them. Verify the checksum of the exact file received before extraction. The inner ZIP hash identifies the package contained inside the downloaded outer artifact archive.
