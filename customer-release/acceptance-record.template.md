@@ -6,19 +6,19 @@ Status values: `PASS`, `FAIL`, `BLOCKED`, or `N/A`. Explain every `FAIL`, `BLOCK
 
 ## 1. Verified package evidence
 
-The following values identify the customer package built and verified by post-merge CI on 2026-10-20 from main commit `abf129cc3fa09a89824e02c788e5b960ae70455a`. Re-check and replace this section when using a different package.
+The following values identify the customer package built and verified by post-merge CI on 2026-10-20 from main commit `1e573609ce2bfd6aed0718c245e2fbf5eb6a7f0b`. Re-check and replace this section when using a different package.
 
 | Field | Verified value |
 |---|---|
 | Package version | `1.0.0` |
-| Source commit | `abf129cc3fa09a89824e02c788e5b960ae70455a` |
-| Workflow run | [39390607881](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39390607881) |
-| GitHub artifact ID | `12249791620` |
+| Source commit | `1e573609ce2bfd6aed0718c245e2fbf5eb6a7f0b` |
+| Workflow run | [39400921687](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39400921687) |
+| GitHub artifact ID | `12255526118` |
 | GitHub artifact name | `xauusd-customer-agent-v1` |
-| GitHub artifact archive SHA-256 | `502a6f6505e8764f2ef89937251aef16310b70cdc67dce85bd240b7bba17c7d9` |
-| Downloaded customer ZIP SHA-256 | `4444fa8d6302b663c294b8944aa6fda3287433f041489b0c74d4737984288297` |
-| Customer ZIP internal manifest | 20 entries verified; all hashes matched (rechecked from artifact 12249791620) |
-| Artifact expiry | 2026-11-19 08:09:34 UTC |
+| GitHub artifact archive SHA-256 | `5ecffe2a4ca9b7ba7d059aa263ebb17376c0480ede2f6b9dcc68a1b37496151a` |
+| Downloaded customer ZIP SHA-256 | `3e717d8bfbfe7147fa81586eb8ec990e07774091c3149573dc15568038cb8658` |
+| Customer ZIP internal manifest | 20 entries verified; all hashes matched (rechecked from artifact 12255526118) |
+| Artifact expiry | 2026-11-19 09:42:34 UTC |
 | Official GitHub Release | Not created; this is a CI artifact, not a tagged release |
 
 The two SHA-256 values refer to different files: the GitHub Actions artifact archive and the downloaded customer package ZIP. Do not interchange them. Verify the checksum of the exact file received before extraction. The inner ZIP hash identifies the package contained inside the downloaded outer artifact archive.
