@@ -6,19 +6,19 @@ Status values: `PASS`, `FAIL`, `BLOCKED`, or `N/A`. Explain every `FAIL`, `BLOCK
 
 ## 1. Verified package evidence
 
-The following values identify the customer package built and verified by CI on 2026-10-19. Re-check and replace this section when using a different package.
+The following values identify the customer package built and verified by CI on 2026-10-20. Re-check and replace this section when using a different package.
 
 | Field | Verified value |
 |---|---|
 | Package version | `1.0.0` |
-| Source commit | `23bbf69556861593ec55b044778ed274635e3cfb` |
-| Workflow run | [39280213885](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39280213885) |
-| GitHub artifact ID | `12202345738` |
+| Source commit | `993c185532fd6f139d1a19adc296992ff4d0721d` |
+| Workflow run | [39315092321](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39315092321) |
+| GitHub artifact ID | `12217761924` |
 | GitHub artifact name | `xauusd-customer-agent-v1` |
-| GitHub artifact archive SHA-256 | `307b24daf198c9a57b9a5992e705e63cf878130e5208e1174cca36f7d04ba2be` |
-| Downloaded customer ZIP SHA-256 | `a893f5296db9932bc729fa84b5f1e8ab0c70e0cc50258dd501a084a8e1ef6945` |
+| GitHub artifact archive SHA-256 | `45efe330674911fe2f8b86a512c8015325f52df2b6c4929fd512ad2e8e71280e` |
+| Downloaded customer ZIP SHA-256 | `12119de212639ebace79a93e5787a018d1d0b5825eddfb96a7e9c1b0a9033c12` |
 | Customer ZIP internal manifest | 20 entries verified; all hashes matched |
-| Artifact expiry | 2026-11-18 16:03:18 UTC |
+| Artifact expiry | 2026-11-18 20:01:33 UTC |
 | Official GitHub Release | Not created; this is a CI artifact, not a tagged release |
 
 The two SHA-256 values refer to different files: the GitHub Actions artifact archive and the downloaded customer package ZIP. Do not interchange them. Verify the checksum of the exact file received before extraction. The inner ZIP hash identifies the package contained inside the downloaded outer artifact archive.
