@@ -1,7 +1,7 @@
 {
   "version": 1,
   "publicRepository": "thiennguyen3004931-sudo/xauusd-ai-master",
-  "publicCommit": "1a54fe559ed06f04fe7f80bc276aee6f13a5c054",
+  "publicCommit": "06dc6901874839bbaba58fc37e51790c3d366c59",
   "packages": {
     "packages/copy-protocol": "6ff9d270b79eaf4016b2b52ef22140ed9654814a",
     "packages/license-service": "aa2a6b58b152b1554790dabe277f822aba10298d",
