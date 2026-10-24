@@ -20,4 +20,3 @@ export const PerformancePage = lazy(() =>
 export function DeferredPage({ children }: { children: ReactNode }) {
   return <Suspense fallback={<LoadingState />}>{children}</Suspense>;
 }
-
