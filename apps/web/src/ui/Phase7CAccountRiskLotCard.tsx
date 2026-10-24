@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Alert,
   Box,
@@ -39,8 +39,8 @@ const LOT_SETTINGS_URL = "/api/v1/phase7c/lot-settings";
 const CONTROL_BASE = "http://127.0.0.1:3711";
 const MANAGED_LOT_STEP = 0.03;
 
-function asRecord(input: unknown): Record<string, any> {
-  return input && typeof input === "object" ? (input as Record<string, any>) : {};
+function asRecord(input: unknown): Record<string, unknown> {
+  return input && typeof input === "object" ? (input as Record<string, unknown>) : {};
 }
 
 function clampLotInputs(input: LotInput): LotInput {
@@ -182,17 +182,20 @@ export function Phase7CAccountRiskLotCard({
   const validationErrors = validateLotInput(draftLot);
   const hasChanges = savedLot !== null && validationErrors.length === 0 && !lotEquals(savedLot, draftLot);
 
-  useEffect(() => {
+  const lotSyncKey = JSON.stringify([savedLot?.trendFixedLot, savedLot?.sidewayRiskPercent, savedLot?.sidewayMaxLot]);
+  const [syncedLotKey, setSyncedLotKey] = useState<string | null>(null);
+  if (syncedLotKey !== lotSyncKey) {
+    setSyncedLotKey(lotSyncKey);
     if (!savedLot) {
       setTrendFixedLot("");
       setSidewayRiskPercent("");
       setSidewayMaxLot("");
-      return;
+    } else {
+      setTrendFixedLot(savedLot.trendFixedLot.toFixed(2));
+      setSidewayRiskPercent(savedLot.sidewayRiskPercent.toFixed(2));
+      setSidewayMaxLot(savedLot.sidewayMaxLot.toFixed(2));
     }
-    setTrendFixedLot(savedLot.trendFixedLot.toFixed(2));
-    setSidewayRiskPercent(savedLot.sidewayRiskPercent.toFixed(2));
-    setSidewayMaxLot(savedLot.sidewayMaxLot.toFixed(2));
-  }, [savedLot?.trendFixedLot, savedLot?.sidewayRiskPercent, savedLot?.sidewayMaxLot]);
+  }
 
   const onSubmit = () => {
     if (!savedLot || !canonicalFixedTp || !canSafelyApply || validationErrors.length > 0 || !hasChanges) return;
