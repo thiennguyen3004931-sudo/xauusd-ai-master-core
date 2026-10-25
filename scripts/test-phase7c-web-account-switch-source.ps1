@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+$PSDefaultParameterValues['Get-Content:Encoding'] = 'UTF8'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
 $files = @{
@@ -81,11 +82,14 @@ Assert-Literal $route '/execute' 'execute endpoint'
 Assert-Literal $route '/status' 'status endpoint'
 Assert-Literal $app '/api/v1/phase7c-account-switch' 'route mounted'
 
-Assert-Literal $web 'Guarded account switch · 2 bước xác nhận' 'two-step UI'
-Assert-Literal $web 'Đưa Bot về PAUSE' 'explicit separate PAUSE action'
+Assert-Contains $web 'preflight\?\.approved[\s\S]*?preflight\.preflightToken[\s\S]*?confirmation\s*===\s*requiredConfirmation' 'approved preflight, token and typed confirmation guard'
+Assert-Literal $web 'disabled={!canExecute || executeMutation.isPending}' 'execute disabled until confirmation guard passes'
+Assert-Literal $web 'if (window.confirm(message)) executeMutation.mutate();' 'separate final confirmation before execute'
+Assert-Literal $web 'pauseMutation.mutate()' 'explicit separate PAUSE action'
+Assert-Literal $web 'mode: "PAUSE"' 'pause action uses canonical PAUSE mode'
 Assert-Literal $web 'SWITCH_TO_LIVE' 'typed LIVE confirmation UI'
 Assert-Literal $web 'SWITCH_TO_DEMO' 'typed DEMO confirmation UI'
-Assert-Literal $web 'Web account-switch không có route ARM' 'no-ARM UI explanation'
+Assert-NotContains $web 'executePhase7CLiveArm|enablePhase7CAuto|/api/v1/phase7c/live-arm' 'switch UI must not arm LIVE or enable AUTO'
 Assert-NotContains $web 'arm-phase7c-live|/arm' 'Web switch card must not expose ARM action'
 Assert-Literal $page 'Phase7CAccountSwitchCard' 'account switch integrated into account/risk page'
 Assert-Literal $router 'Phase7CAccountRiskPage' 'account/risk route uses guarded switch page'

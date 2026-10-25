@@ -13,6 +13,12 @@ concurrency:
 permissions:
   contents: read
 
+# Scope long-path support to CI git processes, including checkout cleanup.
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: core.longpaths
+  GIT_CONFIG_VALUE_0: "true"
+
 jobs:
   private-master-core:
     name: private-master-core-self-hosted
@@ -69,7 +75,7 @@ jobs:
           cache: pnpm
 
       - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline --network-concurrency=4 --fetch-retries=4 --fetch-retry-maxtimeout=30000
 
       - name: M6 fetch pinned public contract
         run: |
@@ -164,7 +170,7 @@ jobs:
       - name: Broader private regression evidence
         id: broader_regression
         continue-on-error: true
-        run: pnpm test
+        run: pnpm test --concurrency=2
 
       - name: M7 source-complete acceptance
         env:
