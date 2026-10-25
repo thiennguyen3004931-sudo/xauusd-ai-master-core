@@ -16,8 +16,8 @@ function Save-Lease {
     version = 1
     status = 'OFFLINE_EXPECTED'
     reason = $Reason
-    issuedAt = $Start.ToString('o')
-    expiresAt = $End.ToString('o')
+    issuedAtEpochMs = $Start.ToUnixTimeMilliseconds()
+    expiresAtEpochMs = $End.ToUnixTimeMilliseconds()
   }
   [System.IO.File]::WriteAllText($path, ($record | ConvertTo-Json -Depth 4))
 }
@@ -36,7 +36,7 @@ try {
   Assert-LeaseState 'INVALID'
   [System.IO.File]::WriteAllText($path, '{broken json')
   Assert-LeaseState 'INVALID'
-  [System.IO.File]::WriteAllText($path, '{"version":1,"status":"OFFLINE_EXPECTED","reason":"MAINTENANCE","issuedAt":"2026-10-25T00:00:00Z","expiresAt":"2026-10-25T01:00:00Z","unexpected":true}')
+  [System.IO.File]::WriteAllText($path, '{"version":1,"status":"OFFLINE_EXPECTED","reason":"MAINTENANCE","issuedAtEpochMs":1792886400000,"expiresAtEpochMs":1792890000000,"unexpected":true}')
   Assert-LeaseState 'INVALID'
   Write-Host 'AUTO_LIVE_OFFLINE_LEASE_TEST=PASS'
   Write-Host 'PRODUCTION_MUTATION=NONE'
