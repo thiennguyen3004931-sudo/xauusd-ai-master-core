@@ -12,10 +12,10 @@ function isReadOnlyMethod(method: string): boolean {
 
 async function readJson<T>(response: Response): Promise<T> {
   const text = await response.text();
-  let payload: any = {};
+  let payload: unknown;
   try { payload = text ? JSON.parse(text) : {}; } catch { payload = {}; }
   if (!response.ok) {
-    throw new Error(typeof payload.error === "string" ? payload.error : `HTTP ${response.status}`);
+    throw new Error(payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string" ? payload.error : `HTTP ${response.status}`);
   }
   return payload as T;
 }

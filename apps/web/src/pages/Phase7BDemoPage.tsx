@@ -26,8 +26,8 @@ import {
   type Phase7CUiGate,
 } from "../phase7c-panel-status";
 
-function asRecord(input: unknown): Record<string, any> {
-  return input && typeof input === "object" ? (input as Record<string, any>) : {};
+function asRecord(input: unknown): Record<string, unknown> {
+  return input && typeof input === "object" ? (input as Record<string, unknown>) : {};
 }
 
 function PanelCard({ title, children, accent = "cyan" }: { title: string; children: ReactNode; accent?: "cyan" | "green" | "red" | "orange" | "purple" }) {

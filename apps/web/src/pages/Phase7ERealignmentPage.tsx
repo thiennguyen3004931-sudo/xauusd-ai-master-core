@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   Alert,
   Box,
@@ -55,7 +55,7 @@ function VariantBreakdown({ variant }: { variant: Phase7ERealignmentVariant }) {
 }
 
 export function Phase7ERealignmentPage() {
-  const yesterday = useMemo(() => new Date(Date.now() - DAY), []);
+  const [yesterday] = useState(() => new Date(Date.now() - DAY));
   const [to, setTo] = useState(ymd(yesterday));
   const [from, setFrom] = useState(ymd(new Date(yesterday.getTime() - 89 * DAY)));
   const [fixedVolume, setFixedVolume] = useState(0.03);
@@ -65,7 +65,7 @@ export function Phase7ERealignmentPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const quickRange = (days: number) => { const end = new Date(Date.now() - DAY); setTo(ymd(end)); setFrom(ymd(new Date(end.getTime() - (days - 1) * DAY))); };
+  const handleQuickRange = (days: number, now: number) => { const end = new Date(now - DAY); setTo(ymd(end)); setFrom(ymd(new Date(end.getTime() - (days - 1) * DAY))); };
   const run = async () => {
     setLoading(true); setError(null);
     try { setResult(await runPhase7ERealignmentBacktest({ from, to, fixedVolume, atrPeriod, multiplier })); }
@@ -88,7 +88,7 @@ export function Phase7ERealignmentPage() {
 
       <Card variant="outlined"><CardContent>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          {[30, 90, 180, 365].map((days) => <Button key={days} variant="outlined" size="small" onClick={() => quickRange(days)}>{days} ngày</Button>)}
+          {[30, 90, 180, 365].map((days) => <Button key={days} variant="outlined" size="small" onClick={() => handleQuickRange(days, Date.now())}>{days} ngày</Button>)}
         </Stack>
         <Grid container spacing={1.5} sx={{ mt: .5 }} alignItems="center">
           <Grid size={{ xs: 12, md: 2.2 }}><TextField fullWidth type="date" label="Từ ngày" value={from} onChange={(e) => setFrom(e.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Grid>

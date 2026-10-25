@@ -1,28 +1,7 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { Phase7BPatternCheckPage, Phase7CAccountRiskPage, Phase7CControlCenterShellPage, Phase7CMobileReadOnlyPage, PerformancePage, DeferredPage } from "./routing-pages";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { DashboardLayout } from "./ui/DashboardLayout";
-import { LoadingState } from "./ui/PageState";
 import { Phase7BDemoPage } from "./pages/Phase7BDemoPage";
-
-const Phase7BPatternCheckPage = lazy(() =>
-  import("./pages/Phase7BPatternCheckPage").then((module) => ({ default: module.Phase7BPatternCheckPage })),
-);
-const Phase7CAccountRiskPage = lazy(() =>
-  import("./pages/Phase7CAccountRiskPage").then((module) => ({ default: module.Phase7CAccountRiskPage })),
-);
-const Phase7CControlCenterShellPage = lazy(() =>
-  import("./pages/Phase7CControlCenterShellPage").then((module) => ({ default: module.Phase7CControlCenterShellPage })),
-);
-const Phase7CMobileReadOnlyPage = lazy(() =>
-  import("./pages/Phase7CMobileReadOnlyPage").then((module) => ({ default: module.Phase7CMobileReadOnlyPage })),
-);
-const PerformancePage = lazy(() =>
-  import("./pages/PerformancePage").then((module) => ({ default: module.PerformancePage })),
-);
-
-function DeferredPage({ children }: { children: ReactNode }) {
-  return <Suspense fallback={<LoadingState />}>{children}</Suspense>;
-}
 
 export const router = createBrowserRouter([
   {

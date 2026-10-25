@@ -22,7 +22,7 @@ export async function getPhase7CRecommendationIntelligence(
   );
 
   const text = await response.text();
-  let payload: unknown = null;
+  let payload: unknown;
   try {
     payload = text ? JSON.parse(text) : null;
   } catch {

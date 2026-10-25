@@ -75,17 +75,18 @@ async function requestJson<T>(path: string, init: RequestInit, fetchImpl: FetchL
   if (!path.startsWith("/__m4/")) throw new Error("M4_SAME_ORIGIN_PATH_REQUIRED");
   const response = await fetchImpl(path, { cache: "no-store", ...init });
   const text = await response.text();
-  let payload: any = {};
+  let payload: unknown;
   try {
     payload = text ? JSON.parse(text) : {};
   } catch {
     throw new Error(`M4 trả JSON không hợp lệ (HTTP ${response.status}).`);
   }
   if (!response.ok) {
-    const message = typeof payload.error === "string"
-      ? payload.error
-      : typeof payload.message === "string"
-        ? payload.message
+    const errorPayload = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+    const message = typeof errorPayload.error === "string"
+      ? errorPayload.error
+      : typeof errorPayload.message === "string"
+        ? errorPayload.message
         : `HTTP ${response.status}`;
     throw new Error(message);
   }
