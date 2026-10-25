@@ -14,6 +14,7 @@ function bridge(): CustomerMt5BridgePort & {
     volume: number;
     stopLoss: number;
     takeProfit: number;
+    side?: "LONG" | "SHORT";
   }>;
 } {
   const calls: Array<{ kind: string; value: unknown }> = [];
@@ -23,6 +24,7 @@ function bridge(): CustomerMt5BridgePort & {
     volume: number;
     stopLoss: number;
     takeProfit: number;
+    side?: "LONG" | "SHORT";
   }> = [];
   return {
     calls,
@@ -44,6 +46,7 @@ function bridge(): CustomerMt5BridgePort & {
       calls.push({ kind: "placeOrder", value: request });
       positions.push({
         ticket: "9001",
+        side: request.side === "BUY" ? "LONG" : "SHORT",
         symbol: request.symbol,
         volume: request.volume,
         stopLoss: request.stopLoss,
@@ -473,4 +476,65 @@ describe("CustomerMt5FollowerExecutor", () => {
 
     expect(port.calls).toHaveLength(before);
   });
+  it("rejects unsafe stop loosening for both LONG and SHORT before broker mutation", async () => {
+    for (const [side, original, unsafe, safe] of [
+      ["LONG", 4190, 4180, 4195],
+      ["SHORT", 4210, 4220, 4205],
+    ] as const) {
+      const port = bridge();
+      port.positions.push({ ticket: "9001", symbol: "XAUUSD", side, volume: 0.12, stopLoss: original, takeProfit: 4220 });
+      const registry = new InMemoryCustomerFollowerPositionRegistry();
+      await registry.set("master-1", "9001");
+      const executor = new CustomerMt5FollowerExecutor(port, registry, {
+        expectedMt5Login: 770001, expectedBrokerServer: "Broker-Real",
+        reconcileAttempts: 1, reconcileDelayMs: 0,
+      });
+      const request = (stopLoss: number): CustomerFollowerExecutionRequest => ({
+        action: "STOP_LOSS_UPDATE", commandId: "sl-risk", sequence: 2,
+        symbol: "XAUUSD", masterPositionRef: "master-1", stopLoss,
+      });
+      await expect(executor.execute(request(unsafe))).rejects.toThrow("FOLLOWER_STOP_LOSS_RISK_INCREASE");
+      expect(port.calls).toHaveLength(0);
+      await executor.execute(request(safe));
+      expect(port.calls.filter((call) => call.kind === "modifyPosition")).toHaveLength(1);
+    }
+  });
+
+  it("fails closed if the broker side or existing stop is unreliable", async () => {
+    for (const position of [
+      { ticket: "9001", symbol: "XAUUSD", volume: 0.12, stopLoss: 4190, takeProfit: 4220 },
+      { ticket: "9001", symbol: "XAUUSD", side: "LONG" as const, volume: 0.12, stopLoss: Number.NaN, takeProfit: 4220 },
+    ]) {
+      const port = bridge();
+      port.positions.push(position);
+      const registry = new InMemoryCustomerFollowerPositionRegistry();
+      await registry.set("master-1", "9001");
+      const executor = new CustomerMt5FollowerExecutor(port, registry, {
+        expectedMt5Login: 770001, expectedBrokerServer: "Broker-Real",
+        reconcileAttempts: 1, reconcileDelayMs: 0,
+      });
+      await expect(executor.execute({
+        action: "STOP_LOSS_UPDATE", commandId: "sl-unknown", sequence: 2,
+        symbol: "XAUUSD", masterPositionRef: "master-1", stopLoss: 4195,
+      })).rejects.toThrow("FOLLOWER_STOP_LOSS_RISK_UNKNOWN");
+      expect(port.calls).toHaveLength(0);
+    }
+  });
+
+  it("allows initial protection when broker position has no stop", async () => {
+    const port = bridge();
+    port.positions.push({ ticket: "9001", symbol: "XAUUSD", side: "LONG", volume: 0.12, stopLoss: 0, takeProfit: 4220 });
+    const registry = new InMemoryCustomerFollowerPositionRegistry();
+    await registry.set("master-1", "9001");
+    const executor = new CustomerMt5FollowerExecutor(port, registry, {
+      expectedMt5Login: 770001, expectedBrokerServer: "Broker-Real",
+      reconcileAttempts: 1, reconcileDelayMs: 0,
+    });
+    await executor.execute({
+      action: "STOP_LOSS_UPDATE", commandId: "first-sl", sequence: 2,
+      symbol: "XAUUSD", masterPositionRef: "master-1", stopLoss: 4195,
+    });
+    expect(port.calls.filter((call) => call.kind === "modifyPosition")).toHaveLength(1);
+  });
+
 });
