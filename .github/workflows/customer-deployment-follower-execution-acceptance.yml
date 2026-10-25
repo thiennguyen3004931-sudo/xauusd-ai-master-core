@@ -14,6 +14,7 @@ on:
       - "packages/installation-proof/**"
       - "customer-release/**"
       - "scripts/customer-follower-execution-e2e.test.mjs"
+      - "scripts/customer-installation-identity-cli.test.mjs"
       - "scripts/customer-mt5-follower-production-wiring-acceptance.test.mjs"
       - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
       - "scripts/test-customer-mt5-broker-port-adapter-boundary.mjs"
@@ -35,6 +36,7 @@ on:
       - "packages/installation-proof/**"
       - "customer-release/**"
       - "scripts/customer-follower-execution-e2e.test.mjs"
+      - "scripts/customer-installation-identity-cli.test.mjs"
       - "scripts/customer-mt5-follower-production-wiring-acceptance.test.mjs"
       - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
       - "scripts/test-customer-mt5-broker-port-adapter-boundary.mjs"
@@ -52,14 +54,22 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: core.longpaths
+  GIT_CONFIG_VALUE_0: "true"
+
 jobs:
   customer-deployment-follower-execution:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -78,7 +88,7 @@ jobs:
         run: |
           $ok = $false
           for ($attempt = 1; $attempt -le 4; $attempt++) {
-            pnpm install --frozen-lockfile
+            pnpm install --frozen-lockfile --prefer-offline --network-concurrency=4 --fetch-retries=4 --fetch-retry-maxtimeout=30000
             if ($LASTEXITCODE -eq 0) { $ok = $true; break }
             if ($attempt -lt 4) { Start-Sleep -Seconds 10 }
           }
@@ -106,6 +116,9 @@ jobs:
 
       - name: Customer agent unit tests
         run: pnpm --filter @xauusd/customer-agent test
+
+      - name: Installation identity CLI preserves enrolled and partial identities
+        run: node --test scripts/customer-installation-identity-cli.test.mjs
 
       - name: Customer agent typecheck
         run: pnpm --filter @xauusd/customer-agent typecheck

@@ -36,6 +36,8 @@ node .\bin\generate-installation-identity.mjs
 
 The command prints `INSTALLATION_ID` and `INSTALLATION_PUBLIC_KEY`. Send those two values to the administrator through the agreed secure provisioning channel.
 
+Run this command once for a fresh installation. If any identity file already exists, it exits with `INSTALLATION_IDENTITY_ALREADY_EXISTS` and preserves the existing files. Reuse the enrolled identity for activation; do not delete the files to force regeneration. If initialization was interrupted or an identity file is missing, preserve the remaining files and use the approved recovery process with the administrator. Moving to a new PC requires the revocation and fresh-installation process in section 8.
+
 **Never send or copy `keys/installation-private.pem`.** The private key must remain on the machine where it was generated. Do not put it in GitHub, a ticket, chat, or a support bundle.
 
 ## 4. Administrator provisioning
