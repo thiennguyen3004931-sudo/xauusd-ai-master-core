@@ -140,7 +140,7 @@ test("private Master/Core CI keeps infrastructure PASS separate from full M3 acc
   assert.match(source, /id:\s*m6_public_contract/);
   assert.match(source, /id:\s*broader_regression/);
   assert.match(source, /continue-on-error:\s*true/);
-  assert.match(source, /run:\s*pnpm test/);
+  assert.match(source, /run:\s*pnpm test --concurrency=2\s*(?:\n|$)/);
   assert.match(source, /SELF_HOSTED_CI_INFRA=PASS/);
   assert.match(source, /M3_PRIVATE_CI=BLOCKED_M2_PROVENANCE/);
   assert.match(source, /M3_PRIVATE_CI=BLOCKED_M6_PUBLIC_CONTRACT/);
