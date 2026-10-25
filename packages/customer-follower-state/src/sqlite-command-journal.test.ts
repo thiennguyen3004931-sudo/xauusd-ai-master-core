@@ -108,6 +108,24 @@ describe("SqliteCustomerFollowerCommandJournal", () => {
     reopenedJournal.close();
   });
 
+  it("refuses invalid payload without creating a reservation", async () => {
+    const journal = new SqliteCustomerFollowerCommandJournal(filename(), binding);
+    const runner = verifiedAdapter(async () => { throw new Error("must not reach executor"); });
+    try {
+      const dispatcher = new DurableCustomerFollowerDispatcher(runner.verifier, runner.adapter, journal);
+      const bad = { ...command("bad-open", 10), payload: { side: "BUY", volume: 0 } };
+      await expect(dispatcher.dispatch(bad)).resolves.toEqual({
+        ok: false, code: "INVALID_EXECUTION_PAYLOAD",
+      });
+      expect(journal.listReserved()).toEqual([]);
+      expect(journal.reserve({ commandId: "safe-next", sequence: 1 })).toEqual({
+        ok: true, code: "RESERVED",
+      });
+    } finally {
+      journal.close();
+    }
+  });
+
   it("leaves an uncertain order RESERVED instead of retrying after executor failure", async () => {
     const path = filename();
     const runner = verifiedAdapter(async () => { throw new Error("simulated broker disconnected"); });
