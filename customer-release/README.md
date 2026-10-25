@@ -17,6 +17,10 @@ On the intended customer Windows PC with Node.js **24.x**:
 $zip = 'C:\ApprovedCustomerPackage\customer-agent-v1.zip'
 $installer = 'C:\ApprovedCustomerPackage\install-customer-agent-safe.ps1'
 $approvedInnerSha256 = '<64-character-lowercase-SHA256-provided-by-operator>'
+$approvedInstallerSha256 = '<64-character-lowercase-installer-SHA256-from-the-accepted-CI-run>'
+if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne $approvedInstallerSha256) {
+    throw 'Untrusted installer file; refuse to execute'
+}
 & $installer -ZipPath $zip -ExpectedSha256 $approvedInnerSha256 -ProductMode SELF_MANAGED
 ```
 
