@@ -1,0 +1,83 @@
+name: Customer Follower Durable Signed Demo CI (No MT5)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/customer-follower-state/**"
+      - "packages/customer-agent/**"
+      - "packages/copy-protocol/**"
+      - "scripts/customer-follower-demo/**"
+      - "scripts/customer-follower-demo-e2e.test.mjs"
+      - ".github/workflows/customer-follower-durable-demo-ci.yml"
+      - "pnpm-lock.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/customer-follower-state/**"
+      - "packages/customer-agent/**"
+      - "packages/copy-protocol/**"
+      - "scripts/customer-follower-demo/**"
+      - "scripts/customer-follower-demo-e2e.test.mjs"
+      - ".github/workflows/customer-follower-durable-demo-ci.yml"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customer-follower-durable-demo-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  signed-demo-durable-replay:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install locked dependencies
+        shell: powershell
+        run: |
+          $ok = $false
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            pnpm install --frozen-lockfile --prefer-offline
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Start-Sleep -Seconds 10
+          }
+          if (-not $ok) { throw "LOCKED_INSTALL_FAILED" }
+      - name: Build signature verifier and durable follower dependencies
+        shell: powershell
+        run: |
+          $packages = @(
+            "@xauusd/copy-protocol",
+            "@xauusd/installation-proof",
+            "@xauusd/customer-agent",
+            "@xauusd/customer-follower-state"
+          )
+          foreach ($package in $packages) {
+            pnpm --filter $package build
+            if ($LASTEXITCODE -ne 0) { throw "BUILD_FAILED=$package" }
+          }
+      - name: Follower journal unit tests
+        run: pnpm --filter @xauusd/customer-follower-state test
+      - name: Follower journal typecheck
+        run: pnpm --filter @xauusd/customer-follower-state typecheck
+      - name: Signed dry-run across process restart
+        run: node --test scripts/customer-follower-demo-e2e.test.mjs
+      - name: Safety summary
+        shell: powershell
+        run: |
+          Write-Host 'COPY_FOLLOWER_DURABLE_JOURNAL=PASS'
+          Write-Host 'SIGNED_COMMAND_DRY_RUN=PASS'
+          Write-Host 'MT5_CONNECTION=NONE'
+          Write-Host 'REAL_ORDER_MUTATION=NONE'
+          Write-Host 'MASTER_ARM_MUTATION=NONE'
