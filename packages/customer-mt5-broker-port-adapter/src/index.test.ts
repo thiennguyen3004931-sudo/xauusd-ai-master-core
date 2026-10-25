@@ -174,6 +174,7 @@ describe("CustomerMt5BrokerPortAdapter", () => {
         volume: 0.12,
         stopLoss: 4190,
         takeProfit: 4220,
+        side: "LONG",
       },
     ]);
   });
