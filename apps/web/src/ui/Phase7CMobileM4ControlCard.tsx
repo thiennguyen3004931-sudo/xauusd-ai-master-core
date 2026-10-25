@@ -1,3 +1,4 @@
+import { useNow } from "../use-now";
 import { useMemo, useState } from "react";
 import { Alert, Box, Button, Card, CardContent, Chip, Stack, Typography } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -31,6 +32,7 @@ function CheckRows({ checks }: { checks: Record<string, boolean> }) {
 }
 
 export function Phase7CMobileM4ControlCard() {
+  const now = useNow();
   const queryClient = useQueryClient();
   const [preflight, setPreflight] = useState<MobileM4ArmPreflight | null>(null);
   const [activeTransactionId, setActiveTransactionId] = useState<string | null>(null);
@@ -115,7 +117,7 @@ export function Phase7CMobileM4ControlCard() {
   const armReady = Boolean(
     preflight?.approved &&
     preflight.transactionId &&
-    (preflight.expiresAt == null || Date.now() < preflight.expiresAt),
+    (preflight.expiresAt == null || now < preflight.expiresAt),
   );
 
   const finalStatus = status.data;

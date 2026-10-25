@@ -11,6 +11,12 @@ on:
 permissions:
   contents: read
 
+# Scope long-path support to CI git processes, including checkout cleanup.
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: core.longpaths
+  GIT_CONFIG_VALUE_0: "true"
+
 concurrency:
   group: canonical-pr-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -34,7 +40,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline --network-concurrency=4 --fetch-retries=4 --fetch-retry-maxtimeout=30000
       - name: Runtime source attestation service tests
         run: pnpm --filter @xauusd/api exec node --import tsx --test src/services/phase7c-runtime-source-attestation.service.test.ts
       - name: Canonical gate source contract

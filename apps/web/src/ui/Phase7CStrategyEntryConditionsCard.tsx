@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -222,13 +222,12 @@ export function Phase7CStrategyEntryConditionsCard() {
   const guards = configQuery.data?.guards ?? {};
   const strategyEntryConditions = monitorQuery.data?.strategyEntryConditions;
 
-  useEffect(() => {
-    if (!state) {
-      setDraft(null);
-      return;
-    }
-    setDraft({ trend: { ...state.trend }, sideway: { ...state.sideway } });
-  }, [state?.version]);
+  const stateVersion = state?.version ?? null;
+  const [syncedVersion, setSyncedVersion] = useState<number | null | undefined>(undefined);
+  if (syncedVersion !== stateVersion) {
+    setSyncedVersion(stateVersion);
+    setDraft(state ? { trend: { ...state.trend }, sideway: { ...state.sideway } } : null);
+  }
 
   const dirty = useMemo(() => {
     if (!state || !draft) return false;

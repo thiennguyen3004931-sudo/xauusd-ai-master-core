@@ -1,3 +1,4 @@
+import { useNow } from "../use-now";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -75,6 +76,7 @@ function firstReason(keys: string[] | undefined, fallback: string) {
 }
 
 export function Phase7CExecutionAuthorizationCard() {
+  const now = useNow();
   const queryClient = useQueryClient();
   const [armRequestId, setArmRequestId] = useState<string | null>(null);
   const [armPreflight, setArmPreflight] = useState<Phase7CLiveArmPreflight | null>(null);
@@ -212,7 +214,7 @@ export function Phase7CExecutionAuthorizationCard() {
     armPreflight?.approved &&
     armPreflight.preflightToken &&
     armPreflight.bridgeSessionId === capability.data?.bridgeSessionId &&
-    (armPreflight.expiresAt === null || Date.now() < armPreflight.expiresAt),
+    (armPreflight.expiresAt === null || now < armPreflight.expiresAt),
   );
 
   return (

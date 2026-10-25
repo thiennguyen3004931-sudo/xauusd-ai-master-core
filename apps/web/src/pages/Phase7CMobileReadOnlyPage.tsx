@@ -21,8 +21,8 @@ import { ErrorState, LoadingState } from "../ui/PageState";
 import { Phase7CMobileM4ControlCard } from "../ui/Phase7CMobileM4ControlCard";
 import { Phase7COperatorStatusBar } from "../ui/Phase7COperatorStatusBar";
 
-function asRecord(input: unknown): Record<string, any> {
-  return input && typeof input === "object" ? (input as Record<string, any>) : {};
+function asRecord(input: unknown): Record<string, unknown> {
+  return input && typeof input === "object" ? (input as Record<string, unknown>) : {};
 }
 
 function MobileCard({ title, children }: { title: string; children: React.ReactNode }) {

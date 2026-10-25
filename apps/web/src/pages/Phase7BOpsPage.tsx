@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Alert,
   Box,
@@ -43,8 +43,8 @@ const LOT_SETTINGS_URL = "/api/v1/phase7c/lot-settings";
 const CONTROL_BASE = "http://127.0.0.1:3711";
 const MANAGED_LOT_STEP = 0.03;
 
-function asRecord(value: unknown): Record<string, any> {
-  return value && typeof value === "object" ? (value as Record<string, any>) : {};
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
 function numberText(value: unknown, fallback: string) {
@@ -232,17 +232,20 @@ export function Phase7BOpsPage() {
   const validationErrors = validateLotInput(draftLot);
   const hasChanges = savedLot !== null && validationErrors.length === 0 && !lotEquals(savedLot, draftLot);
 
-  useEffect(() => {
+  const lotSyncKey = JSON.stringify([resolvedConfiguredLot?.trendFixedLot, resolvedConfiguredLot?.sidewayRiskPercent, resolvedConfiguredLot?.sidewayMaxLot]);
+  const [syncedLotKey, setSyncedLotKey] = useState<string | null>(null);
+  if (syncedLotKey !== lotSyncKey) {
+    setSyncedLotKey(lotSyncKey);
     if (!resolvedConfiguredLot) {
       setTrendFixedLot("");
       setSidewayRiskPercent("");
       setSidewayMaxLot("");
-      return;
+    } else {
+      setTrendFixedLot(numberText(resolvedConfiguredLot.trendFixedLot, ""));
+      setSidewayRiskPercent(numberText(resolvedConfiguredLot.sidewayRiskPercent, ""));
+      setSidewayMaxLot(numberText(resolvedConfiguredLot.sidewayMaxLot, ""));
     }
-    setTrendFixedLot(numberText(resolvedConfiguredLot.trendFixedLot, ""));
-    setSidewayRiskPercent(numberText(resolvedConfiguredLot.sidewayRiskPercent, ""));
-    setSidewayMaxLot(numberText(resolvedConfiguredLot.sidewayMaxLot, ""));
-  }, [resolvedConfiguredLot?.trendFixedLot, resolvedConfiguredLot?.sidewayRiskPercent, resolvedConfiguredLot?.sidewayMaxLot]);
+  }
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError && !query.data) {

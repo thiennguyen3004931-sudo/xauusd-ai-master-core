@@ -21,7 +21,7 @@ export async function getPhase7CCounterfactualIntelligence(
     },
   );
   const text = await response.text();
-  let payload: unknown = null;
+  let payload: unknown;
   try {
     payload = text ? JSON.parse(text) : null;
   } catch {
