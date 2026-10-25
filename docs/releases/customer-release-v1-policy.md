@@ -14,6 +14,27 @@ Status: **release candidate policy**, not an authorized LIVE trading release. Pr
 8. Each customer has their own installation identity, licensed grant, broker/account binding and **blank completed-on-site** acceptance record; never fill customer-specific tokens/keys into this repo.
 9. Approve a customer for DEMO only after separate local-machine acceptance. LIVE requires a new explicit risk and operational go/no-go decision.
 
+## Release signature tooling (offline, candidate only)
+
+Source: `scripts/security/customer-release-attestation.mjs`.
+The signer uses Ed25519 and cryptographically binds the exact **inner customer ZIP bytes**, release ID, full accepted source SHA, full public contract SHA, UTC signing timestamp, and signer key ID. The verifier rejects unrecognized signers, modified ZIPs, malformed signatures and altered metadata.
+
+**Trust bootstrap:** `security/customer-release-trusted-signers.json` ships with an empty `signers` array intentionally. This means every actual verification returns `RELEASE_SIGNER_NOT_TRUSTED` until a separate approved publisher public key is enrolled and independently authenticated. Do not copy a customer-supplied keyring as if it were trusted. Changes to the official trusted keyring require a reviewed PR and separately confirmed key fingerprint; never include its associated private key in a repository, artifact, chat, or support log.
+
+Example: after an approved operator securely provisions an Ed25519 signer **outside the repository and customer machines**, sets the process-only `XAUUSD_RELEASE_SIGNING_KEY_FILE` to the protected private PEM path, and independently validates the exact accepted SHA:
+
+```powershell
+node scripts/security/customer-release-attestation.mjs sign --zip artifacts/customer-agent-release/customer-agent-v1.zip --out artifacts/customer-agent-release/customer-agent-v1.attestation.json --release-id customer-agent-v1.0.0-rc1 --source <accepted-40-hex-main-sha> --public <approved-40-hex-public-contract-sha> --key-id <approved-publisher-key-id>
+```
+
+Then verify against an **independently trusted** pinned signer-keyring (the repository default remains empty until enrollment):
+
+```powershell
+node scripts/security/customer-release-attestation.mjs verify --zip artifacts/customer-agent-release/customer-agent-v1.zip --attestation artifacts/customer-agent-release/customer-agent-v1.attestation.json
+```
+
+A successful signature verifies who signed the ZIP and exact bytes **relative to the trusted keyring**; it does not prove the customer installation, MT5 bridge or trading correctness. Separately check GitHub's **outer** artifact archive digest, ZIP contents against `release-manifest.sha256`, forbidden paths, and actual Windows install. Signing must happen in an isolated authorized release step, **not** automatically from a PR test runner. The signing script refuses to overwrite an existing attestation. Tests use ephemeral synthetic keys only.
+
 ## Rollback
 
 - Retain last verified signed package and public verification key; downgrade requires security compatibility and a new approved grant/session check.
