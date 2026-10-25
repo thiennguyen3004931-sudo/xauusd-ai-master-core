@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 if ($ExpectedSha256 -cnotmatch '^[0-9a-f]{64}$') {
   throw "CUSTOMER_INSTALL_EXPECTED_SHA256_INVALID"
