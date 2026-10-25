@@ -4,22 +4,22 @@ Use one copy per customer installation. This record is for sanitized operational
 
 Status values: `PASS`, `FAIL`, `BLOCKED`, or `N/A`. Explain every `FAIL`, `BLOCKED`, and `N/A`.
 
-## 1. Verified package evidence
+## 1. Package evidence for this installation
 
-The following values identify the customer package built and verified by post-merge CI on 2026-10-20 from main commit `1e573609ce2bfd6aed0718c245e2fbf5eb6a7f0b`. Re-check and replace this section when using a different package.
+This is a blank acceptance record. No package, checksum or customer installation has been verified by this template. Fill in every field from the exact approved package being handed over and retain the corresponding verification evidence. Do not copy values from an older artifact or mark these checks as passed based on the presence of this file.
 
-| Field | Verified value |
+| Field | Value to verify and record |
 |---|---|
-| Package version | `1.0.0` |
-| Source commit | `1e573609ce2bfd6aed0718c245e2fbf5eb6a7f0b` |
-| Workflow run | [39400921687](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/actions/runs/39400921687) |
-| GitHub artifact ID | `12255526118` |
-| GitHub artifact name | `xauusd-customer-agent-v1` |
-| GitHub artifact archive SHA-256 | `5ecffe2a4ca9b7ba7d059aa263ebb17376c0480ede2f6b9dcc68a1b37496151a` |
-| Downloaded customer ZIP SHA-256 | `3e717d8bfbfe7147fa81586eb8ec990e07774091c3149573dc15568038cb8658` |
-| Customer ZIP internal manifest | 20 entries verified; all hashes matched (rechecked from artifact 12255526118) |
-| Artifact expiry | 2026-11-19 09:42:34 UTC |
-| Official GitHub Release | Not created; this is a CI artifact, not a tagged release |
+| Package version | `[version from package.json]` |
+| Source commit | `[full SHA from the accepted main workflow run]` |
+| Workflow run | `[run ID and URL]` |
+| GitHub artifact ID | `[artifact ID from that run]` |
+| GitHub artifact name | `[artifact name from that run]` |
+| GitHub artifact archive SHA-256 | `[verified outer archive SHA-256]` |
+| Downloaded customer ZIP SHA-256 | `[verified inner customer ZIP SHA-256]` |
+| Customer ZIP internal manifest | `[verified entry count and checksum result]` |
+| Artifact expiry | `[expiry date/time and timezone, or N/A with reason]` |
+| Official GitHub Release | `[release URL, or CI artifact only]` |
 
 The two SHA-256 values refer to different files: the GitHub Actions artifact archive and the downloaded customer package ZIP. Do not interchange them. Verify the checksum of the exact file received before extraction. The inner ZIP hash identifies the package contained inside the downloaded outer artifact archive.
 
