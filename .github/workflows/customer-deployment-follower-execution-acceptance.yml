@@ -114,6 +114,9 @@ jobs:
           pnpm --filter @xauusd/customer-mt5-binding-contract build
           if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_MT5_BINDING_CONTRACT_BUILD_FAILED" }
 
+      - name: Customer release Ed25519 attestation tamper regression
+        run: node --test scripts/security/customer-release-attestation.test.mjs
+
       - name: Customer agent unit tests
         run: pnpm --filter @xauusd/customer-agent test
 
