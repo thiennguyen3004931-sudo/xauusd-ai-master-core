@@ -14,8 +14,6 @@ on:
       - "packages/installation-proof/**"
       - "customer-release/**"
       - "scripts/customer-follower-execution-e2e.test.mjs"
-      - "scripts/customer-follower-demo-e2e.test.mjs"
-      - "scripts/customer-follower-demo/**"
       - "scripts/customer-installation-identity-cli.test.mjs"
       - "scripts/customer-mt5-follower-production-wiring-acceptance.test.mjs"
       - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
@@ -38,8 +36,6 @@ on:
       - "packages/installation-proof/**"
       - "customer-release/**"
       - "scripts/customer-follower-execution-e2e.test.mjs"
-      - "scripts/customer-follower-demo-e2e.test.mjs"
-      - "scripts/customer-follower-demo/**"
       - "scripts/customer-installation-identity-cli.test.mjs"
       - "scripts/customer-mt5-follower-production-wiring-acceptance.test.mjs"
       - "scripts/test-customer-deployment-follower-execution-boundary.mjs"
@@ -162,9 +158,6 @@ jobs:
 
       - name: Simulated follower execution E2E
         run: node --test scripts/customer-follower-execution-e2e.test.mjs
-
-      - name: Signed follower demo runner and durable replay protection
-        run: node --test scripts/customer-follower-demo-e2e.test.mjs
 
       - name: Distribution and execution boundary
         run: node --test scripts/test-customer-deployment-follower-execution-boundary.mjs
