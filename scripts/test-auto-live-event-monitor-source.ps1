@@ -178,6 +178,16 @@ Assert-Literal $FailureHandler "Add-Member -NotePropertyName bridgeReadStatus -N
 Assert-Literal $FailureHandler 'The issue''s existing bot mode, ARM, positions, pending orders, and strategy fields were **not refreshed**' 'historical snapshot warning'
 Assert-NotMatch $Monitor 'Invoke-GitHubJson\s+-Method\s+(?:Put|Delete)' 'unexpected GitHub mutation method'
 
+Assert-Literal $Monitor "auto-live-offline-lease.ps1" 'offline lease classifier is sourced'
+Assert-Literal $Monitor 'MONITOR_BRIDGE_READ_STATUS=OFFLINE_EXPECTED' 'explicit expected downtime status'
+Assert-Literal $Monitor "MONITOR_RUNTIME_HEALTH=NOT_VERIFIED" 'no false health classification'
+Assert-Literal $Monitor "MONITOR_DATA_FRESHNESS=UNAVAILABLE" 'no stale observation accepted as current'
+Assert-Literal $Monitor "BRIDGE_OFFLINE_EXPECTED" 'operator downtime is distinguishable in issue audit'
+Assert-Literal $Monitor "'CONNECTIVITY_FAILURE' -and $offlineLeaseState -eq 'VALID'" 'only verified connectivity downtime is expected'
+Assert-Literal $Workflow 'scripts/test-auto-live-offline-lease.ps1' 'offline lease regression executes on PR'
+Assert-Literal $Workflow 'scripts/ops/auto-live-offline-lease.ps1' 'offline lease changes trigger CI'
+Assert-Literal $Workflow 'scripts/ops/set-auto-live-monitor-offline-lease.ps1' 'operator declaration changes trigger CI'
+
 Write-Host 'AUTO_LIVE_MONITOR_SOURCE_CONTRACT=PASS'
 Write-Host 'PRODUCTION_HTTP_METHODS=GET_ONLY'
 Write-Host 'PRODUCTION_MUTATION=NONE'
