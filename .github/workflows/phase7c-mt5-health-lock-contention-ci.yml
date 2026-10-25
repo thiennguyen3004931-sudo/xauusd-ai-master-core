@@ -8,6 +8,7 @@ on:
       - "packages/mt5-broker/bridge/mt5_bridge/mt5_gateway.py"
       - "packages/mt5-broker/bridge/mt5_bridge/guarded_gateway.py"
       - "packages/mt5-broker/bridge/tests/test_health_lock_contention.py"
+      - "packages/mt5-broker/bridge/tests/test_order_idempotency_failure_boundary.py"
       - ".github/workflows/phase7c-mt5-health-lock-contention-ci.yml"
 
 permissions:
@@ -20,6 +21,7 @@ concurrency:
 jobs:
   health-lock-contention:
     name: mt5-health-lock-contention-windows
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 15
 
@@ -57,6 +59,17 @@ jobs:
         run: |
           python -m compileall -q packages/mt5-broker/bridge/mt5_bridge packages/mt5-broker/bridge/tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Full fake-MT5 bridge regression including order replay failures
+        shell: pwsh
+        run: |
+          Push-Location packages/mt5-broker/bridge
+          try {
+            python -m unittest discover -s tests -p 'test_*.py' -v
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
 
       - name: Diff hygiene
         shell: pwsh

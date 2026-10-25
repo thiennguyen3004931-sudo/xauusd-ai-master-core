@@ -17,6 +17,15 @@ The health endpoint retries `MetaTrader5.initialize()` with a short backoff when
 the terminal IPC channel disappears. Idempotent reads retry once after recovery;
 mutating `order_send()` calls are never retried blindly.
 
+New-order idempotency keys remain reserved once `order_send()` has been entered.
+If its response is lost, result decoding fails, or the response cannot be saved
+to SQLite, replay of the same key returns `IDEMPOTENCY_IN_PROGRESS` (HTTP 425)
+without another send, including after a bridge restart. There is no automatic
+expiry or release of this uncertain reservation. Reconcile broker positions,
+orders and deal history before deciding how to resolve it; do not evade it by
+generating another key. Validation failures before `order_send()` still release
+the reservation, and successfully saved responses continue to replay normally.
+
 ## Windows setup
 
 1. Install MetaTrader 5 and log in to a demo account.
