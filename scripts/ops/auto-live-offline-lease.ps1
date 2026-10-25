@@ -14,7 +14,7 @@ function Get-AutoLiveOfflineLeaseState {
     if ($names.Count -ne 5 -or @($names | Where-Object { $_ -notin @('version', 'status', 'reason', 'issuedAt', 'expiresAt') }).Count -gt 0) {
       return 'INVALID'
     }
-    if ($record.version -isnot [int] -or $record.version -ne 1 -or
+    if (($record.version -isnot [int] -and $record.version -isnot [long]) -or $record.version -ne 1 -or
         $record.status -cne 'OFFLINE_EXPECTED' -or
         $record.reason -cnotin @('PLANNED_SHUTDOWN', 'MAINTENANCE')) {
       return 'INVALID'
