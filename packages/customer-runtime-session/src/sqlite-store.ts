@@ -192,6 +192,18 @@ export class SqliteCustomerLicenseRepository
     return row ? parseLicense(row.payload_json) : null;
   }
 
+  // Atomic create-if-absent is mandatory for offline customer enrollment:
+  // two administrators racing must never overwrite the winning license binding.
+  async putIfAbsent(record: LicenseRecord): Promise<boolean> {
+    assertLicenseRecord(record);
+    const result = this.db
+      .prepare(
+        "INSERT OR IGNORE INTO customer_license_records(license_id, payload_json) VALUES (?, ?)",
+      )
+      .run(record.licenseId, JSON.stringify(record));
+    return result.changes === 1;
+  }
+
   async put(record: LicenseRecord): Promise<void> {
     assertLicenseRecord(record);
     this.db
