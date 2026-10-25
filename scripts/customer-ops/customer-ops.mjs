@@ -31,10 +31,9 @@ export async function enrollCustomerLicense(store, record) {
   if (record.status !== "ACTIVE" || record.revokedAt !== null) {
     throw new Error("LICENSE_NOT_ACTIVE");
   }
-  if (await store.licenses.get(record.licenseId)) {
+  if (!(await store.licenses.putIfAbsent(record))) {
     throw new Error("LICENSE_ALREADY_REGISTERED: refusing to overwrite existing identity");
   }
-  await store.licenses.put(record);
   return Object.freeze({ code: "LICENSE_ENROLLED", licenseId: record.licenseId });
 }
 
