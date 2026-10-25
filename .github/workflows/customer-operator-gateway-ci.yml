@@ -26,6 +26,11 @@ on:
 permissions:
   contents: read
 
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: core.longpaths
+  GIT_CONFIG_VALUE_0: "true"
+
 concurrency:
   group: customer-operator-gateway-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -58,6 +63,7 @@ jobs:
         shell: powershell
         run: |
           $packages = @(
+            "@xauusd/copy-protocol",
             "@xauusd/license-service",
             "@xauusd/customer-product-access",
             "@xauusd/customer-grant-registry",
