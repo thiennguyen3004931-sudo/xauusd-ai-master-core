@@ -668,6 +668,7 @@ class Mt5Gateway:
         replay = self._reserve_or_replay(key)
         if replay is not None:
             return replay
+        send_started = False
         try:
             self._require_trading()
             broker_symbol = self._ensure_symbol(request.symbol)
@@ -692,6 +693,10 @@ class Mt5Gateway:
                     response = self._rejected_response(check_code, str(getattr(check, "comment", "order_check rejected")))
                     self.ledger.complete(key, response)
                     return response
+                # From this point a missing response or ledger-write failure
+                # cannot prove that the broker rejected the order. Keep the
+                # durable reservation so a retry cannot send it a second time.
+                send_started = True
                 result = self.mt5.order_send(mt5_request)
             if result is None:
                 raise BridgeError(f"order_send failed: {self.mt5.last_error()}", 502, "ORDER_SEND_FAILED")
@@ -699,7 +704,8 @@ class Mt5Gateway:
             self.ledger.complete(key, response)
             return response
         except Exception:
-            self.ledger.release(key)
+            if not send_started:
+                self.ledger.release(key)
             raise
 
     def cancel_order(self, ticket: str) -> dict[str, Any]:
