@@ -1,0 +1,11 @@
+{
+  "apiBaseUrl": "https://YOUR-APPROVED-CUSTOMER-GATEWAY",
+  "productMode": "COPY_FOLLOWER",
+  "grantId": "REPLACE_WITH_APPROVED_COPY_FOLLOWER_GRANT_ID",
+  "mt5Login": 12345678,
+  "brokerServer": "Broker-Demo",
+  "installationIdFile": "keys/installation-id.txt",
+  "installationPublicKeyFile": "keys/installation-public.txt",
+  "installationPrivateKeyFile": "keys/installation-private.pem",
+  "requestedSizingMode": "EQUITY_RATIO"
+}
