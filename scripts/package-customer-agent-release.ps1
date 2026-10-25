@@ -119,8 +119,11 @@ Compress-Archive -Path (Join-Path $releaseDir "*") -DestinationPath $zipPath -Fo
 
 # Include the independent pre-extraction Windows installer beside the customer ZIP
 # in the outer Actions artifact. Never insert it into an already-signed ZIP.
-Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\install-customer-agent-safe.ps1") -Destination (Join-Path $releaseRoot "install-customer-agent-safe.ps1") -Force
+$installerPath = Join-Path $releaseRoot "install-customer-agent-safe.ps1"
+Copy-Item -LiteralPath (Join-Path $repoRoot "scripts\install-customer-agent-safe.ps1") -Destination $installerPath -Force
+$installerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
+Write-Host "CUSTOMER_INSTALLER_SHA256=$installerHash"
 Write-Host "CUSTOMER_RELEASE_PACKAGE=PASS"
 Write-Host "CUSTOMER_RELEASE_DIR=$releaseDir"
 Write-Host "CUSTOMER_RELEASE_ZIP=$zipPath"
