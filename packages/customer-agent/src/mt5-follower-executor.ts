@@ -52,6 +52,7 @@ export interface CustomerMt5BridgePort {
       volume: number;
       stopLoss: number;
       takeProfit: number;
+      side?: "LONG" | "SHORT";
     }>
   >;
 }
@@ -284,6 +285,24 @@ export class CustomerMt5FollowerExecutor implements CustomerFollowerExecutor {
       request.masterPositionRef,
       request.symbol,
     );
+    // Protective stops must never be loosened by a follower command.
+    // Trust the current broker-side direction, not the signed command payload.
+    if (!finitePositive(request.stopLoss)) fail("FOLLOWER_STOP_LOSS_INVALID");
+    if (
+      (position.side !== "LONG" && position.side !== "SHORT") ||
+      !Number.isFinite(position.stopLoss) ||
+      position.stopLoss < 0
+    ) {
+      fail("FOLLOWER_STOP_LOSS_RISK_UNKNOWN");
+    }
+    if (
+      position.stopLoss > 0 &&
+      (position.side === "LONG"
+        ? request.stopLoss < position.stopLoss
+        : request.stopLoss > position.stopLoss)
+    ) {
+      fail("FOLLOWER_STOP_LOSS_RISK_INCREASE");
+    }
     const result = await this.bridge.modifyPosition(
       position.ticket,
       request.stopLoss,

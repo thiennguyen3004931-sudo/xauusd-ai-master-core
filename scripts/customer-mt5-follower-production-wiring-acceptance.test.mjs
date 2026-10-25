@@ -172,6 +172,7 @@ test("durable follower registry survives executor restart in simulated productio
   const positions = [{
     ticket: "F91001",
     symbol: "XAUUSD",
+    side: "LONG",
     volume: 0.12,
     stopLoss: 4190,
     takeProfit: 4220,

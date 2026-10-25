@@ -51,6 +51,7 @@ export class CustomerMt5BrokerPortAdapter implements CustomerMt5BridgePort {
       volume: position.volume,
       stopLoss: position.stopLoss,
       takeProfit: position.takeProfit,
+      side: position.side,
     }));
   }
 }
