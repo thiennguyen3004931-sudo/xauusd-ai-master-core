@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { toCustomerFollowerExecutionRequest } from "@xauusd/customer-agent";
 import type {
   CustomerCopyCommandBinding,
   CustomerCopyCommandVerifier,
@@ -132,6 +133,9 @@ export class DurableCustomerFollowerDispatcher {
 
     // Reject malformed payload without reserving a broker slot.
     // The execution adapter separately rechecks this strict contract.
+    if (toCustomerFollowerExecutionRequest(verified.command) === null) {
+      return { ok: false, code: "INVALID_EXECUTION_PAYLOAD" };
+    }
     const reserved = this.journal.reserve({
       commandId: verified.command.commandId,
       sequence: verified.command.sequence,
