@@ -1,0 +1,87 @@
+name: Customer Operator Gateway Integration CI (No Trading)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/customer-ops/**"
+      - ".github/workflows/customer-operator-gateway-ci.yml"
+      - "packages/customer-runtime-session/**"
+      - "packages/customer-product-access/**"
+      - "packages/customer-grant-registry/**"
+      - "packages/license-service/**"
+      - "pnpm-lock.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/customer-ops/**"
+      - ".github/workflows/customer-operator-gateway-ci.yml"
+      - "packages/customer-runtime-session/**"
+      - "packages/customer-product-access/**"
+      - "packages/customer-grant-registry/**"
+      - "packages/license-service/**"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customer-operator-gateway-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  customer-operator-gateway-simulated:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install dependencies (locked)
+        shell: powershell
+        run: |
+          $ok = $false
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            pnpm install --frozen-lockfile --prefer-offline
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Start-Sleep -Seconds 10
+          }
+          if (-not $ok) { throw "LOCKED_INSTALL_FAILED" }
+      - name: Build customer security and gateway dependencies
+        shell: powershell
+        run: |
+          $packages = @(
+            "@xauusd/license-service",
+            "@xauusd/customer-product-access",
+            "@xauusd/customer-grant-registry",
+            "@xauusd/installation-proof",
+            "@xauusd/customer-runtime-gate",
+            "@xauusd/customer-runtime-session"
+          )
+          foreach ($package in $packages) {
+            pnpm --filter $package build
+            if ($LASTEXITCODE -ne 0) { throw "BUILD_FAILED=$package" }
+          }
+      - name: Test offline operator and gateway integration
+        run: node --test scripts/customer-ops/customer-ops.test.mjs
+      - name: Test customer gateway package
+        run: pnpm --filter @xauusd/customer-runtime-session test
+      - name: Typecheck gateway package
+        run: pnpm --filter @xauusd/customer-runtime-session typecheck
+      - name: Safety summary
+        shell: powershell
+        run: |
+          Write-Host 'CUSTOMER_GATEWAY_OPERATOR_INTEGRATION=PASS'
+          Write-Host 'OFFLINE_PROVISIONING=PASS'
+          Write-Host 'REAL_CUSTOMER_GATEWAY_DEPLOYMENT=NONE'
+          Write-Host 'MASTER_BOT_MODE_MUTATION=NONE'
+          Write-Host 'MASTER_ARM_MUTATION=NONE'
+          Write-Host 'MT5_MUTATION=NONE'
+          Write-Host 'LIVE_ORDER=NONE'
