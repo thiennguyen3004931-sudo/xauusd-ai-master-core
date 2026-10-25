@@ -21,6 +21,8 @@ on:
       - "scripts/test-customer-follower-runtime-boundary.mjs"
       - "scripts/test-customer-mt5-binding-contract-boundary.mjs"
       - "scripts/package-customer-agent-release.ps1"
+      - "scripts/install-customer-agent-safe.ps1"
+      - "scripts/test-customer-installer-local.ps1"
       - ".github/workflows/customer-deployment-follower-execution-acceptance.yml"
       - "pnpm-lock.yaml"
   push:
@@ -43,6 +45,8 @@ on:
       - "scripts/test-customer-follower-runtime-boundary.mjs"
       - "scripts/test-customer-mt5-binding-contract-boundary.mjs"
       - "scripts/package-customer-agent-release.ps1"
+      - "scripts/install-customer-agent-safe.ps1"
+      - "scripts/test-customer-installer-local.ps1"
       - ".github/workflows/customer-deployment-follower-execution-acceptance.yml"
       - "pnpm-lock.yaml"
   workflow_dispatch:
@@ -227,11 +231,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CUSTOMER_RELEASE_IMPORT_FAILED" }
           Pop-Location
 
+      - name: Test safe Windows install for both customer modes
+        shell: powershell
+        run: .\scripts\test-customer-installer-local.ps1
+
       - name: Upload customer release artifact
         uses: actions/upload-artifact@v4
         with:
           name: xauusd-customer-agent-v1
-          path: artifacts/customer-agent-release/customer-agent-v1.zip
+          path: |
+            artifacts/customer-agent-release/customer-agent-v1.zip
+            artifacts/customer-agent-release/install-customer-agent-safe.ps1
           if-no-files-found: error
           retention-days: 30
 
