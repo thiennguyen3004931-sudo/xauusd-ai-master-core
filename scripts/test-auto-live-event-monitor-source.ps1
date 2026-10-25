@@ -183,7 +183,7 @@ Assert-Literal $Monitor 'MONITOR_BRIDGE_READ_STATUS=OFFLINE_EXPECTED' 'explicit 
 Assert-Literal $Monitor "MONITOR_RUNTIME_HEALTH=NOT_VERIFIED" 'no false health classification'
 Assert-Literal $Monitor "MONITOR_DATA_FRESHNESS=UNAVAILABLE" 'no stale observation accepted as current'
 Assert-Literal $Monitor "BRIDGE_OFFLINE_EXPECTED" 'operator downtime is distinguishable in issue audit'
-Assert-Literal $Monitor "'CONNECTIVITY_FAILURE' -and $offlineLeaseState -eq 'VALID'" 'only verified connectivity downtime is expected'
+Assert-Literal $Monitor ("'CONNECTIVITY_FAILURE' -and " + '$offlineLeaseState' + " -eq 'VALID'") 'only verified connectivity downtime is expected'
 Assert-Literal $Workflow 'scripts/test-auto-live-offline-lease.ps1' 'offline lease regression executes on PR'
 Assert-Literal $Workflow 'scripts/ops/auto-live-offline-lease.ps1' 'offline lease changes trigger CI'
 Assert-Literal $Workflow 'scripts/ops/set-auto-live-monitor-offline-lease.ps1' 'operator declaration changes trigger CI'
