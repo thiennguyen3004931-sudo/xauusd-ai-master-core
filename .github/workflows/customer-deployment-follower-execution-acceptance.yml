@@ -172,6 +172,7 @@ jobs:
       - name: Verify packaged customer release
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
           $zip = "artifacts/customer-agent-release/customer-agent-v1.zip"
           if (-not (Test-Path $zip)) { throw "CUSTOMER_RELEASE_ZIP_MISSING" }
           $verify = Join-Path $env:RUNNER_TEMP "customer-release-verify"
@@ -180,6 +181,40 @@ jobs:
           if (-not (Test-Path (Join-Path $verify "release-manifest.sha256"))) {
             throw "CUSTOMER_RELEASE_MANIFEST_MISSING"
           }
+          foreach ($required in @("README.md", "acceptance-record.template.md")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $verify $required) -PathType Leaf)) {
+              throw "CUSTOMER_RELEASE_REQUIRED_DOCUMENT_MISSING=$required"
+            }
+          }
+
+          $listed = @{}
+          foreach ($line in Get-Content -LiteralPath (Join-Path $verify "release-manifest.sha256") -Encoding UTF8) {
+            if ($line -notmatch '^([0-9a-f]{64})  ([^\\:\r\n]+)$') {
+              throw "CUSTOMER_RELEASE_MANIFEST_INVALID"
+            }
+            $expectedHash = $Matches[1]
+            $relative = $Matches[2]
+            if ($relative.StartsWith('/') -or $relative -match '(^|/)\.\.?(/|$)' -or $relative -eq 'release-manifest.sha256') {
+              throw "CUSTOMER_RELEASE_MANIFEST_PATH_INVALID=$relative"
+            }
+            if ($listed.ContainsKey($relative)) { throw "CUSTOMER_RELEASE_MANIFEST_DUPLICATE=$relative" }
+            $filePath = Join-Path $verify $relative
+            if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
+              throw "CUSTOMER_RELEASE_MANIFEST_FILE_MISSING=$relative"
+            }
+            $actualHash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $expectedHash) { throw "CUSTOMER_RELEASE_CHECKSUM_MISMATCH=$relative" }
+            $listed[$relative] = $true
+          }
+          if ($listed.Count -eq 0) { throw "CUSTOMER_RELEASE_MANIFEST_EMPTY" }
+          foreach ($file in Get-ChildItem -LiteralPath $verify -Recurse -File) {
+            $relative = $file.FullName.Substring($verify.Length).TrimStart([char[]]"\/").Replace("\", "/")
+            if ($relative -ne 'release-manifest.sha256' -and -not $listed.ContainsKey($relative)) {
+              throw "CUSTOMER_RELEASE_UNLISTED_FILE=$relative"
+            }
+          }
+          Write-Host "CUSTOMER_RELEASE_VERIFIED_MANIFEST_ENTRIES=$($listed.Count)"
+
           $forbidden = Get-ChildItem -Path $verify -Recurse -File | Where-Object {
             $_.FullName -match "[\\/]src[\\/]" -or
             $_.Name -match "\.pem$|\.key$|^\.env"
@@ -207,6 +242,8 @@ jobs:
         shell: powershell
         run: |
           Write-Host 'CUSTOMER_DEPLOYMENT_PACKAGE=PASS'
+          Write-Host 'CUSTOMER_HANDOFF_TEMPLATE=PASS'
+          Write-Host 'CUSTOMER_RELEASE_CHECKSUMS=PASS'
           Write-Host 'FOLLOWER_EXECUTION_BOUNDARY=PASS'
           Write-Host 'SIGNED_COPY_COMMAND_TO_EXECUTOR_E2E=PASS'
           Write-Host 'MT5_FOLLOWER_PRODUCTION_WIRING_SIMULATED=PASS'

@@ -69,6 +69,7 @@ foreach ($package in $packages) {
 Copy-Item -Recurse -Force (Join-Path $repoRoot "customer-release\bin") (Join-Path $releaseDir "bin")
 Copy-Item -Recurse -Force (Join-Path $repoRoot "customer-release\config") (Join-Path $releaseDir "config")
 Copy-Item -Force (Join-Path $repoRoot "customer-release\README.md") (Join-Path $releaseDir "README.md")
+Copy-Item -Force (Join-Path $repoRoot "customer-release\acceptance-record.template.md") (Join-Path $releaseDir "acceptance-record.template.md")
 
 @'
 {
