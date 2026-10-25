@@ -34,8 +34,8 @@ $lease = [ordered]@{
   version = 1
   status = 'OFFLINE_EXPECTED'
   reason = $Reason
-  issuedAt = $now.ToString('o')
-  expiresAt = $now.AddHours($DurationHours).ToString('o')
+  issuedAtEpochMs = $now.ToUnixTimeMilliseconds()
+  expiresAtEpochMs = $now.AddHours($DurationHours).ToUnixTimeMilliseconds()
 }
 $tempPath = Join-Path $dir ("auto-live-monitor-offline-lease." + [guid]::NewGuid().ToString('N') + '.tmp')
 try {
@@ -49,6 +49,6 @@ if ((Get-AutoLiveOfflineLeaseState -ProductionRoot $ProductionRoot) -ne 'VALID')
   throw 'MONITOR_OFFLINE_LEASE_VERIFICATION_FAILED'
 }
 Write-Host 'MONITOR_EXPECTED_OFFLINE_LEASE=VALID'
-Write-Host "MONITOR_OFFLINE_LEASE_EXPIRES_UTC=$($lease.expiresAt)"
+Write-Host "MONITOR_OFFLINE_LEASE_EXPIRES_UTC=$($now.AddHours($DurationHours).ToString('o'))"
 Write-Host 'MONITOR_RUNTIME_HEALTH=NOT_VERIFIED'
 Write-Host 'PRODUCTION_TRADING_MUTATION=NONE'
