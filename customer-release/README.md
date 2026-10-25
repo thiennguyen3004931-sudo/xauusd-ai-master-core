@@ -4,6 +4,37 @@ This package contains customer-side libraries and bootstrap scripts only. It is 
 
 It does **not** contain Master strategy, risk, execution, MT5 bridge, server persistence, or Master source code. A successful package build or activation is not proof that a real customer terminal is installed correctly or that LIVE trading is accepted.
 
+## Safe Windows installation (customer package preparation only)
+
+The approved GitHub Actions **outer** artifact contains `customer-agent-v1.zip` and
+`install-customer-agent-safe.ps1` as separate files. Obtain the **exact inner
+ZIP SHA-256** for that release from the approved operator; do not confuse it with
+the SHA-256 of the outer Actions artifact.
+
+On the intended customer Windows PC with Node.js **24.x**:
+
+```powershell
+$zip = 'C:\ApprovedCustomerPackage\customer-agent-v1.zip'
+$installer = 'C:\ApprovedCustomerPackage\install-customer-agent-safe.ps1'
+$approvedInnerSha256 = '<64-character-lowercase-SHA256-provided-by-operator>'
+& $installer -ZipPath $zip -ExpectedSha256 $approvedInnerSha256 -ProductMode SELF_MANAGED
+```
+
+For COPY_FOLLOWER replace `SELF_MANAGED` with `COPY_FOLLOWER`. The installer
+checks the archive hash and its internal manifest, refuses unsafe ZIP paths,
+and **never overwrites an existing installation or customer key**. It copies
+one of `config/self-managed.example.json` or
+`config/copy-follower.example.json` to `config/customer-agent.json`.
+The gateway hostname, grant and account fields are **placeholders** and
+must be set for the particular authorized customer before activation.
+Do not paste the customer API bearer token into this file.
+
+The installer deliberately **does not** generate the customer's identity,
+activate a grant, launch MT5, execute orders or install a trading bot.
+Identity enrollment and activation are separate steps below; full
+SELF_MANAGED trading runtime and COPY_FOLLOWER real broker execution require
+separate DEMO acceptance and approval.
+
 ## 1. Supported delivery modes
 
 ### SELF_MANAGED
