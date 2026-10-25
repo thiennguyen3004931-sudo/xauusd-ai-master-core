@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - 'scripts/ops/auto-live-event-monitor.ps1'
+      - 'scripts/ops/auto-live-offline-lease.ps1'
+      - 'scripts/ops/set-auto-live-monitor-offline-lease.ps1'
+      - 'scripts/test-auto-live-offline-lease.ps1'
       - 'scripts/test-auto-live-event-monitor-source.ps1'
       - '.github/workflows/auto-live-event-monitor.yml'
   pull_request:
@@ -13,6 +16,9 @@ on:
       - main
     paths:
       - 'scripts/ops/auto-live-event-monitor.ps1'
+      - 'scripts/ops/auto-live-offline-lease.ps1'
+      - 'scripts/ops/set-auto-live-monitor-offline-lease.ps1'
+      - 'scripts/test-auto-live-offline-lease.ps1'
       - '.github/workflows/auto-live-event-monitor.yml'
   workflow_dispatch:
     inputs:
@@ -49,6 +55,10 @@ jobs:
       - name: Static monitor safety contract
         shell: powershell
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-auto-live-event-monitor-source.ps1
+ 
+      - name: Expected offline lease regression
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-auto-live-offline-lease.ps1
 
       - name: Run read-only production monitor
         if: github.event_name != 'pull_request'
