@@ -89,6 +89,24 @@ export async function verifyAttestation({ zipPath, attestation, trust }) {
   }
   return { releaseId: body.releaseId, sourceCommit: body.sourceCommit, zipSha256: body.zipSha256, signerKeyId: body.signerKeyId };
 }
+// Production release identity is an independently approved input, not a claim copied
+// out of the candidate attestation. Cryptographic validity != deployment authorization.
+export async function verifyExpectedReleaseAttestation({
+  zipPath, attestation, trust, expectedReleaseId, expectedSourceCommit, expectedPublicContractCommit
+}) {
+  if (typeof expectedReleaseId !== "string" || !releasePattern.test(expectedReleaseId) ||
+      typeof expectedSourceCommit !== "string" || !shaPattern.test(expectedSourceCommit) ||
+      typeof expectedPublicContractCommit !== "string" || !shaPattern.test(expectedPublicContractCommit)) {
+    throw new Error("RELEASE_EXPECTATIONS_INVALID");
+  }
+  if (!attestation || attestation.releaseId !== expectedReleaseId ||
+      attestation.sourceCommit !== expectedSourceCommit ||
+      attestation.publicContractCommit !== expectedPublicContractCommit) {
+    throw new Error("RELEASE_EXPECTED_IDENTITY_MISMATCH");
+  }
+  return verifyAttestation({ zipPath, attestation, trust });
+}
+
 // Resolve symlinks and anchor custody to the actual repository, never process.cwd().
 export async function assertExternalReleaseSigningKeyPath(keyPath) {
   if (typeof keyPath !== "string" || keyPath.trim() === "") {
@@ -134,16 +152,25 @@ async function cli() {
     console.log("CUSTOMER_RELEASE_ATTESTATION_WRITTEN=TRUE");
     console.log("CUSTOMER_RELEASE_SIGNED_ZIP_SHA256=" + attestation.zipSha256);
   } else if (action === "verify") {
-    const allowed = ["--zip", "--attestation", "--trust"];
-    if (Object.keys(flags).some((x) => !allowed.includes(x)) || !flags["--zip"] || !flags["--attestation"]) {
+    // No caller-supplied trust roots: the operator must authenticate the
+    // pinned keyring in the accepted repository through a separate review.
+    // Expectations must come from approved release metadata, not the ZIP.
+    const required = ["--zip", "--attestation", "--expected-release-id", "--expected-source", "--expected-public"];
+    if (JSON.stringify(Object.keys(flags).sort()) !== JSON.stringify([...required].sort()) ||
+        required.some((name) => !flags[name])) {
       throw new Error("RELEASE_ARGUMENTS_INVALID");
     }
-    const result = await verifyAttestation({
+    const result = await verifyExpectedReleaseAttestation({
       zipPath: flags["--zip"],
       attestation: JSON.parse(await readFile(flags["--attestation"], "utf8")),
-      trust: JSON.parse(await readFile(flags["--trust"] || keyringDefault, "utf8"))
+      trust: JSON.parse(await readFile(keyringDefault, "utf8")),
+      expectedReleaseId: flags["--expected-release-id"],
+      expectedSourceCommit: flags["--expected-source"],
+      expectedPublicContractCommit: flags["--expected-public"]
     });
-    console.log("CUSTOMER_RELEASE_SIGNATURE=PASS");
+    console.log("CUSTOMER_RELEASE_SIGNATURE_VALID=TRUE");
+    console.log("CUSTOMER_RELEASE_EXPECTED_IDENTITY_MATCH=TRUE");
+    console.log("CUSTOMER_RELEASE_CUSTOMER_ACCEPTANCE=NOT_VERIFIED");
     console.log("CUSTOMER_RELEASE_VERIFIED_ZIP_SHA256=" + result.zipSha256);
     console.log("CUSTOMER_RELEASE_VERIFIED_SIGNER_ID=" + result.signerKeyId);
   } else {
