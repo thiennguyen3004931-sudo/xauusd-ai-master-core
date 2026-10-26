@@ -190,7 +190,9 @@ $lib = Join-Path $ProductionRoot 'scripts\lib\phase7c-account-mode.ps1'
 $accountState = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
 $envFile = [string]$accountState.envFile
 if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProductionRoot $envFile }
-$envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+# Monitoring is GET-only: a deliberate trading-disable must not prevent planned-offline classification.
+# Keep the strict LIVE config/localhost/key validation, but do not require execution permission.
+$envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE
 $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
 $bridgeHeaders = @{ 'x-mt5-api-key' = $envInfo.apiKey }
 
