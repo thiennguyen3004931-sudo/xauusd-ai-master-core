@@ -38,6 +38,31 @@ try {
   Assert-LeaseState 'INVALID'
   [System.IO.File]::WriteAllText($path, '{"version":1,"status":"OFFLINE_EXPECTED","reason":"MAINTENANCE","issuedAtEpochMs":1792886400000,"expiresAtEpochMs":1792890000000,"unexpected":true}')
   Assert-LeaseState 'INVALID'
+  # Read-only monitoring must accept a deliberately disabled trading environment.
+  # Trade execution validation must still reject it.
+  $accountLib = Join-Path $PSScriptRoot 'lib\phase7c-account-mode.ps1'
+  . $accountLib
+  $fakeEnv = Join-Path $root 'synthetic-live.env'
+  [System.IO.File]::WriteAllText($fakeEnv, @'
+MT5_API_KEY=synthetic-in-memory-not-a-real-secret
+MT5_BRIDGE_HOST=127.0.0.1
+MT5_BRIDGE_PORT=8765
+MT5_ALLOW_REAL_ACCOUNT=true
+MT5_TRADING_ENABLED=false
+MT5_MAGIC_NUMBER=270715
+'@)
+  $readOnlyConfig = Assert-Phase7CAccountEnv -EnvFile $fakeEnv -AccountMode LIVE
+  if ($readOnlyConfig.tradingEnabled -ne $false -or $readOnlyConfig.bridgeHost -ne '127.0.0.1') {
+    throw 'READ_ONLY_MONITOR_DISABLED_TRADING_ENV_MISMATCH'
+  }
+  $blockedExecution = $false
+  try {
+    $null = Assert-Phase7CAccountEnv -EnvFile $fakeEnv -AccountMode LIVE -RequireTrading
+  } catch {
+    $blockedExecution = $true
+  }
+  if (-not $blockedExecution) { throw 'TRADE_EXECUTION_GUARD_WEAKENED' }
+  Write-Host 'READ_ONLY_MONITOR_DISABLED_TRADING_ENV=PASS'
   Write-Host 'AUTO_LIVE_OFFLINE_LEASE_TEST=PASS'
   Write-Host 'PRODUCTION_MUTATION=NONE'
 } finally {
