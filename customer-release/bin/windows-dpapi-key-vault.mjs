@@ -1,4 +1,5 @@
-// Preview-only local Windows CurrentUser DPAPI primitive; not yet wired into V1 identity lifecycle.
+// Windows CurrentUser DPAPI primitive used by the new-installation identity contract.
+// Real-customer migration, ACL audit and release acceptance remain separately blocked.
 // The sensitive buffer crosses a local stdin/stdout pipe, never shell arguments or logs.
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
