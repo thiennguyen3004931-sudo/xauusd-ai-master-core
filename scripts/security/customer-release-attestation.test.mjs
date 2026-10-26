@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createAttestation, verifyAttestation } from "./customer-release-attestation.mjs";
+import { fileURLToPath } from "node:url";
+import { createAttestation, verifyAttestation, assertExternalReleaseSigningKeyPath } from "./customer-release-attestation.mjs";
 
 const SCHEMA = "xauusd-customer-release-attestation/v1";
 const sha = "197803efee5ab2c718c65076d1a9dcb16fe1319f";
@@ -94,5 +95,34 @@ test("invalid release IDs, source SHAs and timestamps fail before any signing", 
     await assert.rejects(createAttestation({ ...base, signedAt: "yesterday" }), /RELEASE_BODY_INVALID/);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("signer key custody rejects repo paths independently of process cwd", async () => {
+  const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+  const outside = await mkdtemp(path.join(tmpdir(), "release-signer-path-test-"));
+  const savedCwd = process.cwd();
+  try {
+    const tempKey = path.join(outside, "synthetic.pem");
+    await writeFile(tempKey, "SYNTHETIC_TEST_KEY_NOT_FOR_SIGNATURE");
+    assert.equal(await assertExternalReleaseSigningKeyPath(tempKey), tempKey);
+    process.chdir(outside);
+    await assert.rejects(
+      assertExternalReleaseSigningKeyPath(path.join(repositoryRoot, "package.json")),
+      /RELEASE_SIGNING_KEY_MUST_BE_OUTSIDE_REPOSITORY/,
+    );
+    // On Windows creating symlinks may require developer privileges. Other
+    // platforms validate that realpath resolves a symlink into the repository.
+    if (process.platform !== "win32") {
+      const linked = path.join(outside, "symlink-to-repo-key");
+      await symlink(path.join(repositoryRoot, "package.json"), linked);
+      await assert.rejects(
+        assertExternalReleaseSigningKeyPath(linked),
+        /RELEASE_SIGNING_KEY_MUST_BE_OUTSIDE_REPOSITORY/,
+      );
+    }
+  } finally {
+    process.chdir(savedCwd);
+    await rm(outside, { recursive: true, force: true });
   }
 });
