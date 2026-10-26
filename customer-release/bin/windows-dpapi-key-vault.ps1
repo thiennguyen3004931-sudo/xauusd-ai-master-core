@@ -20,6 +20,9 @@ try {
   if ($inputBytes.Length -lt 1 -or $inputBytes.Length -gt 65536) {
     throw 'INVALID_LENGTH'
   }
+  # Windows PowerShell 5.1 does not always resolve ProtectedData types until
+  # System.Security is loaded (unlike PowerShell 7 runtimes).
+  Add-Type -AssemblyName System.Security -ErrorAction Stop
   $entropy = [System.Text.Encoding]::UTF8.GetBytes('XAUUSD_CUSTOMER_INSTALLATION_DPAPI_V1')
   $scope = [System.Security.Cryptography.DataProtectionScope]::CurrentUser
   if ($Operation -eq 'Protect') {
