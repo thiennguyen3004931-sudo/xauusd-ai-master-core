@@ -1,4 +1,4 @@
-import { createPrivateKey } from "node:crypto";
+import { loadInstallationPrivateKey } from "./installation-identity-dpapi.mjs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -29,11 +29,15 @@ const installationId = (
 const installationPublicKey = (
   await readFile(path.resolve(config.installationPublicKeyFile), "utf8")
 ).trim();
-const privatePem = await readFile(
+// Legacy plaintext PEMs are refused. DPAPI CurrentUser decryption and the
+// private/public key match must pass before any Customer API transport is created.
+if (typeof config.installationPrivateKeyFile !== "string") {
+  throw new Error("INSTALLATION_DPAPI_PATH_REQUIRED");
+}
+const installationPrivateKey = await loadInstallationPrivateKey(
   path.resolve(config.installationPrivateKeyFile),
-  "utf8",
+  installationPublicKey,
 );
-const installationPrivateKey = createPrivateKey(privatePem);
 
 const mt5Login = Number(config.mt5Login);
 if (!Number.isSafeInteger(mt5Login) || mt5Login <= 0) {

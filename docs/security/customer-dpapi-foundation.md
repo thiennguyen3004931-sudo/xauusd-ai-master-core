@@ -1,5 +1,7 @@
 # Windows DPAPI CurrentUser — customer key-protection foundation
 
+> **2026-10-26 integration addendum — PR #170 (unmerged):** The material below documents PR #167's original **foundation** status. PR #170 proposes wiring DPAPI into the new-installation generator and activation loader. This does **not** migrate any legacy PEM or certify effective NTFS ACL/Windows profile isolation. Code integration is only provisionally complete pending exact-head CI, and commercial release remains BLOCKED. See [#169](../../issues/169).
+
 **Status: experimental foundation / NON-PRODUCTION.** This change does not migrate an existing identity, does not change the V1 installation generator or activation code, and does **not** close the commercial-release key-at-rest blocker in #166. No customer key was read or written to develop this code.
 
 ## Boundaries and rationale

@@ -6,7 +6,7 @@
   "brokerServer": "Broker-Real",
   "installationIdFile": "keys/installation-id.txt",
   "installationPublicKeyFile": "keys/installation-public.txt",
-  "installationPrivateKeyFile": "keys/installation-private.pem",
+  "installationPrivateKeyFile": "keys/installation-private.dpapi",
   "requestedBotMode": "PAUSE",
   "requestedSizingMode": "EQUITY_RATIO"
 }
