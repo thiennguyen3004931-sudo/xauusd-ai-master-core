@@ -117,6 +117,9 @@ jobs:
       - name: Customer release Ed25519 attestation tamper regression
         run: node --test scripts/security/customer-release-attestation.test.mjs
 
+      - name: Windows CurrentUser DPAPI foundation regression (synthetic memory only)
+        run: node --test scripts/customer-windows-dpapi-foundation.test.mjs
+
       - name: Customer agent unit tests
         run: pnpm --filter @xauusd/customer-agent test
 
