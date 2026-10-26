@@ -1,0 +1,73 @@
+# Read-only conservative NTFS ACL policy for customer installation key material.
+# This is an *advisory preflight*, NOT a complete effective-permissions proof.
+# No filesystem ACLs are modified by any function in this file.
+function Test-CustomerKeyAclRuleSet {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory = $true)][string]$OwnerSid,
+    [Parameter(Mandatory = $true)][string]$CurrentUserSid,
+    [Parameter(Mandatory = $true)][bool]$InheritanceProtected,
+    [Parameter(Mandatory = $true)][object[]]$Rules
+  )
+
+  if (-not $InheritanceProtected) { return $false }
+  if ($OwnerSid -cne $CurrentUserSid -and $OwnerSid -cne 'S-1-5-32-544') {
+    return $false
+  }
+
+  # Only the current user, SYSTEM and built-in Administrators may have any
+  # explicit allow grants. Unknown, inherited or translated broad groups
+  # cause a conservative fail-closed result.
+  $allowedSids = @($CurrentUserSid, 'S-1-5-18', 'S-1-5-32-544')
+  $sawUserRead = $false
+  foreach ($entry in $Rules) {
+    if ($null -eq $entry) { return $false }
+    $sid = [string]$entry.Sid
+    $type = [string]$entry.Type
+    $rights = [int64]$entry.Rights
+    if ($entry.Inherited -eq $true -or [string]::IsNullOrWhiteSpace($sid)) {
+      return $false
+    }
+    if ($type -ceq 'Allow') {
+      if ($sid -cnotin $allowedSids) { return $false }
+      if ($sid -ceq $CurrentUserSid -and
+          (($rights -band [int64][System.Security.AccessControl.FileSystemRights]::ReadData) -ne 0)) {
+        $sawUserRead = $true
+      }
+    } elseif ($type -ceq 'Deny') {
+      # Denial applying to this user might block recovery/activation.
+      if ($sid -ceq $CurrentUserSid -or $sid -ceq 'S-1-1-0' -or $sid -ceq 'S-1-5-11') {
+        return $false
+      }
+    } else {
+      return $false
+    }
+  }
+  return $sawUserRead
+}
+
+function Test-CustomerKeyAclPath {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$CurrentUserSid,
+    [Parameter(Mandatory = $true)][bool]$ExpectDirectory
+  )
+  $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+  if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+  if ([bool]$item.PSIsContainer -ne $ExpectDirectory) { return $false }
+
+  $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+  $ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+  $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) |
+    ForEach-Object {
+      [pscustomobject]@{
+        Sid = $_.IdentityReference.Value
+        Type = $_.AccessControlType.ToString()
+        Rights = [int64]$_.FileSystemRights
+        Inherited = [bool]$_.IsInherited
+      }
+    })
+  return Test-CustomerKeyAclRuleSet -OwnerSid $ownerSid -CurrentUserSid $CurrentUserSid `
+    -InheritanceProtected ([bool]$acl.AreAccessRulesProtected) -Rules $rules
+}
