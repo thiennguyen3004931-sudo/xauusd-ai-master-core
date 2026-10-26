@@ -35,3 +35,38 @@ function Get-AutoLiveOfflineLeaseState {
     return 'INVALID'
   }
 }
+
+# A protocol/HTTP error must NEVER become expected offline, even when its text
+# mentions a timeout. Known socket failures are connectivity failures.
+function Get-AutoLiveBridgeFailureCategory {
+  param([Parameter(Mandatory = $true)][System.Exception]$Exception)
+  if ($Exception -is [System.Net.WebException]) {
+    if ($null -ne $Exception.Response -or $Exception.Status -eq [System.Net.WebExceptionStatus]::ProtocolError) {
+      return 'READ_FAILURE'
+    }
+    if ($Exception.Status -in @(
+      [System.Net.WebExceptionStatus]::ConnectFailure,
+      [System.Net.WebExceptionStatus]::Timeout,
+      [System.Net.WebExceptionStatus]::NameResolutionFailure,
+      [System.Net.WebExceptionStatus]::ProxyNameResolutionFailure
+    )) {
+      return 'CONNECTIVITY_FAILURE'
+    }
+    return 'READ_FAILURE'
+  }
+  $message = [string]$Exception.Message
+  if ($message -match '(?i)(http\s*[45][0-9]{2}|\b(401|403|404|429|500|502|503)\b|unauthorized|forbidden|access denied)') {
+    return 'READ_FAILURE'
+  }
+  if ($message -match '(?i)(unable to connect|connection refused|actively refused|timed out|could not establish)') {
+    return 'CONNECTIVITY_FAILURE'
+  }
+  return 'READ_FAILURE'
+}
+function Test-AutoLiveExpectedOffline {
+  param(
+    [Parameter(Mandatory = $true)][string]$FailureCategory,
+    [Parameter(Mandatory = $true)][string]$LeaseState
+  )
+  return ($FailureCategory -ceq 'CONNECTIVITY_FAILURE' -and $LeaseState -ceq 'VALID')
+}
