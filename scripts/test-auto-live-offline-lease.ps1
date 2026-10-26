@@ -64,9 +64,9 @@ MT5_MAGIC_NUMBER=270715
   if (-not $blockedExecution) { throw 'TRADE_EXECUTION_GUARD_WEAKENED' }
   Write-Host 'READ_ONLY_MONITOR_DISABLED_TRADING_ENV=PASS'
   # No network or production issue requests: classify synthetic exception objects.
-  $socketFailure = New-Object System.Net.WebException('Synthetic socket refused', [System.Net.WebExceptionStatus]::ConnectFailure)
-  $httpFailure = New-Object System.Net.WebException('HTTP 401 timed out', [System.Net.WebExceptionStatus]::ProtocolError)
-  $timeoutFailure = New-Object System.Net.WebException('Synthetic timeout', [System.Net.WebExceptionStatus]::Timeout)
+  $socketFailure = [System.Net.WebException]::new('Synthetic socket refused', [System.Net.WebExceptionStatus]::ConnectFailure)
+  $httpFailure = [System.Net.WebException]::new('HTTP 401 timed out', [System.Net.WebExceptionStatus]::ProtocolError)
+  $timeoutFailure = [System.Net.WebException]::new('Synthetic timeout', [System.Net.WebExceptionStatus]::Timeout)
   if ((Get-AutoLiveBridgeFailureCategory -Exception $socketFailure) -cne 'CONNECTIVITY_FAILURE') {
     throw 'SOCKET_CONNECT_FAILURE_WRONGLY_CLASSIFIED'
   }
@@ -76,10 +76,10 @@ MT5_MAGIC_NUMBER=270715
   if ((Get-AutoLiveBridgeFailureCategory -Exception $httpFailure) -cne 'READ_FAILURE') {
     throw 'HTTP_AUTH_FAILURE_WRONGLY_CLASSIFIED'
   }
-  if ((Get-AutoLiveBridgeFailureCategory -Exception (New-Object System.Exception('HTTP 403 timed out'))) -cne 'READ_FAILURE') {
+  if ((Get-AutoLiveBridgeFailureCategory -Exception ([System.Exception]::new('HTTP 403 timed out'))) -cne 'READ_FAILURE') {
     throw 'HTTP_403_ERROR_MASKED_AS_CONNECTIVITY'
   }
-  if ((Get-AutoLiveBridgeFailureCategory -Exception (New-Object System.Exception('Corrupt JSON'))) -cne 'READ_FAILURE') {
+  if ((Get-AutoLiveBridgeFailureCategory -Exception ([System.Exception]::new('Corrupt JSON'))) -cne 'READ_FAILURE') {
     throw 'CORRUPT_BRIDGE_RESPONSE_MASKED'
   }
   foreach ($leaseState in @('ABSENT','EXPIRED','INVALID')) {
