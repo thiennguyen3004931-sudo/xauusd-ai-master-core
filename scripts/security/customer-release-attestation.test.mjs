@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdtemp, writeFile, readFile, rm, symlink, realpath } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, symlink, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAttestation, verifyAttestation, verifyExpectedReleaseAttestation, assertExternalReleaseSigningKeyPath } from "./customer-release-attestation.mjs";
+import { createAttestation, verifyAttestation, verifyExpectedReleaseAttestation, assertStableReleaseZipSnapshot, assertExternalReleaseSigningKeyPath } from "./customer-release-attestation.mjs";
 
 const SCHEMA = "xauusd-customer-release-attestation/v1";
 const sha = "197803efee5ab2c718c65076d1a9dcb16fe1319f";
@@ -192,3 +192,31 @@ test("release CLI cannot accept --trust override or claim customer acceptance", 
   assert.match(cli, /CUSTOMER_RELEASE_CUSTOMER_ACCEPTANCE=NOT_VERIFIED/);
 });
 
+
+test("stable handle snapshot rejects same-size edits, replacement and truncation", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "release-zip-stability-test-"));
+  try {
+    const zipPath = path.join(root, "candidate.zip");
+    await writeFile(zipPath, "SYNTHETIC_STABLE_ZIP");
+    const info = await stat(zipPath);
+    const valid = { ...info, isFile: () => true };
+    assert.doesNotThrow(() => assertStableReleaseZipSnapshot(valid, valid, valid, valid, valid.size));
+    assert.throws(() => assertStableReleaseZipSnapshot(valid, valid, { ...valid, mtimeMs: valid.mtimeMs + 2000 }, valid, valid.size), /RELEASE_ZIP_CHANGED_DURING_READ/);
+    assert.throws(() => assertStableReleaseZipSnapshot(valid, { ...valid, ino: valid.ino + 1 }, valid, valid, valid.size), /RELEASE_ZIP_CHANGED_DURING_READ/);
+    assert.throws(() => assertStableReleaseZipSnapshot(valid, valid, valid, valid, valid.size - 1), /RELEASE_ZIP_CHANGED_DURING_READ/);
+    assert.throws(() => assertStableReleaseZipSnapshot(valid, valid, valid, null, valid.size), /RELEASE_ZIP_CHANGED_DURING_READ/);
+    if (process.platform !== "win32") {
+      const aliasPath = path.join(root, "alias.zip");
+      await symlink(zipPath, aliasPath);
+      const { privateKey } = generateKeyPairSync("ed25519");
+      await assert.rejects(createAttestation({
+        zipPath: aliasPath, releaseId: "customer-agent-v1.0.0",
+        sourceCommit: sha, publicContractCommit: publicCommit, signerKeyId: keyId,
+        signedAt: issueDate,
+        privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString()
+      }), /RELEASE_ZIP_NOT_REGULAR/);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
