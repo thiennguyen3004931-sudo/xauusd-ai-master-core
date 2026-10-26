@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'auto-live-offline-lease.ps1')
 
 $RepositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if ([string]::IsNullOrWhiteSpace($ExpectedSourceCommit)) {
@@ -118,7 +119,15 @@ function Invoke-GitHubJson {
 
 
 function Write-BridgeFailureState {
-  param([string]$FailureCategory)
+  param([string]$FailureCategory, [switch]$ExpectedOffline)
+  $targetBridgeStatus = if ($ExpectedOffline) { 'OFFLINE_EXPECTED' } else { 'FAILED' }
+  $bridgeEvent = if ($ExpectedOffline) { 'BRIDGE_OFFLINE_EXPECTED' } else { 'BRIDGE_READ_FAILED' }
+  $bridgeTitle = if ($ExpectedOffline) { 'operator-declared planned downtime' } else { 'bridge read failure' }
+  $statusNote = if ($ExpectedOffline) {
+    'A short-lived local maintenance lease authorizes the OFFLINE_EXPECTED classification only. Bot/ARM/position state is NOT VERIFIED; no current health claim is made.'
+  } else {
+    'The bridge could not be read, and no valid offline lease was established. Treat this as an incident until investigated.'
+  }
 
   $repo = $env:GITHUB_REPOSITORY
   if ([string]::IsNullOrWhiteSpace($repo)) { throw 'GITHUB_REPOSITORY is missing' }
@@ -129,7 +138,7 @@ function Write-BridgeFailureState {
   if (-not $match.Success) { throw 'AUTO_LIVE_MONITOR_STATE_MARKER_MISSING' }
   $previous = $match.Groups[1].Value | ConvertFrom-Json
 
-  if ([string](Get-ObjectProperty $previous 'bridgeReadStatus') -eq 'FAILED') {
+  if ([string](Get-ObjectProperty $previous 'bridgeReadStatus') -eq $targetBridgeStatus) {
     Write-Host 'MONITOR_BRIDGE_INCIDENT=ALREADY_RECORDED'
     return
   }
@@ -137,17 +146,17 @@ function Write-BridgeFailureState {
   $failedAt = [DateTime]::UtcNow.ToString('o')
   $lastObservedAt = [string](Get-ObjectProperty $previous 'observedAt')
   $comment = @"
-## AUTO LIVE monitor bridge read failure
+## AUTO LIVE monitor $bridgeTitle
 
-- **Event:** BRIDGE_READ_FAILED
+- **Event:** $bridgeEvent
 - **Observed at (UTC):** $failedAt
 - **Failure category:** $FailureCategory
 - **Last complete observation:** $lastObservedAt
 
-The monitor could not complete a fresh production observation. The issue's existing bot mode, ARM, positions, pending orders, and strategy fields were **not refreshed** and must be treated as historical, not as current live status.
+The monitor could not complete a fresh production observation. The issue's existing bot mode, ARM, positions, pending orders, and strategy fields were **not refreshed** and must be treated as historical, not as current live status. $statusNote
 
 ~~~text
-BRIDGE_READ_STATUS=FAILED
+BRIDGE_READ_STATUS=$targetBridgeStatus
 BRIDGE_FAILURE_CATEGORY=$FailureCategory
 PRODUCTION_READ_ONLY=TRUE
 PRODUCTION_HTTP_METHODS=GET_ONLY
@@ -161,7 +170,11 @@ LIVE_TEST_ORDER=NONE
 "@
   Invoke-GitHubJson -Method Post -Uri "$issueUri/comments" -Body @{ body = $comment } | Out-Null
 
-  $previous | Add-Member -NotePropertyName bridgeReadStatus -NotePropertyValue 'FAILED' -Force
+  if ($ExpectedOffline) {
+    $previous | Add-Member -NotePropertyName bridgeReadStatus -NotePropertyValue 'OFFLINE_EXPECTED' -Force
+  } else {
+    $previous | Add-Member -NotePropertyName bridgeReadStatus -NotePropertyValue 'FAILED' -Force
+  }
   $previous | Add-Member -NotePropertyName bridgeFailureObservedAt -NotePropertyValue $failedAt -Force
   $stateJson = $previous | ConvertTo-Json -Depth 12 -Compress
   $newMarker = "<!-- XAUUSD_AUTO_LIVE_MONITOR_STATE_JSON:$stateJson -->"
@@ -177,7 +190,9 @@ $lib = Join-Path $ProductionRoot 'scripts\lib\phase7c-account-mode.ps1'
 $accountState = Get-Content -LiteralPath $accountPath -Raw | ConvertFrom-Json
 $envFile = [string]$accountState.envFile
 if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProductionRoot $envFile }
-$envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE -RequireTrading
+# Monitoring is GET-only: a deliberate trading-disable must not prevent planned-offline classification.
+# Keep the strict LIVE config/localhost/key validation, but do not require execution permission.
+$envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE
 $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
 $bridgeHeaders = @{ 'x-mt5-api-key' = $envInfo.apiKey }
 
@@ -189,14 +204,32 @@ try {
   $bridgeHealth = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers $bridgeHeaders -Method Get -TimeoutSec 10
 } catch {
   $bridgeFailureErrorType = $_.Exception.GetType().Name
-  if ([string]$_.Exception.Message -match '(?i)(unable to connect|connection refused|actively refused|timed out|could not establish)') {
-    $bridgeFailureCategory = 'CONNECTIVITY_FAILURE'
-  } else {
-    $bridgeFailureCategory = 'READ_FAILURE'
-  }
+  $bridgeFailureCategory = Get-AutoLiveBridgeFailureCategory -Exception $_.Exception
 }
 
 if (-not [string]::IsNullOrWhiteSpace($bridgeFailureCategory)) {
+  # Only explicit, unexpired operator intent + connectivity loss can be expected offline.
+  # READ_FAILURE (including authentication/HTTP failures) always remains an incident.
+  $offlineLeaseState = Get-AutoLiveOfflineLeaseState -ProductionRoot $ProductionRoot
+  if (Test-AutoLiveExpectedOffline -FailureCategory $bridgeFailureCategory -LeaseState $offlineLeaseState) {
+    Write-Host 'MONITOR_BRIDGE_READ_STATUS=OFFLINE_EXPECTED'
+    Write-Host 'MONITOR_RUNTIME_HEALTH=NOT_VERIFIED'
+    Write-Host 'MONITOR_DATA_FRESHNESS=UNAVAILABLE'
+    Write-Host 'MONITOR_BOT_MODE=UNKNOWN'
+    Write-Host 'MONITOR_ARM_STATUS=UNKNOWN'
+    Write-Host 'MONITOR_POSITION_COUNT=UNKNOWN'
+    Write-Host 'MONITOR_PRODUCTION_HTTP_METHODS=GET_ONLY'
+    if ($Notify) {
+      Write-BridgeFailureState -FailureCategory $bridgeFailureCategory -ExpectedOffline
+      Write-Host 'MONITOR_REPOSITORY_MUTATION=ISSUE_METADATA_ONLY'
+    } else {
+      Write-Host 'MONITOR_NOTIFY=FALSE'
+      Write-Host 'MONITOR_REPOSITORY_MUTATION=NONE'
+    }
+    Write-Host 'MONITOR_PRODUCTION_MUTATION=NONE'
+    exit 0
+  }
+  Write-Host "MONITOR_OFFLINE_LEASE_STATUS=$offlineLeaseState"
   Write-Host 'MONITOR_BRIDGE_READ_STATUS=FAILED'
   Write-Host "MONITOR_BRIDGE_FAILURE_CATEGORY=$bridgeFailureCategory"
   Write-Host "MONITOR_BRIDGE_ERROR_TYPE=$bridgeFailureErrorType"
@@ -343,7 +376,7 @@ function Prev {
 
 $events = New-Object 'System.Collections.Generic.List[string]'
 
-if ([string](Prev 'bridgeReadStatus') -eq 'FAILED') {
+if ([string](Prev 'bridgeReadStatus') -in @('FAILED', 'OFFLINE_EXPECTED')) {
   $events.Add("BRIDGE_READ_RECOVERED: previous failure observed at $([string](Prev 'bridgeFailureObservedAt'))")
 }
 
