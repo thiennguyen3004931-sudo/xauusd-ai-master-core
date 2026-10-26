@@ -2,7 +2,7 @@
 // A release is trusted only when its signer is pinned in the independently trusted keyring.
 import { createHash, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, readFile, writeFile } from "node:fs/promises";
+import { lstat, readFile, writeFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -89,6 +89,21 @@ export async function verifyAttestation({ zipPath, attestation, trust }) {
   }
   return { releaseId: body.releaseId, sourceCommit: body.sourceCommit, zipSha256: body.zipSha256, signerKeyId: body.signerKeyId };
 }
+// Resolve symlinks and anchor custody to the actual repository, never process.cwd().
+export async function assertExternalReleaseSigningKeyPath(keyPath) {
+  if (typeof keyPath !== "string" || keyPath.trim() === "") {
+    throw new Error("RELEASE_SIGNING_KEY_FILE_NOT_SET");
+  }
+  const repositoryRoot = await realpath(fileURLToPath(new URL("../../", import.meta.url)));
+  const resolvedKey = await realpath(path.resolve(keyPath));
+  const relative = path.relative(repositoryRoot, resolvedKey);
+  if (relative === "" ||
+      (!relative.startsWith(".." + path.sep) && relative !== ".." && !path.isAbsolute(relative))) {
+    throw new Error("RELEASE_SIGNING_KEY_MUST_BE_OUTSIDE_REPOSITORY");
+  }
+  return resolvedKey;
+}
+
 function parseArgs(args) {
   const flags = {};
   if (args.length % 2 !== 0) throw new Error("RELEASE_ARGUMENTS_INVALID");
@@ -108,10 +123,8 @@ async function cli() {
     if (JSON.stringify(Object.keys(flags).sort()) !== JSON.stringify([...required].sort())) throw new Error("RELEASE_ARGUMENTS_INVALID");
     const keyPath = process.env.XAUUSD_RELEASE_SIGNING_KEY_FILE;
     if (!keyPath) throw new Error("RELEASE_SIGNING_KEY_FILE_NOT_SET");
-    if (path.resolve(keyPath).startsWith(path.resolve(process.cwd()) + path.sep)) {
-      throw new Error("RELEASE_SIGNING_KEY_MUST_BE_OUTSIDE_REPOSITORY");
-    }
-    const privateKeyPem = await readFile(keyPath, "utf8");
+    const resolvedKeyPath = await assertExternalReleaseSigningKeyPath(keyPath);
+    const privateKeyPem = await readFile(resolvedKeyPath, "utf8");
     const attestation = await createAttestation({
       zipPath: flags["--zip"], releaseId: flags["--release-id"],
       sourceCommit: flags["--source"], publicContractCommit: flags["--public"],
