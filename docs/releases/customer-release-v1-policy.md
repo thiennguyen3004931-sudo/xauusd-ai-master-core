@@ -30,8 +30,10 @@ node scripts/security/customer-release-attestation.mjs sign --zip artifacts/cust
 Then verify against an **independently trusted** pinned signer-keyring (the repository default remains empty until enrollment):
 
 ```powershell
-node scripts/security/customer-release-attestation.mjs verify --zip artifacts/customer-agent-release/customer-agent-v1.zip --attestation artifacts/customer-agent-release/customer-agent-v1.attestation.json
+node scripts/security/customer-release-attestation.mjs verify --zip artifacts/customer-agent-release/customer-agent-v1.zip --attestation artifacts/customer-agent-release/customer-agent-v1.attestation.json --expected-release-id customer-agent-v1.0.0-rc1 --expected-source <independently-approved-40-hex-main-sha> --expected-public <approved-40-hex-public-contract-sha>
 ```
+
+The verification command **does not accept `--trust` overrides**. It loads the repository-pinned public-key list; that list itself must be independently authenticated to the reviewed accepted repository revision. Release ID and SHA expectations must be obtained from an approved release decision outside the untrusted candidate attestation, not copied from it. The CLI reports separate signature validity, expected identity match and `CUSTOMER_RELEASE_CUSTOMER_ACCEPTANCE=NOT_VERIFIED`. A valid signature is **not** a commercial-distribution or trading approval.
 
 A successful signature verifies who signed the ZIP and exact bytes **relative to the trusted keyring**; it does not prove the customer installation, MT5 bridge or trading correctness. Separately check GitHub's **outer** artifact archive digest, ZIP contents against `release-manifest.sha256`, forbidden paths, and actual Windows install. Signing must happen in an isolated authorized release step, **not** automatically from a PR test runner. The signing script refuses to overwrite an existing attestation. Tests use ephemeral synthetic keys only.
 
