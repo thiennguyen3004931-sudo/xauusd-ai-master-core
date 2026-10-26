@@ -38,9 +38,11 @@ The command prints `INSTALLATION_ID` and `INSTALLATION_PUBLIC_KEY`. Send those t
 
 Run this command once for a fresh installation. If any identity file already exists, it exits with `INSTALLATION_IDENTITY_ALREADY_EXISTS` and preserves the existing files. Reuse the enrolled identity for activation; do not delete the files to force regeneration. If initialization was interrupted or an identity file is missing, preserve the remaining files and use the approved recovery process with the administrator. Moving to a new PC requires the revocation and fresh-installation process in section 8.
 
-**Never send or copy `keys/installation-private.pem`.** The private key must remain on the machine where it was generated. Do not put it in GitHub, a ticket, chat, or a support bundle.
+**DPAPI-only new identity (Windows):** the generator now stores `keys/installation-private.dpapi` encrypted using Windows DPAPI `CurrentUser`. The public key and installation ID are separate files. The key can be decrypted only in an appropriate Windows user profile on the originating machine. Non-Windows generation fails closed; it does not fall back to plaintext. The activation utility validates the decrypted private/public key pair before making any network request.
 
-**Current Windows key-at-rest limitation:** this V1 generator writes an unencrypted PKCS#8 PEM. Node's `mode: 0o600` is not independent evidence of effective Windows NTFS ACL enforcement or DPAPI encryption. Before distributing to customers, the operator must complete and document local ACL / protected-secret-store hardening and obtain a separate security sign-off. Never transfer or back up the installation private key to a different PC as a migration shortcut.
+**Never send or copy** `keys/installation-private.dpapi` or any pre-existing `keys/installation-private.pem`. Neither belongs in GitHub, tickets, chats, support bundles or customer public archives. A legacy PEM is **not** silently migrated: a legacy PEM or mixed-state identity causes initialization/activation to refuse to proceed. Preserve all existing identity files; do not delete, regenerate or overwrite an enrolled identity. Migration requires a separate authorized tool and controlled procedure.
+
+**Release blocker remains:** DPAPI library/CLI synthetic CI is not evidence of the effective NTFS ACL, Windows user/profile recovery, anti-tampering by administrators or safe migration of existing installations. These checks plus customer-machine pilot and a trusted signed release are mandatory before any commercial handoff. Never move the DPAPI ciphertext to a different machine as a migration shortcut.
 
 ## 4. Administrator provisioning
 
