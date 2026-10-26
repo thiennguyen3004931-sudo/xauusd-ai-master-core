@@ -4,15 +4,15 @@
 
 ## Boundaries and rationale
 
-- \`customer-release/bin/windows-dpapi-key-vault.ps1\` offers PowerShell 5.1 CurrentUser DPAPI Protect/Unprotect. The caller gives base64 input over an anonymous local stdin pipe and receives base64 output over stdout. The script never accepts a private key on the command line, makes network requests or writes any file.
-- \`customer-release/bin/windows-dpapi-key-vault.mjs\` is a Node 24 Windows-only wrapper. It accepts \`Buffer\`, uses a versioned \`XAUUSD_DPAPI_CURRENT_USER_V1:\` prefix for ciphertext and rejects unknown versions, malformed base64, failed PowerShell operations and non-Windows environments. The wrapper intentionally suppresses PowerShell stderr because system crypto errors may expose host details.
+- `customer-release/bin/windows-dpapi-key-vault.ps1` offers PowerShell 5.1 CurrentUser DPAPI Protect/Unprotect. The caller gives base64 input over an anonymous local stdin pipe and receives base64 output over stdout. The script never accepts a private key on the command line, makes network requests or writes any file.
+- `customer-release/bin/windows-dpapi-key-vault.mjs` is a Node 24 Windows-only wrapper. It accepts `Buffer`, uses a versioned `XAUUSD_DPAPI_CURRENT_USER_V1:` prefix for ciphertext and rejects unknown versions, malformed base64, failed PowerShell operations and non-Windows environments. The wrapper intentionally suppresses PowerShell stderr because system crypto errors may expose host details.
 - The DPAPI entropy is public domain separation, **not a substitute for account authentication or an encryption secret**. DPAPI CurrentUser ties unprotect ability to the same Windows security principal/profile and its DPAPI master-key protection. It does not resist code execution with that user's rights, local administrator compromise or a compromised host; admins also control machine state and may have recovery options.
 - Unprotect necessarily returns plaintext into Node process memory via a local child stdout pipe. Applications must immediately use and then zero mutable plaintext Buffers where practical, never log raw payloads, and avoid exposing child output in exception messages.
-- No plaintext PEM file is removed by these helpers. The current V1 generator still uses \`installation-private.pem\`, and current activation still reads that PEM directly. Do not label the customer installation protected on the basis of this library alone.
+- No plaintext PEM file is removed by these helpers. The current V1 generator still uses `installation-private.pem`, and current activation still reads that PEM directly. Do not label the customer installation protected on the basis of this library alone.
 
 ## Automated acceptance (synthetic inputs only)
 
-\`node --test scripts/customer-windows-dpapi-foundation.test.mjs\`
+`node --test scripts/customer-windows-dpapi-foundation.test.mjs`
 
 The test generates random ephemeral bytes in memory and verifies DPAPI CurrentUser round-trip, versioned ciphertext and tamper rejection without creating customer identities, reading any production paths, accessing MT5 or persisting runtime secrets. Non-Windows platforms test the fail-closed refusal; the Windows-only part must actually PASS on the approved self-hosted Windows runner. Both Private Master Core CI and Customer Deployment + Follower Execution Acceptance run the test.
 
