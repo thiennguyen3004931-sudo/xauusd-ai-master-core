@@ -44,6 +44,20 @@ Run this command once for a fresh installation. If any identity file already exi
 
 **Release blocker remains:** DPAPI library/CLI synthetic CI is not evidence of the effective NTFS ACL, Windows user/profile recovery, anti-tampering by administrators or safe migration of existing installations. These checks plus customer-machine pilot and a trusted signed release are mandatory before any commercial handoff. Never move the DPAPI ciphertext to a different machine as a migration shortcut.
 
+### Legacy unencrypted PEM migration — controlled maintenance only
+
+A **separately confirmed** helper is available at `bin/migrate-legacy-installation-identity.mjs` for a legacy installation with `keys/installation-private.pem`, `keys/installation-public.txt` and `keys/installation-id.txt` already present. It is **not invoked automatically** by the identity generator or activation. Never run it as part of general installation or on a real customer's machine without a distinct operator-approved maintenance change window and verified backup/recovery plan.
+
+On an isolated Windows test installation **containing only synthetic keys**, the explicit migration command is:
+
+```powershell
+node .\bin\migrate-legacy-installation-identity.mjs --confirm-preserve-legacy-pem
+```
+
+It rejects missing confirmation, invalid or mismatched keys, a missing/partial identity and an existing `.dpapi` target. It uses exclusive file creation (`wx`), encrypts the same Ed25519 private key under the current Windows DPAPI profile and verifies that the newly written ciphertext decrypts to the enrolled public key. **The old PEM is intentionally left untouched, and activation remains BLOCKED while it exists.** The tool neither deletes the old PEM nor claims that ordinary deletion securely removes Windows backups/SSD history. Interrupted output must be handled manually; never overwrite, silently recover by re-enrollment, or delete an identity to make the command pass.
+
+The operator must separately review NTFS ACL inheritance, current user/profile, backup retention, matching license/grant/installation identity, and the authorized **post-verification disposition of legacy plaintext**. No automated cleanup or migration of any real customer key is authorized by this code merge. The helper is **not** an acceptance certificate for commercial release, SELF_MANAGED activation or COPY_FOLLOWER.
+
 ## 4. Administrator provisioning
 
 The administrator creates a license and grant bound to all applicable fields:
