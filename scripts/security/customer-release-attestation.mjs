@@ -1,8 +1,7 @@
 // Offline, detached Ed25519 attestation for a customer ZIP. No network or trading access.
 // A release is trusted only when its signer is pinned in the independently trusted keyring.
 import { createHash, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { lstat, readFile, writeFile, realpath } from "node:fs/promises";
+import { open, lstat, readFile, writeFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,14 +36,48 @@ function transcript(body) {
   assertBody(body);
   return Buffer.from(DOMAIN + JSON.stringify(bodyKeys.map((field) => body[field])), "utf8");
 }
+// Compare the opened file descriptor with the path observed before and after
+// streaming. File replacement, truncation, and metadata changes fail closed.
+export function assertStableReleaseZipSnapshot(initial, opened, completed, pathAfter, length) {
+  const stable = (a, b) => a && b &&
+    a.dev === b.dev && a.ino === b.ino && a.size === b.size &&
+    a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs &&
+    a.birthtimeMs === b.birthtimeMs;
+  if (!initial || !initial.isFile() || !Number.isSafeInteger(initial.size) || initial.size <= 0) {
+    throw new Error("RELEASE_ZIP_NOT_REGULAR");
+  }
+  if (!stable(initial, opened) || !stable(opened, completed) ||
+      !stable(completed, pathAfter) || length !== initial.size) {
+    throw new Error("RELEASE_ZIP_CHANGED_DURING_READ");
+  }
+}
 async function fingerprint(file) {
-  const info = await lstat(file);
-  if (!info.isFile() || info.size <= 0 || !Number.isSafeInteger(info.size)) throw new Error("RELEASE_ZIP_NOT_REGULAR");
-  const h = createHash("sha256");
-  let length = 0;
-  for await (const chunk of createReadStream(file)) { h.update(chunk); length += chunk.length; }
-  if (length !== info.size) throw new Error("RELEASE_ZIP_CHANGED_DURING_READ");
-  return { zipSha256: h.digest("hex"), zipSizeBytes: length };
+  const initial = await lstat(file);
+  if (!initial.isFile() || !Number.isSafeInteger(initial.size) || initial.size <= 0) {
+    throw new Error("RELEASE_ZIP_NOT_REGULAR");
+  }
+  const handle = await open(file, "r");
+  try {
+    const opened = await handle.stat();
+    // Abort before hashing if a symlink/rename replaced the path between
+    // the initial lstat and the descriptor open.
+    if (initial.dev !== opened.dev || initial.ino !== opened.ino) {
+      throw new Error("RELEASE_ZIP_CHANGED_DURING_READ");
+    }
+    const h = createHash("sha256");
+    let length = 0;
+    for await (const chunk of handle.createReadStream({ autoClose: false })) {
+      h.update(chunk);
+      length += chunk.length;
+    }
+    const completed = await handle.stat();
+    let pathAfter;
+    try { pathAfter = await lstat(file); } catch { throw new Error("RELEASE_ZIP_CHANGED_DURING_READ"); }
+    assertStableReleaseZipSnapshot(initial, opened, completed, pathAfter, length);
+    return { zipSha256: h.digest("hex"), zipSizeBytes: length };
+  } finally {
+    await handle.close();
+  }
 }
 export async function createAttestation({ zipPath, releaseId, sourceCommit, publicContractCommit, signerKeyId, signedAt, privateKeyPem }) {
   const key = createPrivateKey(privateKeyPem);
