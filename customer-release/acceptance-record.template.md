@@ -46,6 +46,7 @@ Do not attach the installation private key. The private key must remain on the m
 | Package extracted on the intended Windows machine; Node.js 24.x confirmed | `[PASS/FAIL/BLOCKED/N/A]` | `[fill in]` |
 | Installation identity generated on that machine | `[PASS/FAIL/BLOCKED/N/A]` | `[fill in]` |
 | New identity ciphertext is DPAPI CurrentUser (no plaintext PEM, matching public key) | `[PASS/FAIL/BLOCKED/N/A]` | `[synthetic CI evidence + local host result; no key bytes]` |
+| Offline DPAPI + ACL local readiness preflight (sanitized results only) | `[PASS/FAIL/BLOCKED/N/A]` | `[exact command/checkpoint, Windows profile reference, sanitized status; never upload key bytes]` |
 | Effective Windows NTFS ACL/user-profile and backup handling verified on customer machine | `[PASS/FAIL/BLOCKED/N/A]` | `[sanitized ACL/recovery evidence; NEVER presume from CI]` |
 | Legacy PEM migration, where applicable, separately authorized and verified | `[PASS/FAIL/BLOCKED/N/A]` | `[operator approval, migration evidence or N/A; no automatic conversion]` |
 | Installation ID/public key registered by administrator | `[PASS/FAIL/BLOCKED/N/A]` | `[fill in]` |
