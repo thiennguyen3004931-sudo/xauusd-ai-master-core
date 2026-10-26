@@ -40,6 +40,8 @@ Run this command once for a fresh installation. If any identity file already exi
 
 **Never send or copy `keys/installation-private.pem`.** The private key must remain on the machine where it was generated. Do not put it in GitHub, a ticket, chat, or a support bundle.
 
+**Current Windows key-at-rest limitation:** this V1 generator writes an unencrypted PKCS#8 PEM. Node's `mode: 0o600` is not independent evidence of effective Windows NTFS ACL enforcement or DPAPI encryption. Before distributing to customers, the operator must complete and document local ACL / protected-secret-store hardening and obtain a separate security sign-off. Never transfer or back up the installation private key to a different PC as a migration shortcut.
+
 ## 4. Administrator provisioning
 
 The administrator creates a license and grant bound to all applicable fields:
@@ -144,3 +146,5 @@ Do not bypass an authentication, installation, account, sequence or replay check
 - LIVE ARM, Master BOT_MODE changes, account switching, and LIVE test orders: not part of customer package acceptance.
 
 The final production handoff requires a successful acceptance run on the exact final `main` commit, a verified package artifact, a successful customer installation/binding check, and separate approval for any real MT5 execution. Never infer current production BOT_MODE or ARM status from an old monitor snapshot when the bridge cannot be read.
+
+**Release status:** a passing ZIP/package checksum check is not a signed commercial release. Verify both the GitHub Actions outer artifact digest and inner customer ZIP digest; require trusted publisher signature before customer distribution. Keep a known-good rollback artifact and record the exact final-main CI evidence. No routine in this package authorizes MT5 DEMO or LIVE execution.

@@ -101,6 +101,9 @@ jobs:
       - name: Tracked-secret boundary
         run: node scripts/security/check-private-secrets.mjs --tracked
 
+      - name: Customer release Ed25519 attestation tamper regression
+        run: node --test scripts/security/customer-release-attestation.test.mjs
+
       - name: Windows CurrentUser DPAPI foundation regression (synthetic memory only)
         run: node --test scripts/customer-windows-dpapi-foundation.test.mjs
 
