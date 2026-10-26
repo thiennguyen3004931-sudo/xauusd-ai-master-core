@@ -8,7 +8,7 @@ Status: **release candidate policy**, not an authorized LIVE trading release. Pr
 2. Require Canonical Gate, Private Master Core CI and every relevant customer E2E/package workflow to PASS on the accepted change set. Record each run and SHA.
 3. Build a customer package with exact dependency lock; require clean ZIP extraction, manifest SHA-256 verification, missing/extra-file rejection and zero private Master sources/credentials.
 4. Download the GitHub artifact through an authenticated approved process. Hash **outer GitHub artifact archive** and **inner customer ZIP** separately. Compare outer digest with GitHub metadata, verify every inner manifest entry, and retain immutable masked evidence.
-5. Create a release identifier (for example `customer-agent-v1.0.0-rc1`) and a signed manifest bound to product mode, source SHA, public contract, inner ZIP hash and release time. Signing private key must be provisioned outside GitHub, repository, customer ZIP and logs. Signature verification code and trusted public-key IDs may be distributed.
+5. Create a release identifier (for example `customer-agent-v1.0.0-rc1`) and a detached attestation binding source SHA, public contract, inner ZIP hash, signer ID and release time. This shared ZIP supports both `SELF_MANAGED` and `COPY_FOLLOWER`; **the attestation does not authorize or bind an individual customer's product mode**. Product-mode authorization belongs to the separately validated per-installation license/grant. Signing private key must be provisioned outside GitHub, repository, customer ZIP and logs. Signing private key must be provisioned outside GitHub, repository, customer ZIP and logs. Signature verification code and trusted public-key IDs may be distributed.
 6. If signature infrastructure is absent, classify status `UNSIGNED_RC_NOT_FOR_CUSTOMERS`; a SHA-256 alone checks integrity against a trusted digest but does **not** authenticate the publisher. Do not assert signature PASS.
 7. Release metadata must specify artifact retention expiry, known limitations, approved installation path, help/support, security incident escalation, and explicit DEMO/LIVE permission boundaries.
 8. Each customer has their own installation identity, licensed grant, broker/account binding and **blank completed-on-site** acceptance record; never fill customer-specific tokens/keys into this repo.
@@ -48,9 +48,9 @@ A successful signature verifies who signed the ZIP and exact bytes **relative to
 
 | Gate | Owner and evidence | Status as of initial assessment |
 | --- | --- | --- |
-| Code/test/CI candidate | PR URLs, final SHA and jobs | Existing CI evidence recorded; refresh before release |
-| Digest and internal manifest | Two independent hashes, full file list | Inner manifest passed CI; outer hash is GitHub-reported |
-| Cryptographic release signature | Trusted verification, signature ID and detached signature | NOT IMPLEMENTED / NOT VERIFIED |
+| Code/test/CI candidate | PR URLs, exact PR head SHA and jobs | PR #165 5/5 PASS on `c38939eb533c1043dd6345ee989138167819c9af` (2026-10-26); refresh after every commit and on accepted `main` |
+| Digest and internal manifest | Two independent hashes, full file list | Historical artifact ID `12601917570` independently verified: outer SHA-256, inner ZIP SHA-256, 21/21 internal entries (2026-10-26); refresh for any new release |
+| Cryptographic release signature | Trusted verification, signature ID and detached signature | Tooling implemented and synthetic tests PASS in PR #165; publisher keyring **empty**, no real signed artifact or authenticated publisher enrollment: BLOCKED |
 | Real customer SELF_MANAGED | Separate Windows machine acceptance + sign-off | NOT VERIFIED |
 | COPY_FOLLOWER on MT5 DEMO | Segregated and explicitly approved broker demo E2E | NOT VERIFIED |
 | Production LIVE | Separate approval and risk gating | NOT AUTHORIZED |
