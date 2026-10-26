@@ -77,10 +77,11 @@ $IssueReadIndex = $Monitor.IndexOf('$issue = Invoke-GitHubJson -Method Get', [Sy
 if ($NotifyGuardIndex -lt 0 -or $IssueReadIndex -lt 0 -or $NotifyGuardIndex -ge $IssueReadIndex) {
   throw 'Notify=false guard must exit before normal state persistence.'
 }
-$BridgeFailureCallIndex = $Monitor.IndexOf('Write-BridgeFailureState -FailureCategory $bridgeFailureCategory', [System.StringComparison]::Ordinal)
-if ($NotifyGuardIndex -lt 0 -or $BridgeFailureCallIndex -lt 0 -or $NotifyGuardIndex -ge $BridgeFailureCallIndex) {
-  throw 'Bridge failure persistence must be guarded by Notify=true.'
-}
+# Both bridge persistence call sites must have their OWN notify guard.
+# The planned-downtime handler legitimately occurs before the normal $Notify guard.
+# Do not compare against the first occurrence of a different branch's guard.
+Assert-Match $Monitor '(?s)if \(\$Notify\)\s*\{\s*Write-BridgeFailureState -FailureCategory \$bridgeFailureCategory -ExpectedOffline\s*Write-Host' 'expected downtime issue persistence requires explicit notify'
+Assert-Match $Monitor '(?s)if \(-not \$Notify\)\s*\{\s*Write-Host ''MONITOR_NOTIFY=FALSE''\s*Write-Host ''MONITOR_REPOSITORY_MUTATION=NONE''\s*throw "AUTO_LIVE_BRIDGE_READ_FAILED: \$bridgeFailureCategory"\s*\}\s*Write-BridgeFailureState -FailureCategory \$bridgeFailureCategory' 'unexpected bridge failure issue persistence requires explicit notify'
 
 Assert-Literal $Monitor 'Read-BridgeArray -Uri "$bridgeBase/v1/positions?symbol=XAUUSD"' 'position read endpoint'
 Assert-Literal $Monitor 'Read-BridgeArray -Uri "$bridgeBase/v1/orders?symbol=XAUUSD"' 'pending-order read endpoint'
