@@ -107,6 +107,9 @@ jobs:
       - name: Windows CurrentUser DPAPI foundation regression (synthetic memory only)
         run: node --test scripts/customer-windows-dpapi-foundation.test.mjs
 
+      - name: Synthetic legacy PEM migration preservation and DPAPI verification (Windows only)
+        run: node --test scripts/customer-legacy-pem-migration.test.mjs
+
       - name: Windows customer key NTFS ACL conservative policy (synthetic SIDs only)
         run: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-customer-key-ntfs-acl.ps1
 
