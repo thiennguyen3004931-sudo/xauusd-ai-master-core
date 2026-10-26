@@ -202,7 +202,9 @@ test("stable handle snapshot rejects same-size edits, replacement and truncation
     const valid = { ...info, isFile: () => true };
     assert.doesNotThrow(() => assertStableReleaseZipSnapshot(valid, valid, valid, valid, valid.size));
     assert.throws(() => assertStableReleaseZipSnapshot(valid, valid, { ...valid, mtimeMs: valid.mtimeMs + 2000 }, valid, valid.size), /RELEASE_ZIP_CHANGED_DURING_READ/);
-    assert.throws(() => assertStableReleaseZipSnapshot(valid, { ...valid, ino: valid.ino + 1 }, valid, valid, valid.size), /RELEASE_ZIP_CHANGED_DURING_READ/);
+    // Windows file indexes may be above Number.MAX_SAFE_INTEGER, where ino + 1 rounds back to ino.
+    // Use an unambiguously distinct synthetic identity regardless of host filesystem representation.
+    assert.throws(() => assertStableReleaseZipSnapshot(valid, { ...valid, ino: Symbol('synthetic-replacement-inode') }, valid, valid, valid.size), /RELEASE_ZIP_CHANGED_DURING_READ/);
     assert.throws(() => assertStableReleaseZipSnapshot(valid, valid, valid, valid, valid.size - 1), /RELEASE_ZIP_CHANGED_DURING_READ/);
     assert.throws(() => assertStableReleaseZipSnapshot(valid, valid, valid, null, valid.size), /RELEASE_ZIP_CHANGED_DURING_READ/);
     if (process.platform !== "win32") {
