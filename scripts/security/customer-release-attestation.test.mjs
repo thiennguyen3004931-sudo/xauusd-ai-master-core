@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdtemp, writeFile, readFile, rm, symlink } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, symlink, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAttestation, verifyAttestation, assertExternalReleaseSigningKeyPath } from "./customer-release-attestation.mjs";
+import { createAttestation, verifyAttestation, verifyExpectedReleaseAttestation, assertExternalReleaseSigningKeyPath } from "./customer-release-attestation.mjs";
 
 const SCHEMA = "xauusd-customer-release-attestation/v1";
 const sha = "197803efee5ab2c718c65076d1a9dcb16fe1319f";
@@ -105,7 +105,7 @@ test("signer key custody rejects repo paths independently of process cwd", async
   try {
     const tempKey = path.join(outside, "synthetic.pem");
     await writeFile(tempKey, "SYNTHETIC_TEST_KEY_NOT_FOR_SIGNATURE");
-    assert.equal(await assertExternalReleaseSigningKeyPath(tempKey), tempKey);
+    assert.equal(await assertExternalReleaseSigningKeyPath(tempKey), await realpath(tempKey));
     process.chdir(outside);
     await assert.rejects(
       assertExternalReleaseSigningKeyPath(path.join(repositoryRoot, "package.json")),
@@ -126,3 +126,69 @@ test("signer key custody rejects repo paths independently of process cwd", async
     await rm(outside, { recursive: true, force: true });
   }
 });
+
+test("production expectations reject a valid but different signed release and trust substitution", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "release-approved-id-test-"));
+  try {
+    const zipPath = path.join(root, "candidate.zip");
+    await writeFile(zipPath, "SYNTHETIC_ZIP_BYTES_ONLY");
+    const pair = generateKeyPairSync("ed25519");
+    const signerKeyId = "synthetic-operator";
+    const trust = { schema: SCHEMA, signers: [{
+      keyId: signerKeyId,
+      publicKeyPem: pair.publicKey.export({ format: "pem", type: "spki" }).toString()
+    }] };
+    const attestation = await createAttestation({
+      zipPath, releaseId: "customer-agent-v1.0.0-rc1",
+      sourceCommit: sha, publicContractCommit: publicCommit,
+      signerKeyId, signedAt: issueDate,
+      privateKeyPem: pair.privateKey.export({ format: "pem", type: "pkcs8" }).toString()
+    });
+    const accepted = {
+      zipPath, attestation, trust,
+      expectedReleaseId: attestation.releaseId,
+      expectedSourceCommit: sha,
+      expectedPublicContractCommit: publicCommit
+    };
+    assert.equal((await verifyExpectedReleaseAttestation(accepted)).sourceCommit, sha);
+    await assert.rejects(
+      verifyExpectedReleaseAttestation({ ...accepted, expectedReleaseId: "customer-agent-v1.0.1" }),
+      /RELEASE_EXPECTED_IDENTITY_MISMATCH/
+    );
+    await assert.rejects(
+      verifyExpectedReleaseAttestation({ ...accepted, expectedSourceCommit: "f".repeat(40) }),
+      /RELEASE_EXPECTED_IDENTITY_MISMATCH/
+    );
+    await assert.rejects(
+      verifyExpectedReleaseAttestation({ ...accepted, expectedPublicContractCommit: "f".repeat(40) }),
+      /RELEASE_EXPECTED_IDENTITY_MISMATCH/
+    );
+    await assert.rejects(
+      verifyExpectedReleaseAttestation({ ...accepted, expectedSourceCommit: "latest" }),
+      /RELEASE_EXPECTATIONS_INVALID/
+    );
+    await assert.rejects(
+      verifyExpectedReleaseAttestation({ ...accepted, trust: { schema: SCHEMA, signers: [] } }),
+      /RELEASE_SIGNER_NOT_TRUSTED/
+    );
+    const attacker = generateKeyPairSync("ed25519");
+    await assert.rejects(
+      verifyExpectedReleaseAttestation({ ...accepted, trust: { schema: SCHEMA, signers: [{
+        keyId: signerKeyId,
+        publicKeyPem: attacker.publicKey.export({ format: "pem", type: "spki" }).toString()
+      }] } }),
+      /RELEASE_SIGNATURE_INVALID/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("release CLI cannot accept --trust override or claim customer acceptance", async () => {
+  const cli = await readFile(new URL("./customer-release-attestation.mjs", import.meta.url), "utf8");
+  assert.match(cli, /const required = \["--zip", "--attestation", "--expected-release-id", "--expected-source", "--expected-public"\]/);
+  assert.doesNotMatch(cli, /flags\["--trust"\]/);
+  assert.doesNotMatch(cli, /CUSTOMER_RELEASE_SIGNATURE=PASS/);
+  assert.match(cli, /CUSTOMER_RELEASE_CUSTOMER_ACCEPTANCE=NOT_VERIFIED/);
+});
+
