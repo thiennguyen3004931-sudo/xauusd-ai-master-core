@@ -85,6 +85,8 @@ Assert-Match $Monitor '(?s)if \(-not \$Notify\)\s*\{\s*Write-Host ''MONITOR_NOTI
 
 Assert-Literal $Monitor 'Read-BridgeArray -Uri "$bridgeBase/v1/positions?symbol=XAUUSD"' 'position read endpoint'
 Assert-Literal $Monitor 'Read-BridgeArray -Uri "$bridgeBase/v1/orders?symbol=XAUUSD"' 'pending-order read endpoint'
+Assert-Literal $Monitor '$envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE' 'read-only config permits disabled trading'
+Assert-NotMatch $Monitor 'Assert-Phase7CAccountEnv[^\r\n]*-RequireTrading' 'read-only monitor must not require trade execution enablement'
 Assert-Literal $Monitor 'Invoke-RestMethod -Uri "$bridgeBase/health"' 'MT5 bridge health read'
 Assert-Literal $Monitor "/api/v1/phase7c/lifecycle' -Method Get" 'lifecycle GET'
 Assert-Literal $Monitor "/api/v1/phase7c-live-arm-control/capability' -Method Get" 'ARM capability GET'
