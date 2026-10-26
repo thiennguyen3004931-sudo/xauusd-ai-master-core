@@ -204,18 +204,14 @@ try {
   $bridgeHealth = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers $bridgeHeaders -Method Get -TimeoutSec 10
 } catch {
   $bridgeFailureErrorType = $_.Exception.GetType().Name
-  if ([string]$_.Exception.Message -match '(?i)(unable to connect|connection refused|actively refused|timed out|could not establish)') {
-    $bridgeFailureCategory = 'CONNECTIVITY_FAILURE'
-  } else {
-    $bridgeFailureCategory = 'READ_FAILURE'
-  }
+  $bridgeFailureCategory = Get-AutoLiveBridgeFailureCategory -Exception $_.Exception
 }
 
 if (-not [string]::IsNullOrWhiteSpace($bridgeFailureCategory)) {
   # Only explicit, unexpired operator intent + connectivity loss can be expected offline.
   # READ_FAILURE (including authentication/HTTP failures) always remains an incident.
   $offlineLeaseState = Get-AutoLiveOfflineLeaseState -ProductionRoot $ProductionRoot
-  if ($bridgeFailureCategory -eq 'CONNECTIVITY_FAILURE' -and $offlineLeaseState -eq 'VALID') {
+  if (Test-AutoLiveExpectedOffline -FailureCategory $bridgeFailureCategory -LeaseState $offlineLeaseState) {
     Write-Host 'MONITOR_BRIDGE_READ_STATUS=OFFLINE_EXPECTED'
     Write-Host 'MONITOR_RUNTIME_HEALTH=NOT_VERIFIED'
     Write-Host 'MONITOR_DATA_FRESHNESS=UNAVAILABLE'
