@@ -63,6 +63,39 @@ MT5_MAGIC_NUMBER=270715
   }
   if (-not $blockedExecution) { throw 'TRADE_EXECUTION_GUARD_WEAKENED' }
   Write-Host 'READ_ONLY_MONITOR_DISABLED_TRADING_ENV=PASS'
+  # No network or production issue requests: classify synthetic exception objects.
+  $socketFailure = New-Object System.Net.WebException('Synthetic socket refused', [System.Net.WebExceptionStatus]::ConnectFailure)
+  $httpFailure = New-Object System.Net.WebException('HTTP 401 timed out', [System.Net.WebExceptionStatus]::ProtocolError)
+  $timeoutFailure = New-Object System.Net.WebException('Synthetic timeout', [System.Net.WebExceptionStatus]::Timeout)
+  if ((Get-AutoLiveBridgeFailureCategory -Exception $socketFailure) -cne 'CONNECTIVITY_FAILURE') {
+    throw 'SOCKET_CONNECT_FAILURE_WRONGLY_CLASSIFIED'
+  }
+  if ((Get-AutoLiveBridgeFailureCategory -Exception $timeoutFailure) -cne 'CONNECTIVITY_FAILURE') {
+    throw 'SOCKET_TIMEOUT_WRONGLY_CLASSIFIED'
+  }
+  if ((Get-AutoLiveBridgeFailureCategory -Exception $httpFailure) -cne 'READ_FAILURE') {
+    throw 'HTTP_AUTH_FAILURE_WRONGLY_CLASSIFIED'
+  }
+  if ((Get-AutoLiveBridgeFailureCategory -Exception (New-Object System.Exception('HTTP 403 timed out'))) -cne 'READ_FAILURE') {
+    throw 'HTTP_403_ERROR_MASKED_AS_CONNECTIVITY'
+  }
+  if ((Get-AutoLiveBridgeFailureCategory -Exception (New-Object System.Exception('Corrupt JSON'))) -cne 'READ_FAILURE') {
+    throw 'CORRUPT_BRIDGE_RESPONSE_MASKED'
+  }
+  foreach ($leaseState in @('ABSENT','EXPIRED','INVALID')) {
+    if (Test-AutoLiveExpectedOffline -FailureCategory 'CONNECTIVITY_FAILURE' -LeaseState $leaseState) {
+      throw "INVALID_LEASE_SUPPRESSED_CONNECTIVITY_INCIDENT:$leaseState"
+    }
+  }
+  foreach ($category in @('READ_FAILURE','AUTH_FAILURE','HTTP_FAILURE')) {
+    if (Test-AutoLiveExpectedOffline -FailureCategory $category -LeaseState 'VALID') {
+      throw "NON_CONNECTIVITY_INCIDENT_SUPPRESSED:$category"
+    }
+  }
+  if (-not (Test-AutoLiveExpectedOffline -FailureCategory 'CONNECTIVITY_FAILURE' -LeaseState 'VALID')) {
+    throw 'VALID_DECLARED_CONNECTIVITY_FAILURE_NOT_EXPECTED_OFFLINE'
+  }
+  Write-Host 'AUTO_LIVE_BRIDGE_FAILURE_CLASSIFICATION=PASS'
   Write-Host 'AUTO_LIVE_OFFLINE_LEASE_TEST=PASS'
   Write-Host 'PRODUCTION_MUTATION=NONE'
 } finally {
