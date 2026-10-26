@@ -163,3 +163,18 @@ test("corrupt DPAPI ciphertext and mixed legacy private PEM fail closed", window
     original.fill(0);
   }
 });
+
+test("customer activation refuses plaintext PEM without constructing any gateway transport", async () => {
+  const source = await readFile(
+    path.join(repoRoot, "customer-release/bin/activate-customer-agent.mjs"), "utf8",
+  );
+  const example = JSON.parse(await readFile(
+    path.join(repoRoot, "customer-release/config/customer-agent.example.json"), "utf8",
+  ));
+  assert.equal(example.installationPrivateKeyFile, "keys/installation-private.dpapi");
+  assert.match(source, /loadInstallationPrivateKey\(/);
+  assert.doesNotMatch(source, /createPrivateKey\(privatePem\)|readFile\([^)]*installationPrivateKeyFile/);
+  assert.ok(source.indexOf("await loadInstallationPrivateKey(") < source.indexOf("new HttpsCustomerAgentTransport("));
+  assert.match(source, /config\.productMode === "SELF_MANAGED"/);
+  assert.match(source, /config\.productMode === "COPY_FOLLOWER"/);
+});
