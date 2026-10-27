@@ -45,7 +45,15 @@ $full = [System.Security.AccessControl.FileSystemRights]::FullControl
 $stage = 'ACL_SETUP'
 foreach ($itemPath in @($keys, $dpapi)) {
   $stage = 'ACL_GET'
-  $acl = Get-Acl -LiteralPath $itemPath -ErrorAction Stop
+  # powershell.exe on our Windows runner may not expose Get-Acl/Set-Acl
+  # because Microsoft.PowerShell.Security is not in the module path.
+  # Use Windows PowerShell 5.1 / .NET Framework NTFS APIs directly.
+  $ntfsItem = if ($itemPath -eq $keys) {
+    [System.IO.DirectoryInfo]::new($itemPath)
+  } else {
+    [System.IO.FileInfo]::new($itemPath)
+  }
+  $acl = $ntfsItem.GetAccessControl()
   $stage = 'ACL_INHERITANCE'
   $acl.SetAccessRuleProtection($true, $false)
   $stage = 'ACL_ENUMERATE'
@@ -66,7 +74,7 @@ foreach ($itemPath in @($keys, $dpapi)) {
     ))
   }
   $stage = 'ACL_APPLY'
-  Set-Acl -LiteralPath $itemPath -AclObject $acl -ErrorAction Stop
+  $ntfsItem.SetAccessControl($acl)
   $stage = 'ACL_SETUP'
 }
 Write-Output 'SYNTHETIC_TEMP_ONLY_ACL_FIXTURE=PASS'
