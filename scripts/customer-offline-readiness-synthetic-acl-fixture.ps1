@@ -36,46 +36,63 @@ if (-not (Get-Item -LiteralPath $keys).PSIsContainer -or
 
 $stage = 'CURRENT_USER_SID'
 $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-$systemSid = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
-$adminsSid = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
-$everyoneSid = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
-$allow = [System.Security.AccessControl.AccessControlType]::Allow
-$full = [System.Security.AccessControl.FileSystemRights]::FullControl
+if ($null -eq $currentSid -or [string]::IsNullOrWhiteSpace($currentSid.Value)) {
+  throw 'SYNTHETIC_ACL_CURRENT_USER_MISSING'
+}
 
-$stage = 'ACL_SETUP'
+# Only the *test fixture*, never the customer CLI, may mutate ACLs.
+# Use the standard Windows native ACL utility because SetAccessControl()
+# throws on our self-hosted test runner; all output is suppressed.
+$stage = 'ACL_TOOL'
+$icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+if (-not [System.IO.File]::Exists($icacls)) {
+  throw 'SYNTHETIC_ACL_TOOL_UNAVAILABLE'
+}
+$full = @(
+  ('*' + $currentSid.Value + ':(F)'),
+  '*S-1-5-18:(F)',
+  '*S-1-5-32-544:(F)'
+)
+
 foreach ($itemPath in @($keys, $dpapi)) {
+  # A fresh temp fixture is owned by the current user. Refuse a foreign
+  # owner instead of taking ownership or changing any other user's files.
   $stage = 'ACL_GET'
-  # powershell.exe on our Windows runner may not expose Get-Acl/Set-Acl
-  # because Microsoft.PowerShell.Security is not in the module path.
-  # Use Windows PowerShell 5.1 / .NET Framework NTFS APIs directly.
-  $ntfsItem = if ($itemPath -eq $keys) {
+  $item = if ($itemPath -eq $keys) {
     [System.IO.DirectoryInfo]::new($itemPath)
   } else {
     [System.IO.FileInfo]::new($itemPath)
   }
-  $acl = $ntfsItem.GetAccessControl()
-  $stage = 'ACL_INHERITANCE'
-  $acl.SetAccessRuleProtection($true, $false)
-  $stage = 'ACL_ENUMERATE'
-  foreach ($rule in @($acl.Access)) {
-    $stage = 'ACL_REMOVE'
-    [void]$acl.RemoveAccessRuleSpecific($rule)
+  $acl = $item.GetAccessControl()
+  if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -cne $currentSid.Value) {
+    throw 'SYNTHETIC_ACL_FOREIGN_OWNER'
   }
-  $stage = 'ACL_OWNER'
-  $acl.SetOwner($currentSid)
-  foreach ($sid in @($currentSid, $systemSid, $adminsSid)) {
-    $stage = 'ACL_ADD'
-    $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, $full, $allow))
-  }
+
+  $stage = 'ACL_RESET'
+  & $icacls $itemPath '/reset' 1>$null 2>$null
+  if ($LASTEXITCODE -ne 0) { throw 'SYNTHETIC_ACL_RESET_FAILED' }
+
+  $stage = 'ACL_NO_INHERITANCE'
+  & $icacls $itemPath '/inheritance:r' 1>$null 2>$null
+  if ($LASTEXITCODE -ne 0) { throw 'SYNTHETIC_ACL_INHERITANCE_FAILED' }
+
+  $stage = 'ACL_GRANT'
+  & $icacls $itemPath '/grant:r' $full[0] $full[1] $full[2] 1>$null 2>$null
+  if ($LASTEXITCODE -ne 0) { throw 'SYNTHETIC_ACL_GRANT_FAILED' }
+
   if ($InjectEveryone.IsPresent -and $itemPath -eq $dpapi) {
     $stage = 'ACL_EVERYONE'
-    $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
-      $everyoneSid, [System.Security.AccessControl.FileSystemRights]::Read, $allow
-    ))
+    & $icacls $itemPath '/grant' '*S-1-1-0:(R)' 1>$null 2>$null
+    if ($LASTEXITCODE -ne 0) { throw 'SYNTHETIC_ACL_EVERYONE_FAILED' }
   }
-  $stage = 'ACL_APPLY'
-  $ntfsItem.SetAccessControl($acl)
-  $stage = 'ACL_SETUP'
+
+  # Immediate readback is mandatory; the production checker performs the
+  # strict SID and inheritance assertions later in the end-to-end test.
+  $stage = 'ACL_READBACK'
+  $after = $item.GetAccessControl()
+  if (-not $after.AreAccessRulesProtected) {
+    throw 'SYNTHETIC_ACL_INHERITANCE_NOT_REMOVED'
+  }
 }
 Write-Output 'SYNTHETIC_TEMP_ONLY_ACL_FIXTURE=PASS'
 } catch {
