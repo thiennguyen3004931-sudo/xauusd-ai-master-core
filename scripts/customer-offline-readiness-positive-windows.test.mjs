@@ -64,7 +64,7 @@ async function applySyntheticAcl(dir, injectEveryone = false) {
   ];
   if (injectEveryone) args.push("-InjectEveryone");
   const result = await run(args, repoRoot, "powershell.exe");
-  assert.equal(result.code, 0, "temp ACL fixture setup failed; no private bytes or paths printed");
+  assert.equal(result.code, 0, "temp ACL fixture setup failed (" + (result.stderr.match(/SYNTHETIC_ACL_FIXTURE_BLOCKED_STAGE=[A-Z_]+/)?.[0] ?? "NO_SANITIZED_STAGE") + ")");
   assert.match(result.stdout, /SYNTHETIC_TEMP_ONLY_ACL_FIXTURE=PASS/);
 }
 
