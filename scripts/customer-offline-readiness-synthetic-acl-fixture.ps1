@@ -44,16 +44,23 @@ $full = [System.Security.AccessControl.FileSystemRights]::FullControl
 
 $stage = 'ACL_SETUP'
 foreach ($itemPath in @($keys, $dpapi)) {
+  $stage = 'ACL_GET'
   $acl = Get-Acl -LiteralPath $itemPath -ErrorAction Stop
+  $stage = 'ACL_INHERITANCE'
   $acl.SetAccessRuleProtection($true, $false)
+  $stage = 'ACL_ENUMERATE'
   foreach ($rule in @($acl.Access)) {
+    $stage = 'ACL_REMOVE'
     [void]$acl.RemoveAccessRuleSpecific($rule)
   }
+  $stage = 'ACL_OWNER'
   $acl.SetOwner($currentSid)
   foreach ($sid in @($currentSid, $systemSid, $adminsSid)) {
+    $stage = 'ACL_ADD'
     $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, $full, $allow))
   }
   if ($InjectEveryone.IsPresent -and $itemPath -eq $dpapi) {
+    $stage = 'ACL_EVERYONE'
     $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
       $everyoneSid, [System.Security.AccessControl.FileSystemRights]::Read, $allow
     ))
