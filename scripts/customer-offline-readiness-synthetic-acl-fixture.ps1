@@ -63,7 +63,20 @@ foreach ($itemPath in @($keys, $dpapi)) {
   } else {
     [System.IO.FileInfo]::new($itemPath)
   }
-  $acl = $item.GetAccessControl()
+  # PowerShell 7/.NET surfaces NTFS access via static extension methods.
+  # PowerShell 5.1/.NET Framework uses instance GetAccessControl().
+  $extensions = [System.Type]::GetType(
+    'System.IO.FileSystemAclExtensions, System.IO.FileSystem.AccessControl', $false
+  )
+  if ($null -ne $extensions) {
+    if ($itemPath -eq $keys) {
+      $acl = [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.DirectoryInfo]$item)
+    } else {
+      $acl = [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.FileInfo]$item)
+    }
+  } else {
+    $acl = $item.GetAccessControl()
+  }
   if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -cne $currentSid.Value) {
     throw 'SYNTHETIC_ACL_FOREIGN_OWNER'
   }
@@ -89,7 +102,15 @@ foreach ($itemPath in @($keys, $dpapi)) {
   # Immediate readback is mandatory; the production checker performs the
   # strict SID and inheritance assertions later in the end-to-end test.
   $stage = 'ACL_READBACK'
-  $after = $item.GetAccessControl()
+  if ($null -ne $extensions) {
+    if ($itemPath -eq $keys) {
+      $after = [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.DirectoryInfo]$item)
+    } else {
+      $after = [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.FileInfo]$item)
+    }
+  } else {
+    $after = $item.GetAccessControl()
+  }
   if (-not $after.AreAccessRulesProtected) {
     throw 'SYNTHETIC_ACL_INHERITANCE_NOT_REMOVED'
   }
