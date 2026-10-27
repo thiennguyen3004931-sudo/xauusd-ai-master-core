@@ -65,19 +65,27 @@ foreach ($itemPath in @($keys, $dpapi)) {
   }
   # PowerShell 7/.NET surfaces NTFS access via static extension methods.
   # PowerShell 5.1/.NET Framework uses instance GetAccessControl().
+  $stage = 'ACL_TYPE_CHECK'
   $extensions = [System.Type]::GetType(
     'System.IO.FileSystemAclExtensions, System.IO.FileSystem.AccessControl', $false
   )
   if ($null -ne $extensions) {
+    $stage = 'ACL_EXTENSION_READ'
     if ($itemPath -eq $keys) {
       $acl = [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.DirectoryInfo]$item)
     } else {
       $acl = [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.FileInfo]$item)
     }
   } else {
+    $stage = 'ACL_INSTANCE_READ'
     $acl = $item.GetAccessControl()
   }
-  if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -cne $currentSid.Value) {
+  $stage = 'ACL_OWNER_CHECK'
+  $ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+  # Default Windows administrative tokens can assign newly-created TEMP files
+  # to built-in Administrators; production's conservative policy ALREADY
+  # permits current user or this specific built-in owner (S-1-5-32-544).
+  if ($ownerSid -cne $currentSid.Value -and $ownerSid -cne 'S-1-5-32-544') {
     throw 'SYNTHETIC_ACL_FOREIGN_OWNER'
   }
 
