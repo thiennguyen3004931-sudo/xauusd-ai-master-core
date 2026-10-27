@@ -58,6 +58,18 @@ It rejects missing confirmation, invalid or mismatched keys, a missing/partial i
 
 The operator must separately review NTFS ACL inheritance, current user/profile, backup retention, matching license/grant/installation identity, and the authorized **post-verification disposition of legacy plaintext**. No automated cleanup or migration of any real customer key is authorized by this code merge. The helper is **not** an acceptance certificate for commercial release, SELF_MANAGED activation or COPY_FOLLOWER.
 
+### Offline customer-machine readiness preflight (read-only)
+
+On a **separately controlled Windows customer pilot PC**, run the local command below from the extracted customer release directory as the Windows user/profile that is intended to own the installation:
+
+```powershell
+node .\bin\check-customer-installation-readiness.mjs
+```
+
+This command has **no CLI arguments and no network/MT5 activity**. It checks for legacy plaintext PEM or missing/invalid identity files, invokes the conservative read-only NTFS ACL preflight for the `keys` folder and encrypted key, then verifies that the Windows CurrentUser DPAPI ciphertext decrypts to the registered public key. It never prints key material, account SIDs or local paths, modifies file permissions or authorizes customer activation.
+
+`CUSTOMER_INSTALLATION_OFFLINE_READINESS=PASS` means only the local checks completed under that Windows user at that moment. Separate host and account verification, recovery/backup evidence, grants, approved publisher signing, client consent, and DEMO acceptance are **NOT VERIFIED** by this command. A `BLOCKED` result must not be bypassed by disabling the audit, reusing a plaintext PEM or changing requested bot modes. Do not run the command against a real customer install before the operator approves that pilot's scope.
+
 ## 4. Administrator provisioning
 
 The administrator creates a license and grant bound to all applicable fields:

@@ -110,6 +110,9 @@ jobs:
       - name: Synthetic legacy PEM migration preservation and DPAPI verification (Windows only)
         run: node --test scripts/customer-legacy-pem-migration.test.mjs
 
+      - name: Offline customer installation readiness fail-closed regression
+        run: node --test scripts/customer-offline-installation-readiness.test.mjs
+
       - name: Windows customer key NTFS ACL conservative policy (synthetic SIDs only)
         run: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-customer-key-ntfs-acl.ps1
 
