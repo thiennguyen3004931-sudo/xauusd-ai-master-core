@@ -46,6 +46,28 @@ function Test-CustomerKeyAclRuleSet {
   return $sawUserRead
 }
 
+# Windows PowerShell 5.1 exposes instance methods; some PowerShell 7/.NET
+# installations expose the same NTFS APIs only as FileSystemAclExtensions.
+# Never fall back to textual ACL parsing or permissive acceptance.
+function Get-CustomerNtfsSecurityDescriptor {
+  [CmdletBinding()]
+  param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item)
+  $extensions = [System.Type]::GetType(
+    'System.IO.FileSystemAclExtensions, System.IO.FileSystem.AccessControl', $false
+  )
+  if ($null -ne $extensions) {
+    if ($Item -is [System.IO.DirectoryInfo]) {
+      return [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.DirectoryInfo]$Item)
+    }
+    if ($Item -is [System.IO.FileInfo]) {
+      return [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.FileInfo]$Item)
+    }
+    throw 'CUSTOMER_NTFS_ACL_TYPE_UNSUPPORTED'
+  }
+  # No extension type on older .NET Framework: native instance methods.
+  return $Item.GetAccessControl()
+}
+
 function Test-CustomerKeyAclPath {
   [CmdletBinding()]
   param(
@@ -65,7 +87,7 @@ function Test-CustomerKeyAclPath {
   } else {
     [System.IO.FileInfo]::new([System.IO.Path]::GetFullPath($Path))
   }
-  $acl = $ntfsItem.GetAccessControl()
+  $acl = Get-CustomerNtfsSecurityDescriptor -Item $ntfsItem
   $ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
   $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) |
     ForEach-Object {
