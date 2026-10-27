@@ -73,5 +73,13 @@ Write-Output 'SYNTHETIC_TEMP_ONLY_ACL_FIXTURE=PASS'
 } catch {
   # Stage-only sanitized diagnostics: no absolute paths, account SIDs or Windows errors.
   [Console]::Error.WriteLine('SYNTHETIC_ACL_FIXTURE_BLOCKED_STAGE=' + $stage)
+  # Diagnostic enumeration ONLY, never raw exception messages: PowerShell
+  # exception text can contain the local Windows account or absolute path.
+  $category = [string]$_.CategoryInfo.Category
+  if ($category -cnotin @('ObjectNotFound','PermissionDenied','InvalidOperation','SecurityError','ResourceUnavailable','MetadataError','InvalidArgument','NotSpecified','ParserError')) { $category = 'OTHER' }
+  $type = $_.Exception.GetType().Name
+  if ($type -cnotin @('CommandNotFoundException','UnauthorizedAccessException','ItemNotFoundException','FileNotFoundException','DirectoryNotFoundException','ArgumentException','InvalidOperationException','MethodInvocationException','RuntimeException','SecurityException','NotSupportedException','IOException','ProviderInvocationException','PSInvalidOperationException')) { $type = 'OTHER' }
+  [Console]::Error.WriteLine('SYNTHETIC_ACL_FIXTURE_BLOCKED_CATEGORY=' + $category)
+  [Console]::Error.WriteLine('SYNTHETIC_ACL_FIXTURE_BLOCKED_EXCEPTION_TYPE=' + $type)
   exit 2
 }
