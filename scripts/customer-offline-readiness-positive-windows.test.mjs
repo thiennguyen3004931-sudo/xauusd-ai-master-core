@@ -74,7 +74,9 @@ test("synthetic ACL fixture is guarded against non-temp customer paths", async (
   assert.match(source, /xauusd-offline-positive-/);
   assert.match(source, /\$parent -ine \$tempFull/);
   assert.match(source, /SYNTHETIC_ACL_FIXTURE_ROOT_REQUIRED/);
-  assert.doesNotMatch(source, /(?<![A-Za-z])Remove-Item\b|(?<![A-Za-z])Get-Content\b/);
+  assert.match(source, /System32\\icacls\.exe/);
+  assert.match(source, /ACL_READBACK/);
+  assert.doesNotMatch(source, /\bSet-Acl\b|\.SetAccessControl\(|(?<![A-Za-z])Remove-Item\b|(?<![A-Za-z])Get-Content\b/);
 });
 
 test("Windows synthetic DPAPI + explicit restricted ACL passes OFFLINE readiness, then broad ACL fails", windowsOnly, async (t) => {
