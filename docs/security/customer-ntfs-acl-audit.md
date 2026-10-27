@@ -40,3 +40,9 @@ Runs as an isolated synthetic ruleset test in dedicated Windows CI. No real cust
 The test requires the real offline readiness command to report `PASS` with restrictive synthetic ACLs, then requires `BLOCKED` when the fixture intentionally adds Everyone read access. It also checks a substituted public key causes `BLOCKED` without changing the DPAPI ciphertext. No Gateway, MT5, broker, license or real customer key is involved.
 
 **Scope warning:** This improves confidence in the executable Windows path, but it is **not** a real-customer host ACL review, NTFS privilege/backup audit, profile recovery test, hardware compromise assessment or permission-remediation tool. Actual customer deployment remains blocked on separate evidence.
+
+## Windows PowerShell 5.1 NTFS ACL interoperability
+
+The production read-only `customer-key-ntfs-acl-policy.ps1` now obtains `DirectorySecurity` and `FileSecurity` directly through the Windows .NET Framework `DirectoryInfo.GetAccessControl()` and `FileInfo.GetAccessControl()` APIs. The original `Get-Acl` cmdlet was unavailable in the isolated Windows CI environment (`CommandNotFoundException`). This is a compatibility change **only to reading the same ACL**, not a reduced principal allowlist or permission inheritance check. Any unsupported API, access failure or invalid descriptor still produces `BLOCKED`.
+
+The **test-only** disposable Windows TEMP ACL fixture similarly uses the native `.GetAccessControl()` and `.SetAccessControl()` APIs on objects after a strict temp-directory and reparse-point guard. Only the fixture writes ACLs; the shipped customer audit and offline readiness commands remain **read-only**. The positive/negative integration tests must demonstrate actual Windows execution before this change can be merged.
