@@ -32,3 +32,11 @@ powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/
 Runs as an isolated synthetic ruleset test in dedicated Windows CI. No real customer key path or host ACL is audited by this regression. This test is wired into both Private Master Core CI and Customer Deployment + Follower Read-Only Acceptance.
 
 **Still-open P0 controls:** DPAPI identity lifecycle on actual customer Windows PC, approved migration of legacy unencrypted PEM, effective NTFS permissions and profile/backup protection, authorized release publisher and signed immutable package, revocation/recovery and independent pilot. Track these in [#169](../../issues/169) and [#166](../../issues/166). **No BOT_MODE, ARM, customer activation or MT5 orders are authorized.**
+
+## Extra Windows positive-path integration regression (synthetic disposable fixture)
+
+`node --test scripts/customer-offline-readiness-positive-windows.test.mjs` runs on the Windows CI runner under a temporary directory whose name is constrained to `xauusd-offline-positive-*`. The fixture generates an ephemeral Ed25519 private key, DPAPI-protects it under the runner's **current Windows user**, and applies a restrictive DACL **only to its own synthetic temporary folder/file** via `scripts/customer-offline-readiness-synthetic-acl-fixture.ps1`. The fixture refuses any path outside the Windows temporary directory and does not read private key file contents or touch any customer/production path.
+
+The test requires the real offline readiness command to report `PASS` with restrictive synthetic ACLs, then requires `BLOCKED` when the fixture intentionally adds Everyone read access. It also checks a substituted public key causes `BLOCKED` without changing the DPAPI ciphertext. No Gateway, MT5, broker, license or real customer key is involved.
+
+**Scope warning:** This improves confidence in the executable Windows path, but it is **not** a real-customer host ACL review, NTFS privilege/backup audit, profile recovery test, hardware compromise assessment or permission-remediation tool. Actual customer deployment remains blocked on separate evidence.
