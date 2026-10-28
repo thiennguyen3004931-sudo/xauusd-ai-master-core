@@ -114,7 +114,7 @@ describe("SqliteCustomerSecurityStore", () => {
     // blocker: restoring an older *physical file* bypasses local write guards.
     // This test intentionally does NOT assert that old-backup restore is safe.
     const path = databasePath();
-    const oldBackupPath = path.replace(/\\.sqlite$/, "-pre-revocation.sqlite");
+    const oldBackupPath = path.slice(0, -".sqlite".length) + "-pre-revocation.sqlite";
     const activeLicense = license();
     const activeGrant = createCustomerProductGrantLifecycle(
       issueSelfManagedGrant(activeLicense, {
