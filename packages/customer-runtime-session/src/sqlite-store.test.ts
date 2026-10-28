@@ -154,10 +154,10 @@ describe("SqliteCustomerSecurityStore", () => {
     // proves that a DB-local immutability rule is NOT a restore anti-rollback
     // defense. No gateway or customer agent is constructed in this test.
     const restoredOldBackup = new SqliteCustomerSecurityStore(oldBackupPath);
-    await expect(restoredOldBackup.licenses.get(activeLicense.licenseId))
-      .resolves.toEqual(activeLicense);
-    await expect(restoredOldBackup.grants.get(activeGrant.grant.grantId))
-      .resolves.toEqual(activeGrant);
+    const staleLicense = await restoredOldBackup.licenses.get(activeLicense.licenseId);
+    const staleGrant = await restoredOldBackup.grants.get(activeGrant.grant.grantId);
+    expect(staleLicense).toEqual(activeLicense);
+    expect(staleGrant).toEqual(activeGrant);
     restoredOldBackup.close();
 
     // The trusted baseline must be held independently of any restored DB.
@@ -168,8 +168,12 @@ describe("SqliteCustomerSecurityStore", () => {
       grantStatus: "REVOKED",
       revokedAt: NOW + 1,
     });
-    expect(activeLicense.status).not.toBe(independentBaseline.licenseStatus);
-    expect(activeGrant.status).not.toBe(independentBaseline.grantStatus);
+    // Check the values ACTUALLY fetched from the restored snapshot, not
+    // merely the test's original fixture variables.
+    expect(staleLicense?.status).toBe("ACTIVE");
+    expect(staleGrant?.status).toBe("ACTIVE");
+    expect(staleLicense?.status).not.toBe(independentBaseline.licenseStatus);
+    expect(staleGrant?.status).not.toBe(independentBaseline.grantStatus);
     expect(revokedLicense.revokedAt).toBe(independentBaseline.revokedAt);
     expect(revokedGrant.revokedAt).toBe(independentBaseline.revokedAt);
 
