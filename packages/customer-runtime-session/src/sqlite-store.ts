@@ -194,14 +194,47 @@ export class SqliteCustomerLicenseRepository
 
   async put(record: LicenseRecord): Promise<void> {
     assertLicenseRecord(record);
-    this.db
-      .prepare(`
-        INSERT INTO customer_license_records(license_id, payload_json)
-        VALUES (?, ?)
-        ON CONFLICT(license_id) DO UPDATE SET
-          payload_json = excluded.payload_json
-      `)
-      .run(record.licenseId, JSON.stringify(record));
+
+    // Keep an already revoked license immutable inside the live SQLite
+    // database. BEGIN IMMEDIATE serializes this check with concurrent writers
+    // so an older ACTIVE record cannot silently undo a committed revocation.
+    // This does NOT protect against restoring an older physical database
+    // backup; that needs an external trusted anti-rollback authority (#176).
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const currentRow = this.db
+        .prepare(
+          "SELECT payload_json FROM customer_license_records WHERE license_id = ?",
+        )
+        .get(record.licenseId) as SqlRow | undefined;
+
+      if (currentRow) {
+        const current = parseLicense(currentRow.payload_json);
+        if (
+          current.status === "REVOKED" &&
+          JSON.stringify(current) !== JSON.stringify(record)
+        ) {
+          throw new Error("CUSTOMER_LICENSE_REVOKED_IMMUTABLE");
+        }
+      }
+
+      this.db
+        .prepare(`
+          INSERT INTO customer_license_records(license_id, payload_json)
+          VALUES (?, ?)
+          ON CONFLICT(license_id) DO UPDATE SET
+            payload_json = excluded.payload_json
+        `)
+        .run(record.licenseId, JSON.stringify(record));
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // If SQLite already aborted the transaction, preserve original error.
+      }
+      throw error;
+    }
   }
 }
 
