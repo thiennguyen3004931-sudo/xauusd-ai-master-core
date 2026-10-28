@@ -22,15 +22,19 @@ if ($parent -ine $tempFull -or $leaf -notmatch '^xauusd-offline-positive-[A-Za-z
 
 $keys = Join-Path $rootFull 'keys'
 $dpapi = Join-Path $keys 'installation-private.dpapi'
+$public = Join-Path $keys 'installation-public.txt'
+$installationId = Join-Path $keys 'installation-id.txt'
 $stage = 'FIXTURE_FILES'
-foreach ($itemPath in @($rootFull, $keys, $dpapi)) {
+foreach ($itemPath in @($rootFull, $keys, $dpapi, $public, $installationId)) {
   $item = Get-Item -LiteralPath $itemPath -Force -ErrorAction Stop
   if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
     throw 'SYNTHETIC_ACL_REPARSE_PATH_FORBIDDEN'
   }
 }
 if (-not (Get-Item -LiteralPath $keys).PSIsContainer -or
-    (Get-Item -LiteralPath $dpapi).PSIsContainer) {
+    (Get-Item -LiteralPath $dpapi).PSIsContainer -or
+    (Get-Item -LiteralPath $public).PSIsContainer -or
+    (Get-Item -LiteralPath $installationId).PSIsContainer) {
   throw 'SYNTHETIC_ACL_FIXTURE_SHAPE_INVALID'
 }
 
@@ -40,6 +44,10 @@ if ($null -eq $currentSid -or [string]::IsNullOrWhiteSpace($currentSid.Value)) {
   throw 'SYNTHETIC_ACL_CURRENT_USER_MISSING'
 }
 
+# All four fixture resources must remain readable by the same synthetic runner
+# identity. Resetting inheritance on the keys directory while omitting the
+# two metadata files can leave their inherited DACLs inaccessible to Node.
+# These are NEW temporary test files only, never production customer files.
 # Only the *test fixture*, never the customer CLI, may mutate ACLs.
 # Use the standard Windows native ACL utility because SetAccessControl()
 # throws on our self-hosted test runner; all output is suppressed.
@@ -54,7 +62,7 @@ $full = @(
   '*S-1-5-32-544:(F)'
 )
 
-foreach ($itemPath in @($keys, $dpapi)) {
+foreach ($itemPath in @($keys, $dpapi, $public, $installationId)) {
   # A fresh temp fixture is owned by the current user. Refuse a foreign
   # owner instead of taking ownership or changing any other user's files.
   $stage = 'ACL_GET'
