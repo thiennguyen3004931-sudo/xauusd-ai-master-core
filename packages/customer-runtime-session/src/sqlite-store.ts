@@ -292,15 +292,47 @@ export class SqliteCustomerGrantRegistryRepository
       return result.changes === 1;
     }
 
-    const result = this.db
-      .prepare(`
-        UPDATE customer_grant_records
-        SET revision = ?, payload_json = ?
-        WHERE grant_id = ? AND revision = ?
-      `)
-      .run(next.revision, payload, grantId, expectedRevision);
+    // A revoked grant must never be restored to ACTIVE (or modified) by a
+    // stale writer. Serialize the state check with the revision CAS.
+    // Physical backup rollback remains a separate P0 gate (#176).
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const currentRow = this.db
+        .prepare(
+          "SELECT payload_json FROM customer_grant_records WHERE grant_id = ? AND revision = ?",
+        )
+        .get(grantId, expectedRevision) as SqlRow | undefined;
+      if (!currentRow) {
+        this.db.exec("ROLLBACK");
+        return false;
+      }
 
-    return result.changes === 1;
+      const current = parseGrant(currentRow.payload_json);
+      if (
+        current.status === "REVOKED" &&
+        JSON.stringify(current) !== payload
+      ) {
+        this.db.exec("ROLLBACK");
+        return false;
+      }
+
+      const result = this.db
+        .prepare(`
+          UPDATE customer_grant_records
+          SET revision = ?, payload_json = ?
+          WHERE grant_id = ? AND revision = ?
+        `)
+        .run(next.revision, payload, grantId, expectedRevision);
+      this.db.exec("COMMIT");
+      return result.changes === 1;
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // Preserve the original SQLite or validation failure.
+      }
+      throw error;
+    }
   }
 
   async list(): Promise<readonly CustomerProductGrantLifecycleRecord[]> {
