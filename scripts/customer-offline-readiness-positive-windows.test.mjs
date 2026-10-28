@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
 import { protectInstallationPrivateKey, loadInstallationPrivateKey } from "../customer-release/bin/installation-identity-dpapi.mjs";
+import { verifyOfflineCustomerActivation } from "../customer-release/bin/check-customer-installation-readiness.mjs";
 
 const runFile = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
