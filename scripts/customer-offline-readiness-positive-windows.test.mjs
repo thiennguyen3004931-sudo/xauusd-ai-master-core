@@ -54,7 +54,7 @@ async function fixture(t) {
   await writeFile(path.join(keys, "installation-public.txt"), publicString + "\n", { flag: "wx" });
   await writeFile(path.join(keys, "installation-id.txt"), "installation-synthetic-offline-positive\n", { flag: "wx" });
 
-  return { dir, keys, dpapi: path.join(keys, "installation-private.dpapi") };
+  return { dir, keys, dpapi: path.join(keys, "installation-private.dpapi"), publicString };
 }
 
 async function applySyntheticAcl(dir, injectEveryone = false) {
@@ -101,17 +101,25 @@ test("Windows synthetic DPAPI + explicit restricted ACL passes OFFLINE readiness
     const directory = probe.stdout.match(/SYNTHETIC_ACL_DIRECTORY=(PASS|BLOCKED|UNKNOWN)/)?.[1] ?? "UNKNOWN";
     const privateFile = probe.stdout.match(/SYNTHETIC_ACL_PRIVATE_FILE=(PASS|BLOCKED|UNKNOWN)/)?.[1] ?? "UNKNOWN";
     let dpapi = "BLOCKED";
-    const expectedPublic = (await readFile(path.join(f.keys, "installation-public.txt"), "utf8")).trim();
+    // Use synthetic key material already held in memory. A failed file read
+    // must never leak the runner's full Windows TEMP path into CI logs.
+    const expectedPublic = f.publicString;
     try {
       await loadInstallationPrivateKey(f.dpapi, expectedPublic);
       dpapi = "VERIFIED";
     } catch {
       // Intentionally discard sensitive runtime exceptions.
     }
+    let publicAccess = "BLOCKED";
+    let idAccess = "BLOCKED";
+    try { await readFile(path.join(f.keys, "installation-public.txt")); publicAccess = "PASS"; } catch {}
+    try { await readFile(path.join(f.keys, "installation-id.txt")); idAccess = "PASS"; } catch {}
     assert.equal(good.code, 0,
       "offline readiness synthetic diagnosis: ACL_AUDIT=" + (audit.code === 0 ? "PASS" : "BLOCKED") +
       "; ACL_DIRECTORY=" + directory +
       "; ACL_PRIVATE_FILE=" + privateFile +
+      "; PUBLIC_FILE_READ=" + publicAccess +
+      "; ID_FILE_READ=" + idAccess +
       "; DPAPI_CURRENT_USER=" + dpapi +
       "; COMPOSITE=BLOCKED");
   }
@@ -137,7 +145,11 @@ test("Windows offline readiness blocks a substituted public key without touching
   const before = createHash("sha256").update(await readFile(f.dpapi)).digest("hex");
   const otherPair = generateKeyPairSync("ed25519");
   const otherPublic = otherPair.publicKey.export({ type: "spki", format: "der" }).toString("base64url");
-  await writeFile(path.join(f.keys, "installation-public.txt"), otherPublic + "\n");
+  try {
+    await writeFile(path.join(f.keys, "installation-public.txt"), otherPublic + "\n");
+  } catch {
+    assert.fail("synthetic public-key substitution cannot access disposable fixture file");
+  }
   assertBlock(await run([readinessCli], f.dir));
   assert.equal(createHash("sha256").update(await readFile(f.dpapi)).digest("hex"), before);
 });
