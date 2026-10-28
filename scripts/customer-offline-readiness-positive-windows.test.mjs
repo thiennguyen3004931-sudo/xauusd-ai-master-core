@@ -10,7 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
-import { protectInstallationPrivateKey } from "../customer-release/bin/installation-identity-dpapi.mjs";
+import { protectInstallationPrivateKey, loadInstallationPrivateKey } from "../customer-release/bin/installation-identity-dpapi.mjs";
 
 const runFile = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -85,6 +85,27 @@ test("Windows synthetic DPAPI + explicit restricted ACL passes OFFLINE readiness
   await applySyntheticAcl(f.dir);
 
   const good = await run([readinessCli], f.dir);
+  if (good.code !== 0) {
+    // Diagnose only the synthetic fixture; never emit raw errors, user IDs,
+    // filesystem paths, key material or raw PowerShell stdout/stderr.
+    const auditScript = path.join(repoRoot, "customer-release/bin/audit-customer-key-ntfs-acl.ps1");
+    const audit = await run([
+      "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+      "-File", auditScript, "-InstallationRoot", f.dir,
+    ], repoRoot, "powershell.exe");
+    let dpapi = "BLOCKED";
+    const expectedPublic = (await readFile(path.join(f.keys, "installation-public.txt"), "utf8")).trim();
+    try {
+      await loadInstallationPrivateKey(f.dpapi, expectedPublic);
+      dpapi = "VERIFIED";
+    } catch {
+      // Intentionally discard sensitive runtime exceptions.
+    }
+    assert.equal(good.code, 0,
+      "offline readiness synthetic diagnosis: ACL_AUDIT=" + (audit.code === 0 ? "PASS" : "BLOCKED") +
+      "; DPAPI_CURRENT_USER=" + dpapi +
+      "; COMPOSITE=BLOCKED");
+  }
   assert.equal(good.code, 0, "conservative Windows temp fixture unexpectedly rejected");
   assert.match(good.stdout, /^CUSTOMER_INSTALLATION_OFFLINE_READINESS=PASS$/m);
   assert.match(good.stdout, /^CUSTOMER_DPAPI_IDENTITY_CURRENT_USER=VERIFIED$/m);
