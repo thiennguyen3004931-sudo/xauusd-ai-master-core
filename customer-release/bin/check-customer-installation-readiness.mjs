@@ -54,6 +54,31 @@ export async function verifyOfflineCustomerInstallation(root) {
   return true;
 }
 
+
+// Required before activating a customer agent or constructing a Gateway transport.
+// A configuration must point to the same local identity whose DPAPI/ACL state
+// was checked. Otherwise a safe preflight could be followed by a different,
+// unverified private-key path. This is read-only; no customer state is mutated.
+export async function verifyOfflineCustomerActivation(config, installationRoot) {
+  const root = path.resolve(installationRoot);
+  const identityPaths = {
+    installationIdFile: path.join(root, "keys", "installation-id.txt"),
+    installationPublicKeyFile: path.join(root, "keys", "installation-public.txt"),
+    installationPrivateKeyFile: path.join(root, "keys", "installation-private.dpapi"),
+  };
+  if (config === null || typeof config !== "object" || Array.isArray(config)) {
+    throw new Error("CUSTOMER_ACTIVATION_IDENTITY_CONFIG_INVALID");
+  }
+  for (const [field, expected] of Object.entries(identityPaths)) {
+    const supplied = config[field];
+    if (typeof supplied !== "string" || supplied.length === 0 ||
+        supplied.trim() !== supplied || path.resolve(root, supplied) !== expected) {
+      throw new Error("CUSTOMER_ACTIVATION_IDENTITY_PATH_MISMATCH");
+    }
+  }
+  return verifyOfflineCustomerInstallation(root);
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     // Always inspect the current local directory, never accept arbitrary
