@@ -142,6 +142,10 @@ test("Windows synthetic DPAPI + explicit restricted ACL passes OFFLINE readiness
   assert.doesNotMatch(good.stdout + good.stderr, /PRIVATE KEY|S-1-5-|C:\\Users\\/);
 
   await applySyntheticAcl(f.dir, true);
+  await assert.rejects(
+    verifyOfflineCustomerActivation(activationConfig, f.dir),
+    /INSTALLATION_OFFLINE_ACL_NOT_PROVEN/,
+  );
   const broad = await run([readinessCli], f.dir);
   assertBlock(broad);
   assert.equal(createHash("sha256").update(await readFile(f.dpapi)).digest("hex"), before);
