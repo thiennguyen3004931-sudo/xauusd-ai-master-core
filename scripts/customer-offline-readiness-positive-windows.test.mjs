@@ -85,6 +85,13 @@ test("Windows synthetic DPAPI + explicit restricted ACL passes OFFLINE readiness
   const before = createHash("sha256").update(await readFile(f.dpapi)).digest("hex");
   await applySyntheticAcl(f.dir);
 
+  const activationConfig = {
+    installationIdFile: "keys/installation-id.txt",
+    installationPublicKeyFile: "keys/installation-public.txt",
+    installationPrivateKeyFile: "keys/installation-private.dpapi",
+  };
+  assert.equal(await verifyOfflineCustomerActivation(activationConfig, f.dir), true);
+
   const good = await run([readinessCli], f.dir);
   if (good.code !== 0) {
     // Diagnose only the synthetic fixture; never emit raw errors, user IDs,
