@@ -98,8 +98,8 @@ test("Windows synthetic DPAPI + explicit restricted ACL passes OFFLINE readiness
       "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
       "-File", probeScript, "-Root", f.dir,
     ], repoRoot, "powershell.exe");
-    const directory = probe.stdout.match(/^SYNTHETIC_ACL_DIRECTORY=(PASS|BLOCKED|UNKNOWN)$/m)?.[1] ?? "UNKNOWN";
-    const privateFile = probe.stdout.match(/^SYNTHETIC_ACL_PRIVATE_FILE=(PASS|BLOCKED|UNKNOWN)$/m)?.[1] ?? "UNKNOWN";
+    const directory = probe.stdout.match(/SYNTHETIC_ACL_DIRECTORY=(PASS|BLOCKED|UNKNOWN)/)?.[1] ?? "UNKNOWN";
+    const privateFile = probe.stdout.match(/SYNTHETIC_ACL_PRIVATE_FILE=(PASS|BLOCKED|UNKNOWN)/)?.[1] ?? "UNKNOWN";
     let dpapi = "BLOCKED";
     const expectedPublic = (await readFile(path.join(f.keys, "installation-public.txt"), "utf8")).trim();
     try {
