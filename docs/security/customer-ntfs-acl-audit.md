@@ -32,3 +32,17 @@ powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/
 Runs as an isolated synthetic ruleset test in dedicated Windows CI. No real customer key path or host ACL is audited by this regression. This test is wired into both Private Master Core CI and Customer Deployment + Follower Read-Only Acceptance.
 
 **Still-open P0 controls:** DPAPI identity lifecycle on actual customer Windows PC, approved migration of legacy unencrypted PEM, effective NTFS permissions and profile/backup protection, authorized release publisher and signed immutable package, revocation/recovery and independent pilot. Track these in [#169](../../issues/169) and [#166](../../issues/166). **No BOT_MODE, ARM, customer activation or MT5 orders are authorized.**
+
+## Extra Windows positive-path integration regression (synthetic disposable fixture)
+
+`node --test scripts/customer-offline-readiness-positive-windows.test.mjs` runs on the Windows CI runner under a temporary directory whose name is constrained to `xauusd-offline-positive-*`. The fixture generates an ephemeral Ed25519 private key, DPAPI-protects it under the runner's **current Windows user**, and applies a restrictive DACL **only to its own synthetic temporary folder/file** via `scripts/customer-offline-readiness-synthetic-acl-fixture.ps1`. The fixture refuses any path outside the Windows temporary directory and does not read private key file contents or touch any customer/production path.
+
+The test requires the real offline readiness command to report `PASS` with restrictive synthetic ACLs, then requires `BLOCKED` when the fixture intentionally adds Everyone read access. It also checks a substituted public key causes `BLOCKED` without changing the DPAPI ciphertext. No Gateway, MT5, broker, license or real customer key is involved.
+
+**Scope warning:** This improves confidence in the executable Windows path, but it is **not** a real-customer host ACL review, NTFS privilege/backup audit, profile recovery test, hardware compromise assessment or permission-remediation tool. Actual customer deployment remains blocked on separate evidence.
+
+## Windows PowerShell 5.1 NTFS ACL interoperability
+
+The production read-only `customer-key-ntfs-acl-policy.ps1` now obtains `DirectorySecurity` and `FileSecurity` via Windows .NET `FileSystemAclExtensions.GetAccessControl()` on modern runtimes, with a Windows PowerShell 5.1 / .NET Framework instance-method fallback when the extension API is unavailable. The original `Get-Acl` cmdlet was unavailable in the isolated Windows CI environment (`CommandNotFoundException`). This is a compatibility change **only to reading the same ACL**, not a reduced principal allowlist or permission inheritance check. Any unsupported API, access failure or invalid descriptor still produces `BLOCKED`.
+
+The **test-only** disposable Windows TEMP ACL fixture uses the same version-aware .NET read API and applies ACL changes with native `icacls.exe` after a strict temp-directory/owner/reparse-point guard. Neither `Get-Acl` nor `.SetAccessControl()` is required by the fixture. Only the fixture writes ACLs; the shipped customer audit and offline readiness commands remain **read-only**. The positive/negative integration tests must demonstrate actual Windows execution before this change can be merged.

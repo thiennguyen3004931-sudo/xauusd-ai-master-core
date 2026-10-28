@@ -46,6 +46,28 @@ function Test-CustomerKeyAclRuleSet {
   return $sawUserRead
 }
 
+# Windows PowerShell 5.1 exposes instance methods; some PowerShell 7/.NET
+# installations expose the same NTFS APIs only as FileSystemAclExtensions.
+# Never fall back to textual ACL parsing or permissive acceptance.
+function Get-CustomerNtfsSecurityDescriptor {
+  [CmdletBinding()]
+  param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item)
+  $extensions = [System.Type]::GetType(
+    'System.IO.FileSystemAclExtensions, System.IO.FileSystem.AccessControl', $false
+  )
+  if ($null -ne $extensions) {
+    if ($Item -is [System.IO.DirectoryInfo]) {
+      return [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.DirectoryInfo]$Item)
+    }
+    if ($Item -is [System.IO.FileInfo]) {
+      return [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.FileInfo]$Item)
+    }
+    throw 'CUSTOMER_NTFS_ACL_TYPE_UNSUPPORTED'
+  }
+  # No extension type on older .NET Framework: native instance methods.
+  return $Item.GetAccessControl()
+}
+
 function Test-CustomerKeyAclPath {
   [CmdletBinding()]
   param(
@@ -57,7 +79,15 @@ function Test-CustomerKeyAclPath {
   if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
   if ([bool]$item.PSIsContainer -ne $ExpectDirectory) { return $false }
 
-  $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+  # Read NTFS security via Windows PowerShell 5.1 / .NET Framework APIs.
+  # Get-Acl may not be discoverable on minimal/self-hosted runners; there is
+  # NO permissive fallback. Any .NET permission/read error fails closed.
+  $ntfsItem = if ($ExpectDirectory) {
+    [System.IO.DirectoryInfo]::new([System.IO.Path]::GetFullPath($Path))
+  } else {
+    [System.IO.FileInfo]::new([System.IO.Path]::GetFullPath($Path))
+  }
+  $acl = Get-CustomerNtfsSecurityDescriptor -Item $ntfsItem
   $ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
   $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) |
     ForEach-Object {

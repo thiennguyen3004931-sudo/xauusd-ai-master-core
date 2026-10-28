@@ -45,6 +45,14 @@ $noRead = @([pscustomobject]@{
 })
 Assert-AclPolicy -Name 'write-only-is-not-read' -Expected $false -Rules $noRead
 
+$policySource = Get-Content -LiteralPath $module -Raw
+if ($policySource -notmatch 'DirectoryInfo' -or
+    $policySource -notmatch 'FileInfo' -or
+    $policySource -notmatch '\.GetAccessControl\(' -or
+    $policySource -match '\bGet-Acl\s+-LiteralPath|\.SetAccessControl\(|\bSet-Acl\b') {
+  throw 'NTFS_POLICY_READ_ONLY_NATIVE_API_CONTRACT_FAILED'
+}
+
 $cli = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\customer-release\bin\audit-customer-key-ntfs-acl.ps1') -Raw
 if ($cli -notmatch 'CUSTOMER_RELEASE_APPROVAL=NOT_VERIFIED' -or
     $cli -notmatch 'CUSTOMER_ACL_MODIFICATIONS=NONE' -or
