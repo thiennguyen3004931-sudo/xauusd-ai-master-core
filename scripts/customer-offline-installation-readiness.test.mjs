@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
-import { verifyOfflineCustomerInstallation } from "../customer-release/bin/check-customer-installation-readiness.mjs";
+import { verifyOfflineCustomerInstallation, verifyOfflineCustomerActivation } from "../customer-release/bin/check-customer-installation-readiness.mjs";
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -83,4 +83,42 @@ test("non-Windows refuses to inspect DPAPI identity without plaintext fallback",
 }, async (t) => {
   const dir = await fixture(t);
   await assert.rejects(verifyOfflineCustomerInstallation(dir), /INSTALLATION_OFFLINE_WINDOWS_ONLY/);
+});
+
+test("activation preflight rejects mismatched identity file paths before any Windows IO", async () => {
+  const dir = path.join(tmpdir(), "xauusd-preflight-nonexistent-only");
+  const valid = {
+    installationIdFile: "keys/installation-id.txt",
+    installationPublicKeyFile: "keys/installation-public.txt",
+    installationPrivateKeyFile: "keys/installation-private.dpapi",
+  };
+  for (const [field, replacement] of [
+    ["installationIdFile", "other/installation-id.txt"],
+    ["installationPublicKeyFile", "keys/../unverified-public.txt"],
+    ["installationPrivateKeyFile", "keys/installation-private.pem"],
+    ["installationPrivateKeyFile", "../other-customer/installation-private.dpapi"],
+    ["installationPrivateKeyFile", ""],
+  ]) {
+    await assert.rejects(
+      verifyOfflineCustomerActivation({ ...valid, [field]: replacement }, dir),
+      /CUSTOMER_ACTIVATION_IDENTITY_PATH_MISMATCH/,
+    );
+  }
+  await assert.rejects(
+    verifyOfflineCustomerActivation(null, dir),
+    /CUSTOMER_ACTIVATION_IDENTITY_CONFIG_INVALID/,
+  );
+});
+
+test("activation script enforces offline ACL and DPAPI gate before identity load or Gateway transport", async () => {
+  const activation = await readFile(path.join(root, "customer-release/bin/activate-customer-agent.mjs"), "utf8");
+  const gate = activation.indexOf("await verifyOfflineCustomerActivation(config, process.cwd());");
+  const load = activation.indexOf("await loadInstallationPrivateKey(");
+  const transport = activation.indexOf("new HttpsCustomerAgentTransport(");
+  assert.ok(gate >= 0 && load > gate && transport > load);
+  assert.match(activation, /from "\\.\/check-customer-installation-readiness\\.mjs"/);
+  assert.doesNotMatch(activation.slice(gate, transport), /try\s*\{|catch\s*\(/);
+  const policy = await readFile(cli, "utf8");
+  assert.match(policy, /installationPrivateKeyFile: path\\.join\\(root, "keys", "installation-private\\.dpapi"\\)/);
+  assert.ok(policy.indexOf("return verifyOfflineCustomerInstallation(root);") >= 0);
 });
