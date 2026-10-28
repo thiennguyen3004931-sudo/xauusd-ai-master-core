@@ -100,6 +100,9 @@ Set the approved HTTPS gateway URL, product mode, grant ID, MT5 login, broker se
 
 For the first SELF_MANAGED handoff, leave `requestedBotMode` as `PAUSE`. For COPY_FOLLOWER, use only the sizing mode explicitly authorized by the administrator.
 
+**Mandatory offline gate before activation (proposed software hardening):** when `node .\\bin\\activate-customer-agent.mjs` runs, it must first check the same installation's conservative read-only NTFS ACL policy and current-user DPAPI/private-public-key binding *before constructing any Gateway transport*. Run from the root of the extracted installation; the three identity-file configuration values must resolve exactly to `keys/installation-id.txt`, `keys/installation-public.txt`, and `keys/installation-private.dpapi` under that root. A different/relocated path, legacy PEM, inherited/broad ACL, wrong Windows user profile or failed DPAPI check **blocks activation**. Do not disable the gate, reset identity files or weaken NTFS permissions to make it pass. The gate does not change ACLs or activate MT5; a software check at a point in time is not full effective-permissions or customer-host acceptance. Real customer pilot use still requires separate operator approval.
+
+
 ## 6. Supply the API token and activate
 
 Set the bearer token in the current PowerShell process; do not write it into the JSON configuration:
