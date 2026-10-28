@@ -77,6 +77,38 @@ describe("SqliteCustomerSecurityStore", () => {
     reopened.close();
   });
 
+  it("never resurrects a revoked license with a stale ACTIVE write, including after reopen", async () => {
+    const path = databasePath();
+    const active = license();
+    const revoked: LicenseRecord = {
+      ...active,
+      status: "REVOKED",
+      revokedAt: NOW + 1,
+    };
+
+    const first = new SqliteCustomerSecurityStore(path);
+    await first.licenses.put(active);
+    await first.licenses.put(revoked);
+    await expect(first.licenses.put(active)).rejects.toThrow(
+      "CUSTOMER_LICENSE_REVOKED_IMMUTABLE",
+    );
+    await expect(first.licenses.get(active.licenseId)).resolves.toEqual(revoked);
+    // A repeated copy of the exact revoked record stays idempotent.
+    await expect(first.licenses.put({ ...revoked })).resolves.toBeUndefined();
+    first.close();
+
+    const reopened = new SqliteCustomerSecurityStore(path);
+    await expect(reopened.licenses.put(active)).rejects.toThrow(
+      "CUSTOMER_LICENSE_REVOKED_IMMUTABLE",
+    );
+    await expect(reopened.licenses.put({
+      ...revoked,
+      allowedMt5Logins: [770002],
+    })).rejects.toThrow("CUSTOMER_LICENSE_REVOKED_IMMUTABLE");
+    await expect(reopened.licenses.get(active.licenseId)).resolves.toEqual(revoked);
+    reopened.close();
+  });
+
   it("preserves grant compare-and-set revision semantics", async () => {
     const path = databasePath();
     const currentLicense = license();
