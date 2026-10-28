@@ -162,6 +162,11 @@ test("Windows offline readiness blocks a substituted public key without touching
   } catch {
     assert.fail("synthetic public-key substitution cannot access disposable fixture file");
   }
+  await assert.rejects(verifyOfflineCustomerActivation({
+    installationIdFile: "keys/installation-id.txt",
+    installationPublicKeyFile: "keys/installation-public.txt",
+    installationPrivateKeyFile: "keys/installation-private.dpapi",
+  }, f.dir));
   assertBlock(await run([readinessCli], f.dir));
   assert.equal(createHash("sha256").update(await readFile(f.dpapi)).digest("hex"), before);
 });
