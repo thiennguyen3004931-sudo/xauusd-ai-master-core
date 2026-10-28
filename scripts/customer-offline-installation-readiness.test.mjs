@@ -116,9 +116,9 @@ test("activation script enforces offline ACL and DPAPI gate before identity load
   const load = activation.indexOf("await loadInstallationPrivateKey(");
   const transport = activation.indexOf("new HttpsCustomerAgentTransport(");
   assert.ok(gate >= 0 && load > gate && transport > load);
-  assert.match(activation, /from "\\.\/check-customer-installation-readiness\\.mjs"/);
+  assert.ok(activation.includes('from "./check-customer-installation-readiness.mjs"'));
   assert.doesNotMatch(activation.slice(gate, transport), /try\s*\{|catch\s*\(/);
   const policy = await readFile(cli, "utf8");
-  assert.match(policy, /installationPrivateKeyFile: path\\.join\\(root, "keys", "installation-private\\.dpapi"\\)/);
+  assert.ok(policy.includes('installationPrivateKeyFile: path.join(root, "keys", "installation-private.dpapi")'));
   assert.ok(policy.indexOf("return verifyOfflineCustomerInstallation(root);") >= 0);
 });
