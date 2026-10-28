@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
 import { protectInstallationPrivateKey, loadInstallationPrivateKey } from "../customer-release/bin/installation-identity-dpapi.mjs";
+import { verifyOfflineCustomerActivation } from "../customer-release/bin/check-customer-installation-readiness.mjs";
 
 const runFile = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -84,6 +85,13 @@ test("Windows synthetic DPAPI + explicit restricted ACL passes OFFLINE readiness
   const before = createHash("sha256").update(await readFile(f.dpapi)).digest("hex");
   await applySyntheticAcl(f.dir);
 
+  const activationConfig = {
+    installationIdFile: "keys/installation-id.txt",
+    installationPublicKeyFile: "keys/installation-public.txt",
+    installationPrivateKeyFile: "keys/installation-private.dpapi",
+  };
+  assert.equal(await verifyOfflineCustomerActivation(activationConfig, f.dir), true);
+
   const good = await run([readinessCli], f.dir);
   if (good.code !== 0) {
     // Diagnose only the synthetic fixture; never emit raw errors, user IDs,
@@ -134,6 +142,10 @@ test("Windows synthetic DPAPI + explicit restricted ACL passes OFFLINE readiness
   assert.doesNotMatch(good.stdout + good.stderr, /PRIVATE KEY|S-1-5-|C:\\Users\\/);
 
   await applySyntheticAcl(f.dir, true);
+  await assert.rejects(
+    verifyOfflineCustomerActivation(activationConfig, f.dir),
+    /INSTALLATION_OFFLINE_ACL_NOT_PROVEN/,
+  );
   const broad = await run([readinessCli], f.dir);
   assertBlock(broad);
   assert.equal(createHash("sha256").update(await readFile(f.dpapi)).digest("hex"), before);
@@ -150,6 +162,11 @@ test("Windows offline readiness blocks a substituted public key without touching
   } catch {
     assert.fail("synthetic public-key substitution cannot access disposable fixture file");
   }
+  await assert.rejects(verifyOfflineCustomerActivation({
+    installationIdFile: "keys/installation-id.txt",
+    installationPublicKeyFile: "keys/installation-public.txt",
+    installationPrivateKeyFile: "keys/installation-private.dpapi",
+  }, f.dir));
   assertBlock(await run([readinessCli], f.dir));
   assert.equal(createHash("sha256").update(await readFile(f.dpapi)).digest("hex"), before);
 });
