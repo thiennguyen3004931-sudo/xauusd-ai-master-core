@@ -4,6 +4,7 @@ import ts from "typescript";
 import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
 import { acquireRuntimeSingleton } from "./phase7c-runtime-singleton-lock.mjs";
 import { evaluateAutoTrendEntryModeGate } from "./phase7c-trend-mode-gate.mjs";
+import { evaluateLiveAutoReversalEntryLock } from "./phase7c-auto-live-reversal-lock.mjs";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
 import { recordTrendEntryAttributionBestEffort } from "./phase7c-trend-entry-attribution.mjs";
 import { transformPhase7CTrendM5TrailingSource } from "./phase7c-m5-structural-trailing-source-adapter.mjs";
@@ -519,6 +520,23 @@ async function evaluateTrendEntryPermission(request) {
   ]);
 
   const finalRegime = String(regime?.regime ?? "").toUpperCase();
+  // Enforce the operator-approved LIVE AUTO reversal lock at the final POST gate.
+  // Deny BOTH canonical reversal orders and any order while regime=REVERSAL.
+  // Existing positions and management requests remain untouched.
+  const liveReversalLock = evaluateLiveAutoReversalEntryLock({
+    activeMode,
+    regime: finalRegime,
+    reversalOrigin: orderEvidence.reversalOrigin,
+  });
+  if (!liveReversalLock.allowed) {
+    return {
+      allowed: false,
+      activeMode,
+      recommendedMode: String(regime?.recommendedMode ?? "PAUSE").toUpperCase(),
+      reason: liveReversalLock.reason,
+      detail: liveReversalLock.detail,
+    };
+  }
   if (orderEvidence.reversalOrigin && finalRegime !== "REVERSAL") {
     return {
       allowed: false,

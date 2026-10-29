@@ -174,6 +174,12 @@ jobs:
       - name: REVERSAL CHOCH direction entry contract
         run: node --test scripts/test-phase7c-reversal-entry-contract.mjs
 
+      - name: LIVE AUTO REVERSAL final-order hard lock regression
+        run: node --test scripts/phase7c-auto-live-reversal-lock.test.mjs
+
+      - name: REVERSAL H1 H4 read-only trend filter regression
+        run: pnpm --dir apps/api exec tsx ../../scripts/phase7c-reversal-trend-filter.test.mjs
+
       - name: New-machine bootstrap safety contract
         run: node --test scripts/test-phase7c-new-machine-installer-source.mjs
 
