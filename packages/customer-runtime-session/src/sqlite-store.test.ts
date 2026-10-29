@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -107,6 +107,82 @@ describe("SqliteCustomerSecurityStore", () => {
     })).rejects.toThrow("CUSTOMER_LICENSE_REVOKED_IMMUTABLE");
     await expect(reopened.licenses.get(active.licenseId)).resolves.toEqual(revoked);
     reopened.close();
+  });
+
+  it("witnesses physical pre-revocation backup rollback despite in-place immutability guard (P0 #176)", async () => {
+    // Disposable, synthetic SQLite state ONLY. Demonstrate a known release
+    // blocker: restoring an older *physical file* bypasses local write guards.
+    // This test intentionally does NOT assert that old-backup restore is safe.
+    const path = databasePath();
+    const oldBackupPath = path.slice(0, -".sqlite".length) + "-pre-revocation.sqlite";
+    const activeLicense = license();
+    const activeGrant = createCustomerProductGrantLifecycle(
+      issueSelfManagedGrant(activeLicense, {
+        grantId: "grant-stale-backup-witness",
+        issuedAt: NOW - 1_000,
+        expiresAt: NOW + 120_000,
+        allowedBotModes: ["AUTO"],
+      }),
+    );
+
+    const initial = new SqliteCustomerSecurityStore(path);
+    await initial.licenses.put(activeLicense);
+    expect(await initial.grants.compareAndSet(
+      activeGrant.grant.grantId, null, activeGrant,
+    )).toBe(true);
+    initial.close();
+
+    // Copy a CLOSED database; avoid confusing WAL snapshots or copying live
+    // customer security files. This is NOT an approved backup procedure.
+    copyFileSync(path, oldBackupPath);
+
+    const later = new SqliteCustomerSecurityStore(path);
+    const revokedLicense: LicenseRecord = {
+      ...activeLicense, status: "REVOKED", revokedAt: NOW + 1,
+    };
+    const revokedGrant = revokeCustomerProductGrant(activeGrant, NOW + 1);
+    await later.licenses.put(revokedLicense);
+    expect(await later.grants.compareAndSet(
+      activeGrant.grant.grantId, activeGrant.revision, revokedGrant,
+    )).toBe(true);
+    await expect(later.licenses.put(activeLicense)).rejects.toThrow(
+      "CUSTOMER_LICENSE_REVOKED_IMMUTABLE",
+    );
+    later.close();
+
+    // A standalone old SQLite file can still contain ACTIVE access. That
+    // proves that a DB-local immutability rule is NOT a restore anti-rollback
+    // defense. No gateway or customer agent is constructed in this test.
+    const restoredOldBackup = new SqliteCustomerSecurityStore(oldBackupPath);
+    const staleLicense = await restoredOldBackup.licenses.get(activeLicense.licenseId);
+    const staleGrant = await restoredOldBackup.grants.get(activeGrant.grant.grantId);
+    expect(staleLicense).toEqual(activeLicense);
+    expect(staleGrant).toEqual(activeGrant);
+    restoredOldBackup.close();
+
+    // The trusted baseline must be held independently of any restored DB.
+    // The baseline values here are only synthetic test-memory witnesses,
+    // NOT an authenticated/production revocation authority.
+    const independentBaseline = Object.freeze({
+      licenseStatus: "REVOKED",
+      grantStatus: "REVOKED",
+      revokedAt: NOW + 1,
+    });
+    // Check the values ACTUALLY fetched from the restored snapshot, not
+    // merely the test's original fixture variables.
+    expect(staleLicense?.status).toBe("ACTIVE");
+    expect(staleGrant?.status).toBe("ACTIVE");
+    expect(staleLicense?.status).not.toBe(independentBaseline.licenseStatus);
+    expect(staleGrant?.status).not.toBe(independentBaseline.grantStatus);
+    expect(revokedLicense.revokedAt).toBe(independentBaseline.revokedAt);
+    expect(revokedGrant.revokedAt).toBe(independentBaseline.revokedAt);
+
+    const accepted = new SqliteCustomerSecurityStore(path);
+    await expect(accepted.licenses.get(activeLicense.licenseId))
+      .resolves.toEqual(revokedLicense);
+    await expect(accepted.grants.get(activeGrant.grant.grantId))
+      .resolves.toEqual(revokedGrant);
+    accepted.close();
   });
 
   it("preserves grant compare-and-set revision semantics", async () => {
