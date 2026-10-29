@@ -39,5 +39,5 @@ test("LIVE order wrapper invokes hard lock AFTER authoritative regime reload, BE
   assert.ok(regime >= 0 && lock > regime && normalGate > lock);
   assert.match(fn, /if \(!liveReversalLock\.allowed\) \{/);
   assert.match(fn, /reason: liveReversalLock\.reason/);
-  assert.match(src, /if \(request\.method !== "POST"/);
+  assert.match(src, /PHASE7C_GATE_SCOPE=POST_\/v1\/orders_ONLY/);
 });
