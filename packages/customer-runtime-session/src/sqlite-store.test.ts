@@ -222,6 +222,40 @@ describe("SqliteCustomerSecurityStore", () => {
     store.close();
   });
 
+  it("never reactivates or changes a revoked grant through a stale CAS, even after reopen", async () => {
+    const path = databasePath();
+    const currentLicense = license();
+    const active = createCustomerProductGrantLifecycle(
+      issueSelfManagedGrant(currentLicense, {
+        grantId: "grant-revoked-immutable-001",
+        issuedAt: NOW - 1_000,
+        expiresAt: NOW + 120_000,
+        allowedBotModes: ["AUTO"],
+      }),
+    );
+    const revoked = revokeCustomerProductGrant(active, NOW + 1);
+    const changedRevocation = { ...revoked, revokedAt: NOW + 2 };
+
+    const first = new SqliteCustomerSecurityStore(path);
+    expect(await first.grants.compareAndSet(active.grant.grantId, null, active)).toBe(true);
+    expect(await first.grants.compareAndSet(active.grant.grantId, active.revision, revoked)).toBe(true);
+
+    // The previous implementation accepted this downgrade when the caller
+    // supplied the current revision: revision alone is not an authorization.
+    expect(await first.grants.compareAndSet(active.grant.grantId, revoked.revision, active)).toBe(false);
+    expect(await first.grants.compareAndSet(active.grant.grantId, revoked.revision, changedRevocation)).toBe(false);
+    expect(await first.grants.compareAndSet(active.grant.grantId, null, active)).toBe(false);
+    expect(await first.grants.compareAndSet(active.grant.grantId, revoked.revision, revoked)).toBe(true);
+    await expect(first.grants.get(active.grant.grantId)).resolves.toEqual(revoked);
+    first.close();
+
+    const reopened = new SqliteCustomerSecurityStore(path);
+    expect(await reopened.grants.compareAndSet(active.grant.grantId, revoked.revision, active)).toBe(false);
+    expect(await reopened.grants.compareAndSet(active.grant.grantId, revoked.revision, changedRevocation)).toBe(false);
+    await expect(reopened.grants.get(active.grant.grantId)).resolves.toEqual(revoked);
+    reopened.close();
+  });
+
   it("persists one-time challenge consumption across reopen", async () => {
     const path = databasePath();
     const challenge = createInstallationChallenge({
