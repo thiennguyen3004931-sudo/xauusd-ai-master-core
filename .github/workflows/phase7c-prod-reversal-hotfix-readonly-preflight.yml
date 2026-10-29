@@ -1,12 +1,15 @@
 name: Phase7C REVERSAL Hotfix LIVE Read-Only Preflight
 
+# Operator reports bot intentionally OFF; no automatic LIVE probes.
+# Run manually only after confirming bridge is intentionally online.
 on:
-  pull_request:
-    branches: [release/prod-baseline-reversal-20261029]
-    paths:
-      - 'scripts/run-phase7c-trend-controller.mjs'
-      - 'scripts/phase7c-auto-live-reversal-lock.mjs'
-      - '.github/workflows/phase7c-prod-reversal-hotfix-readonly-preflight.yml'
+  workflow_dispatch:
+    inputs:
+      operator_confirmed_online:
+        description: 'I confirm the bot and MT5 bridge are intentionally ONLINE for GET-only validation'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,13 +20,14 @@ concurrency:
 
 jobs:
   observe-production:
+    if: ${{ inputs.operator_confirmed_online == true }}
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 10
     steps:
       - name: Checkout exact proposed hotfix (no deployment)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
 
       - name: Read-only LIVE preflight (strict no mutation)
         shell: powershell
