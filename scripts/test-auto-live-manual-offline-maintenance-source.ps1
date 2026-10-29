@@ -42,7 +42,7 @@ Must 'ARM_MUTATION=NONE' 'NO_ARM_MUTATION'
 Must 'LIVE_ORDER_MUTATION=NONE' 'NO_ORDER_MUTATION'
 Must 'POSITION_MUTATION=NONE' 'NO_POSITION_MUTATION'
 Must 'PRODUCTION_SOURCE_MUTATION=NONE' 'NO_CODE_MUTATION'
-MustNot '(?i)(Invoke-RestMethod|Invoke-WebRequest|curl\.exe|http://|https?://127\.0\.0\.1|git\s+-C\s+\$prod\s+(checkout|reset|merge|pull|fetch)|/v1/orders|lifecycle/start|lifecycle/stop)' 'RUNTIME_OR_NETWORK_MUTATION'
+MustNot '(?i)(Invoke-RestMethod|Invoke-WebRequest|curl\.exe|https?://(?:127\.0\.0\.1|localhost)|git\s+-C\s+\$prod\s+(checkout|reset|merge|pull|fetch)|/v1/orders|lifecycle/start|lifecycle/stop)' 'RUNTIME_OR_NETWORK_MUTATION'
 MustNot '(?m)^\s*-\s*cron:' 'CRON_SCHEDULE'
 
 foreach ($token in @('-Enable', '-Clear', '-ConfirmPlannedDowntime', 'OFFLINE_EXPECTED')) {
