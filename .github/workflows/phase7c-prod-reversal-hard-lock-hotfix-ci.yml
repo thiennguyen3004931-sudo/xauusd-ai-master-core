@@ -1,0 +1,75 @@
+name: Phase7C Production Baseline REVERSAL Hard Lock CI
+
+on:
+  pull_request:
+    branches:
+      - release/prod-baseline-reversal-20261029
+    paths:
+      - 'scripts/run-phase7c-trend-controller.mjs'
+      - 'scripts/phase7c-auto-live-reversal-lock.mjs'
+      - 'scripts/phase7c-auto-live-reversal-lock.test.mjs'
+      - '.github/workflows/phase7c-prod-reversal-hard-lock-hotfix-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod-reversal-hard-lock-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  production-baseline-lock:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Hard lock unit and source contract
+        run: node --test scripts/phase7c-auto-live-reversal-lock.test.mjs
+      - name: CHOCH/reversal mode gate unchanged
+        run: node --test scripts/test-phase7c-reversal-entry-contract.mjs scripts/phase7c-trend-mode-gate.test.mjs
+      - name: Trend M5 source and single owner regression
+        run: node --test scripts/phase7c-trend-m5-runtime-wiring.test.mjs scripts/phase7c-trend-m5-single-owner.test.mjs
+      - name: Trend recovery and managed positions regression
+        run: |
+          node scripts/test-phase7c-canonical-daily-recovery-executors-contract.mjs
+          node scripts/test-phase7c-trend-management-path-regression.mjs
+      - name: Shared position and order lock regression
+        run: node --test scripts/phase7c-trend-singleton-ownership.test.mjs scripts/phase7c-execution-lock.test.mjs
+      - name: SEMI ownership pass through regression
+        run: node --test scripts/phase7c-semi-trend-production-wiring.test.mjs scripts/phase7c-semi-post-entry-contract.test.mjs
+      - name: Verify exact deployed-base parent
+        shell: pwsh
+        run: |
+          $expected = 'ff116b5e0c491163a11e33cb9e38fb6b503f0a1d'
+          $base = (git merge-base HEAD $expected).Trim()
+          if ($base -ne $expected) {
+            throw "PRODUCTION_BASELINE_ANCESTOR_MISMATCH=$base"
+          }
+          Write-Host 'PRODUCTION_BASELINE_ANCESTOR=PASS'
+      - name: Syntax and clean worktree
+        shell: pwsh
+        run: |
+          node --check scripts/run-phase7c-trend-controller.mjs
+          node --check scripts/phase7c-auto-live-reversal-lock.mjs
+          git diff --check
+          $dirty = git status --porcelain --untracked-files=no
+          if ($dirty) { throw "TRACKED_WORKTREE_DIRTY" }
+          Write-Host 'PRODUCTION_HOTFIX_SOURCE_ACCEPTANCE=PASS'
