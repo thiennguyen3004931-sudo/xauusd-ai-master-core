@@ -92,7 +92,7 @@ jobs:
             if (-not [int]::TryParse($env:LEASE_HOURS, [ref]$hours) -or $hours -notin @(1, 4, 8, 12, 24)) {
               throw 'INVALID_LEASE_DURATION'
             }
-            & $helper -ProductionRoot $prod -Enable -Reason $env:LEASE_REASON -DurationHours $hours -ConfirmPlannedDowntime
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helper -ProductionRoot $prod -Enable -Reason $env:LEASE_REASON -DurationHours $hours -ConfirmPlannedDowntime
             if ($LASTEXITCODE -ne 0) { throw 'LEASE_HELPER_ENABLE_FAILED' }
             . $classifier
             if ((Get-AutoLiveOfflineLeaseState -ProductionRoot $prod) -ne 'VALID') {
@@ -100,7 +100,7 @@ jobs:
             }
             Write-Host 'OPERATOR_OFFLINE_LEASE=VALID'
           } elseif ($env:LEASE_ACTION -eq 'clear') {
-            & $helper -ProductionRoot $prod -Clear
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helper -ProductionRoot $prod -Clear
             if ($LASTEXITCODE -ne 0) { throw 'LEASE_HELPER_CLEAR_FAILED' }
             . $classifier
             if ((Get-AutoLiveOfflineLeaseState -ProductionRoot $prod) -ne 'ABSENT') {
