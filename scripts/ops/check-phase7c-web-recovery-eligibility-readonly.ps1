@@ -126,7 +126,7 @@ $complete = (
 )
 $evidence['preRecoveryChecksPass'] = [bool]$complete
 $evidence['webRestartAuthorized'] = $false
-$evidence['blockerCodes'] = @($blockers)
+$evidence['blockerCodes'] = @($blockers.ToArray())
 Write-Host "PHASE7C_RECOVERY_READONLY_SOURCE_MATCH=$($evidence.productionHeadMatches)"
 Write-Host "PHASE7C_RECOVERY_READONLY_WEB_TASK_READY=$($evidence.taskWebReady)"
 Write-Host "PHASE7C_RECOVERY_READONLY_EXECUTORS_RUNNING=$($evidence.taskExecutorsRunning)"
@@ -138,7 +138,7 @@ Write-Host "PHASE7C_RECOVERY_READONLY_BRIDGE_LIVE_REAL=$($evidence.brokerLiveRea
 Write-Host "PHASE7C_RECOVERY_READONLY_ARM_DISARMED=$($evidence.brokerArmDisarmed)"
 Write-Host "PHASE7C_RECOVERY_READONLY_BROKER_FLAT=$($evidence.brokerXauFlat)"
 Write-Host "PHASE7C_RECOVERY_READONLY_PRECHECK_PASS=$complete"
-Write-Host "PHASE7C_RECOVERY_READONLY_BLOCKERS=$(@($blockers) -join ',')"
+Write-Host "PHASE7C_RECOVERY_READONLY_BLOCKERS=$(@($blockers.ToArray()) -join ',')"
 Write-Host 'PHASE7C_RECOVERY_READONLY_WEB_RESTART_AUTHORIZED=FALSE'
 Write-Host 'PHASE7C_RECOVERY_READONLY_PRODUCTION_MUTATION=NONE'
 Write-Host 'PHASE7C_RECOVERY_READONLY_BROKER_HTTP_METHODS=GET_ONLY'
