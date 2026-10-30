@@ -22,10 +22,15 @@ function Assert-OnlyCanonicalAction {
   $action = $actions[0]
   $exe = [string]$action.Execute
   $args = [string]$action.Arguments
-  if ($exe -notmatch '(?i)(^|[\/])(?:powershell|pwsh)\.exe$') { throw 'WEB_TASK_EXECUTABLE_NOT_POWERSHELL' }
+  $exeNormalized = $exe.Trim('"')
+  $trustedPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  if ($exeNormalized -ieq 'powershell.exe') {
+    $exeNormalized = [string](Get-Command powershell.exe -ErrorAction Stop).Source
+  }
+  if ($exeNormalized -ine $trustedPowerShell) { throw 'WEB_TASK_EXECUTABLE_NOT_TRUSTED_SYSTEM_POWERSHELL' }
   if ($args -match '(?i)(?:-encodedcommand|-command\s|invoke-expression|iex\s)') { throw 'WEB_TASK_ACTION_UNTRUSTED_COMMAND' }
-  if ($args -notmatch '(?i)(?:^|\s)-File\s') { throw 'WEB_TASK_ACTION_MISSING_FILE_SWITCH' }
-  if ($args.IndexOf($expectedLauncher, [StringComparison]::OrdinalIgnoreCase) -lt 0) { throw 'WEB_TASK_LAUNCHER_PATH_NOT_CANONICAL' }
+  $fileSwitchPattern = '(?i)(?:^|\s)-File\s+["'']?' + [regex]::Escape($expectedLauncher) + '["'']?(?=\s|$)'
+  if ($args -notmatch $fileSwitchPattern) { throw 'WEB_TASK_LAUNCHER_PATH_NOT_CANONICAL' }
   if ($args.IndexOf('-WorkDir', [StringComparison]::OrdinalIgnoreCase) -lt 0) { throw 'WEB_TASK_WORKDIR_MISSING' }
   if (-not (Test-Path -LiteralPath $expectedLauncher -PathType Leaf)) { throw 'WEB_TASK_LAUNCHER_NOT_FOUND' }
   $expectedBlob = (& git -C $ProductionRoot rev-parse "$($ExpectedSource):scripts/run-phase7b-web-autostart.ps1").Trim().ToLowerInvariant()
