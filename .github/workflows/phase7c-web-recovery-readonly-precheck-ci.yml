@@ -27,6 +27,19 @@ jobs:
         shell: powershell
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-phase7c-web-recovery-readonly-precheck-source.ps1
 
+      - name: Synthetic missing-production fail-closed test (NO live reads)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $missing = Join-Path $env:RUNNER_TEMP ('missing-prod-' + [guid]::NewGuid().ToString('N'))
+          $receipt = Join-Path $env:RUNNER_TEMP ('synthetic-recovery-' + [guid]::NewGuid().ToString('N') + '.json')
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ops/check-phase7c-web-recovery-eligibility-readonly.ps1 -ProductionRoot $missing -ReceiptPath $receipt
+          if ($LASTEXITCODE -ne 0) { throw 'SYNTHETIC_PRECHECK_UNEXPECTED_EXIT' }
+          $out = Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
+          if ($out.webRestartAuthorized -ne $false -or $out.preRecoveryChecksPass -ne $false) { throw 'SYNTHETIC_PRECHECK_UNSAFE_PASS' }
+          if ('PRODUCTION_ROOT_MISSING' -notin @($out.blockerCodes)) { throw 'SYNTHETIC_PRECHECK_MISSING_FAIL_CLOSED_REASON' }
+          Write-Host 'PHASE7C_WEB_RECOVERY_SYNTHETIC_FAIL_CLOSED=PASS'
+
       - name: Verify test path never performs LIVE reads
         shell: powershell
         run: |
