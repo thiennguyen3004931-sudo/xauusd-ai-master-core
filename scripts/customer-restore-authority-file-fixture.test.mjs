@@ -76,3 +76,24 @@ test("failed validation leaves original authority file unchanged",async t=>{
   assert.equal((await commit(adapter,invalid)).ok,false);
   assert.deepEqual(JSON.parse(await readFile(join(independent,"key.json"),"utf8")),initial);
 });
+
+test("interrupted temp file forces quarantine rather than silent recovery",async t=>{
+  const {independent,adapter}=await setup(t);
+  await writeFile(join(independent,"key.interrupted.tmp"),JSON.stringify(updated));
+  const result=await commit(adapter);
+  assert.equal(result.reasonCode,"AUTHORITY_FIXTURE_RECOVERY_REQUIRED");
+  assert.deepEqual(JSON.parse(await readFile(join(independent,"key.json"),"utf8")),initial);
+});
+test("symlinked state file is rejected",async t=>{
+  const {independent,adapter}=await setup(t);
+  const {symlink}=await import("node:fs/promises");
+  await writeFile(join(independent,"target.json"),JSON.stringify(initial));
+  await rm(join(independent,"key.json"));
+  await symlink(join(independent,"target.json"),join(independent,"key.json"));
+  assert.equal((await commit(adapter)).ok,false);
+});
+test("missing authority directory is not silently recreated",async t=>{
+  const {independent,adapter}=await setup(t);
+  await rm(independent,{recursive:true,force:true});
+  assert.equal((await commit(adapter)).ok,false);
+});
