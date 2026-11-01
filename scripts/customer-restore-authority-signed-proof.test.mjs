@@ -23,3 +23,41 @@ test("invalid signature rejected", () => assert.equal(evaluate(statement, "AAAA"
 test("revoked signed authority cannot revive license", () => assert.equal(evaluate({ ...statement, authorizationState: "REVOKED" }).allowed, false));
 test("stale snapshot rejected against signed higher watermark", () => assert.equal(evaluate({ ...statement, tokenGeneration: 2 }).allowed, false));
 test("no trust roots rejected", () => assert.equal(evaluate(statement, signature(statement), { trustedPublicKeys: {} }).allowed, false));
+
+// P0 regression: signing a structurally valid but security-inconsistent authority must not admit a restored state.
+test("validly signed higher revocation generation blocks restored snapshot", () => {
+  const newer = { ...statement, revocationGeneration: statement.revocationGeneration + 1 };
+  assert.equal(evaluate(newer).reasonCode, "RESTORE_GENERATION_ROLLBACK");
+});
+test("validly signed higher consumed challenge generation blocks restore", () => {
+  const newer = { ...statement, challengeConsumptionGeneration: statement.challengeConsumptionGeneration + 1 };
+  assert.equal(evaluate(newer).reasonCode, "RESTORE_GENERATION_ROLLBACK");
+});
+test("validly signed higher audit high-water blocks restore", () => {
+  const newer = { ...statement, auditHighWater: statement.auditHighWater + 1 };
+  assert.equal(evaluate(newer).reasonCode, "RESTORE_GENERATION_ROLLBACK");
+});
+test("validly signed higher token generation blocks restore", () => {
+  const newer = { ...statement, tokenGeneration: statement.tokenGeneration + 1 };
+  assert.equal(evaluate(newer).reasonCode, "RESTORE_GENERATION_ROLLBACK");
+});
+test("validly signed mismatched installation is rejected", () => {
+  const swapped = { ...statement, installationId: "other-installation" };
+  assert.equal(evaluate(swapped).reasonCode, "RESTORE_BINDING_MISMATCH");
+});
+test("validly signed revoked authority is denied even if counters match", () => {
+  const revoked = { ...statement, authorizationState: "REVOKED" };
+  assert.equal(evaluate(revoked).reasonCode, "RESTORE_NOT_ACTIVE");
+});
+test("validly signed expired license is denied even if counters match", () => {
+  const expired = { ...statement, authorizationState: "EXPIRED" };
+  assert.equal(evaluate(expired).reasonCode, "RESTORE_NOT_ACTIVE");
+});
+test("signature cannot be reused under a different domain", () => {
+  const wrongDomain = sign(null, Buffer.from("UNRELATED-PROTOCOL\\n" + JSON.stringify(FIELDS.map(k => statement[k]))), privateKey).toString("base64");
+  assert.equal(evaluate(statement, wrongDomain).reasonCode, "AUTHORITY_SIGNATURE_INVALID");
+});
+test("validly signed unknown future schema version is rejected", () => {
+  const future = { ...statement, schemaVersion: 2 };
+  assert.equal(evaluate(future).reasonCode, "AUTHORITY_NONCE_OR_VERSION_INVALID");
+});
