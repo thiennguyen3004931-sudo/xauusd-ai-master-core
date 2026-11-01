@@ -51,3 +51,28 @@ test("unsafe binding key denied",async t=>{
   const {adapter}=await setup(t);
   assert.equal((await commitAuthorityTransition({adapter,bindingKey:"../escape",next:updated,expectedAuditHighWater:3})).ok,false);
 });
+
+test("concurrent writer is rejected while first transaction holds exclusive lock",async t=>{
+  const {adapter}=await setup(t);
+  let release;
+  const barrier=new Promise(resolve=>{release=resolve;});
+  let signal;
+  const entered=new Promise(resolve=>{signal=resolve;});
+  const first=adapter.transact("key",async previous=>{
+    signal();
+    await barrier;
+    return {commit:true,next:updated,decision:{ok:true,reasonCode:"TEST_VALID"}};
+  });
+  await entered;
+  const second=await commit(adapter);
+  assert.equal(second.ok,false);
+  assert.equal(second.reasonCode,"AUTHORITY_FIXTURE_LOCK_UNAVAILABLE");
+  release();
+  assert.equal((await first).committed,true);
+});
+test("failed validation leaves original authority file unchanged",async t=>{
+  const {independent,adapter}=await setup(t);
+  const invalid={...updated,installationId:"other"};
+  assert.equal((await commit(adapter,invalid)).ok,false);
+  assert.deepEqual(JSON.parse(await readFile(join(independent,"key.json"),"utf8")),initial);
+});
