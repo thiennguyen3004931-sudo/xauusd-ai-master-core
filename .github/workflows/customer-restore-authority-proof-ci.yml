@@ -9,6 +9,8 @@ on:
       - 'scripts/customer-restore-authority-signed-proof.test.mjs'
       - 'scripts/customer-restore-authority-transition.mjs'
       - 'scripts/customer-restore-authority-transition.test.mjs'
+      - 'scripts/customer-restore-authority-atomic-cas.mjs'
+      - 'scripts/customer-restore-authority-atomic-cas.test.mjs'
       - '.github/workflows/customer-restore-authority-proof-ci.yml'
   workflow_dispatch:
 
@@ -29,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          node --test scripts/customer-restore-authority-compare.test.mjs scripts/customer-restore-authority-signed-proof.test.mjs scripts/customer-restore-authority-transition.test.mjs 2>&1 | tee restore-authority-test-output.txt
+          node --test scripts/customer-restore-authority-compare.test.mjs scripts/customer-restore-authority-signed-proof.test.mjs scripts/customer-restore-authority-transition.test.mjs scripts/customer-restore-authority-atomic-cas.test.mjs 2>&1 | tee restore-authority-test-output.txt
       - name: Upload test diagnostics even when tests fail
         if: always()
         uses: actions/upload-artifact@v4
