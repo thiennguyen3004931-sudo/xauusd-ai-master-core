@@ -24,4 +24,14 @@ jobs:
         with:
           node-version: '22'
       - name: Run independent authority proof unit tests
-        run: node --test scripts/customer-restore-authority-compare.test.mjs scripts/customer-restore-authority-signed-proof.test.mjs
+        shell: bash
+        run: |
+          set -o pipefail
+          node --test scripts/customer-restore-authority-compare.test.mjs scripts/customer-restore-authority-signed-proof.test.mjs 2>&1 | tee restore-authority-test-output.txt
+      - name: Upload test diagnostics even when tests fail
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-authority-test-diagnostics
+          path: restore-authority-test-output.txt
+          if-no-files-found: warn
