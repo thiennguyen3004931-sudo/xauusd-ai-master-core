@@ -126,7 +126,7 @@ assert.match(
 
 const sidewaySource = fs.readFileSync(new URL("./run-phase7c-sideway-controller.mjs", import.meta.url), "utf8");
 const transformedSideway = transformPhase7CSidewayM5TrailingSource(sidewaySource);
-assert.match(transformedSideway, /PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_M5_CONFIRMED_STRUCTURE_TRAILING/);
+assert.match(transformedSideway, /PHASE7C_SIDEWAY_MANAGEMENT=BROKER_TP_SL_PLUS_MONOTONIC_STOP_TIGHTENING_PLUS_M5_STRUCTURE/);
 assert.match(transformedSideway, /SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN/);
 assert.match(transformedSideway, /managed\.partialApplied/);
 assert.match(transformedSideway, /evaluateM5StructuralTrail/);
@@ -147,7 +147,7 @@ assert.match(
 );
 
 const legacySidewaySource = sidewaySource.replace(
-  'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_PLUS_FAST_MOVE_LOCK");',
+  'console.log("PHASE7C_SIDEWAY_MANAGEMENT=BROKER_TP_SL_PLUS_MONOTONIC_STOP_TIGHTENING");',
   'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING");',
 );
 assert.notEqual(legacySidewaySource, sidewaySource, "Fast-Move Sideway declaration must exist in the source fixture.");
