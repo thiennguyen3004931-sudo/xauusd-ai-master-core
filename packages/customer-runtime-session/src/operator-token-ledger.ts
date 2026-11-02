@@ -99,6 +99,7 @@ export class OperatorSqliteCustomerTokenLedger implements CustomerApiTokenLifecy
       db?.close();
       throw new Error("OPERATOR_LEDGER_OPEN_FAILED");
     }
+    if (!db) throw new Error("OPERATOR_LEDGER_OPEN_FAILED");
     this.db = db;
   }
 
