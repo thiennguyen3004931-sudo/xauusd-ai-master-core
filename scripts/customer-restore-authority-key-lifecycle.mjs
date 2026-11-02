@@ -6,6 +6,7 @@
  * putting both values in a restorable customer database defeats this gate.
  * No network, filesystem, secret-key access, customer activation or MT5 I/O.
  */
+import { createHash, timingSafeEqual } from "node:crypto";
 import { verifySignedRestoreAuthority } from "./customer-restore-authority-signed-proof.mjs";
 
 const deny = reasonCode => Object.freeze({ allowed: false, reasonCode });
@@ -13,6 +14,38 @@ const object = value => value !== null && typeof value === "object" && !Array.is
 const safeMs = value => Number.isSafeInteger(value) && value >= 0;
 const exactKeys = (value, keys) =>
   object(value) && Object.keys(value).sort().join("|") === [...keys].sort().join("|");
+
+/**
+ * Canonical keyring fingerprint. In production, the expected fingerprint MUST
+ * come from an independently authenticated, durable operator/KMS trust root.
+ * Never derive the trusted pin from an untrusted keyring during verification.
+ */
+export function fingerprintRestoreAuthorityKeyring(keyring) {
+  try {
+    if (!exactKeys(keyring, ["epoch", "keys"]) || !object(keyring.keys) ||
+        !Number.isSafeInteger(keyring.epoch) || keyring.epoch < 1) return null;
+    const ids = Object.keys(keyring.keys).sort();
+    if (!ids.length || ids.length > 128) return null;
+    const entries = [];
+    for (const id of ids) {
+      const e = keyring.keys[id];
+      if (!/^[A-Za-z0-9._-]{1,128}$/.test(id) ||
+          !exactKeys(e, ["publicKeyPem", "status", "notBeforeMs", "notAfterMs"]) ||
+          typeof e.publicKeyPem !== "string" || !e.publicKeyPem ||
+          e.publicKeyPem.length > 8192 ||
+          !safeMs(e.notBeforeMs) || !safeMs(e.notAfterMs) ||
+          e.notAfterMs <= e.notBeforeMs ||
+          (e.status !== "ACTIVE" && e.status !== "REVOKED")) return null;
+      entries.push([id, e.publicKeyPem, e.status, e.notBeforeMs, e.notAfterMs]);
+    }
+    return createHash("sha256")
+      .update("XAUUSD-RESTORE-KEYRING-V1\\n")
+      .update(JSON.stringify([keyring.epoch, entries]))
+      .digest("hex");
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Verifies a nonce-bound Ed25519 restore proof against a time-limited,
@@ -23,7 +56,7 @@ const exactKeys = (value, keys) =>
  */
 export function verifyRestoreAuthorityWithKeyLifecycle({
   restored, statement, signatureBase64, keyring,
-  trustedKeyringEpoch, expectedNonce, nowMs,
+  trustedKeyringEpoch, trustedKeyringSha256Hex, expectedNonce, nowMs,
 } = {}) {
   try {
     if (!safeMs(nowMs) || !Number.isSafeInteger(trustedKeyringEpoch) ||
@@ -34,6 +67,16 @@ export function verifyRestoreAuthorityWithKeyLifecycle({
     }
     if (keyring.epoch < trustedKeyringEpoch) return deny("AUTHORITY_KEYRING_ROLLBACK");
     if (keyring.epoch > trustedKeyringEpoch) return deny("AUTHORITY_KEYRING_UNVERIFIED_EPOCH");
+    const fingerprint = fingerprintRestoreAuthorityKeyring(keyring);
+    if (!fingerprint) return deny("AUTHORITY_KEYRING_INVALID");
+    if (typeof trustedKeyringSha256Hex !== "string" ||
+        !/^[0-9a-f]{64}$/.test(trustedKeyringSha256Hex)) {
+      return deny("AUTHORITY_TRUSTED_KEYRING_DIGEST_MISSING");
+    }
+    if (!timingSafeEqual(Buffer.from(fingerprint, "hex"),
+                         Buffer.from(trustedKeyringSha256Hex, "hex"))) {
+      return deny("AUTHORITY_KEYRING_DIGEST_MISMATCH");
+    }
     if (!object(statement) || typeof statement.authorityKeyId !== "string" ||
         !/^[A-Za-z0-9._-]{1,128}$/.test(statement.authorityKeyId)) {
       return deny("AUTHORITY_SIGNER_ID_INVALID");
