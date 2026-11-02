@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { issueRestoreAuthorityProof } from "./customer-restore-authority-proof-issuer.mjs";
-import { verifyRestoreAuthorityWithKeyLifecycle as verify } from "./customer-restore-authority-key-lifecycle.mjs";
+import { verifyRestoreAuthorityWithKeyLifecycle as verify, fingerprintRestoreAuthorityKeyring as fingerprint } from "./customer-restore-authority-key-lifecycle.mjs";
 
 // Synthetic keys, identities and authority counters only; no operator KMS.
 const NOW = 1_900_000_000_000;
@@ -35,13 +35,20 @@ const proof = (key = first, authorityKeyId = "operatorV1", state = authority) =>
   assert.equal(issued.ok, true);
   return issued;
 };
-const decide = (signed, overrides = {}) => verify({
-  restored: authority, statement: signed.statement,
-  signatureBase64: signed.signatureBase64,
-  keyring: ring(), trustedKeyringEpoch: 7,
-  expectedNonce: nonce, nowMs: NOW + 500,
-  ...overrides,
-});
+const decide = (signed, overrides = {}) => {
+  const keyring = Object.hasOwn(overrides, "keyring") ? overrides.keyring : ring();
+  // Test-only simulation of an independently pinned digest. Production MUST
+  // obtain this pin from a separate durable authenticated trust root.
+  const trustedKeyringSha256Hex = Object.hasOwn(overrides, "trustedKeyringSha256Hex")
+    ? overrides.trustedKeyringSha256Hex : fingerprint(keyring);
+  return verify({
+    restored: authority, statement: signed.statement,
+    signatureBase64: signed.signatureBase64,
+    keyring, trustedKeyringEpoch: 7, trustedKeyringSha256Hex,
+    expectedNonce: nonce, nowMs: NOW + 500,
+    ...overrides,
+  });
+};
 const reason = (result, expected) => {
   assert.equal(result.allowed, false);
   assert.equal(result.reasonCode, expected);
@@ -60,6 +67,21 @@ test("independent trusted epoch rejects old or unverified keyring epochs", () =>
   reason(decide(proof(), { keyring: ring(8) }), "AUTHORITY_KEYRING_UNVERIFIED_EPOCH");
   reason(decide(proof(), { trustedKeyringEpoch: undefined }), "AUTHORITY_TRUST_ANCHOR_MISSING");
   reason(decide(proof(), { trustedKeyringEpoch: 0 }), "AUTHORITY_TRUST_ANCHOR_MISSING");
+});
+
+test("same-epoch substituted public key or revocation state is denied by independently pinned digest", () => {
+  const originalPin = fingerprint(ring());
+  assert.match(originalPin, /^[0-9a-f]{64}$/);
+  reason(decide(proof(), {
+    keyring: ring(7, { operatorV1: entry(second) }),
+    trustedKeyringSha256Hex: originalPin,
+  }), "AUTHORITY_KEYRING_DIGEST_MISMATCH");
+  reason(decide(proof(), {
+    keyring: ring(7, { operatorV1: entry(first, "REVOKED") }),
+    trustedKeyringSha256Hex: originalPin,
+  }), "AUTHORITY_KEYRING_DIGEST_MISMATCH");
+  reason(decide(proof(), { trustedKeyringSha256Hex: undefined }),
+    "AUTHORITY_TRUSTED_KEYRING_DIGEST_MISSING");
 });
 
 test("revoked signing key rejects even a previously valid, unexpired signature", () => {
