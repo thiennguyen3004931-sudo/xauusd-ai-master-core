@@ -1,6 +1,6 @@
 // TEST-ONLY independent-directory authority fixture; not production-grade durability.
 // The directory MUST NOT be included in customer SQLite backup/restore media.
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -20,11 +20,20 @@ export class FileAuthorityFixture {
     const stateFile = join(this.directory, bindingKey + ".json");
     let locked = false;
     try {
+      // A leftover temp file may represent an interrupted commit. Never auto-promote it.
+      const entries = await readdir(this.directory);
+      if (entries.some(name => name.startsWith(bindingKey + ".") && name.endsWith(".tmp"))) {
+        return denied("AUTHORITY_FIXTURE_RECOVERY_REQUIRED");
+      }
+      const directoryStat = await lstat(this.directory);
+      if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) return denied("AUTHORITY_FIXTURE_DIRECTORY_INVALID");
       // Caller provisions directory; never silently create a missing authority store.
       await mkdir(lock);
       locked = true;
       let previous;
       try {
+        const stateStat = await lstat(stateFile);
+        if (!stateStat.isFile() || stateStat.isSymbolicLink()) return denied("AUTHORITY_FIXTURE_STATE_INVALID");
         previous = JSON.parse(await readFile(stateFile, "utf8"));
       } catch {
         return denied("AUTHORITY_FIXTURE_STATE_UNAVAILABLE");
