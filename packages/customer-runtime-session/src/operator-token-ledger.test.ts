@@ -1,4 +1,4 @@
-import { copyFileSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -24,17 +24,11 @@ afterEach(() => {
 function fresh() {
   const root = tempDir();
   const operatorPath = join(root, "operator", "tokens.sqlite");
-  const { mkdirSync } = requireFs();
   mkdirSync(join(root, "operator"));
   mkdirSync(join(root, "customer-restorable"));
   initializeEmptyOperatorTokenLedger(operatorPath);
   return { root, operatorPath, ledger: new OperatorSqliteCustomerTokenLedger(operatorPath) };
 }
-function requireFs() {
-  // Plain import aliases avoided to make the fixture explicit and tiny.
-  return { mkdirSync: mkdirSyncImported };
-}
-import { mkdirSync as mkdirSyncImported } from "node:fs";
 const record = (tokenSha256Hex = HASH): CustomerApiTokenLifecycleRecord => ({
   tokenSha256Hex, customerId: "customer-1", status: "ACTIVE",
   notBeforeMs: NOW - 1000, expiresAtMs: NOW + 60_000,
