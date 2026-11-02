@@ -68,6 +68,7 @@ jobs:
             "@xauusd/customer-product-access",
             "@xauusd/customer-grant-registry",
             "@xauusd/installation-proof",
+            "@xauusd/customer-activation",
             "@xauusd/customer-runtime-gate",
             "@xauusd/customer-runtime-session"
           )
