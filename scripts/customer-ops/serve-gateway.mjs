@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 // Customer-only HTTPS listener: strictly no Master Control API and no MT5 mutation.
-import { readFile } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, resolve } from "node:path";
 import {
   SqliteCustomerSecurityStore,
+  OperatorSqliteCustomerTokenLedger,
   createCustomerApiGatewayHttpsServer,
 } from "../../packages/customer-runtime-session/dist/index.js";
 import {
-  assertSafeGatewayBind, createCustomerOperatorGateway, parseCustomerTokenHashRecords,
+  assertSafeGatewayBind, createCustomerOperatorGateway,
 } from "./customer-ops.mjs";
 
 async function start() {
   const { XAUUSD_CUSTOMER_GATEWAY_DB: database,
-    XAUUSD_CUSTOMER_GATEWAY_TOKEN_HASHES: tokenFile,
+    XAUUSD_CUSTOMER_GATEWAY_OPERATOR_TOKEN_LEDGER: operatorLedgerPath,
     XAUUSD_CUSTOMER_GATEWAY_TLS_KEY: tlsKey,
     XAUUSD_CUSTOMER_GATEWAY_TLS_CERT: tlsCert,
     XAUUSD_CUSTOMER_GATEWAY_BIND: configuredHost,
@@ -20,7 +21,7 @@ async function start() {
     XAUUSD_CUSTOMER_GATEWAY_ALLOW_REMOTE: remoteApproval,
   } = process.env;
 
-  for (const [label, path] of Object.entries({ database, tokenFile, tlsKey, tlsCert })) {
+  for (const [label, path] of Object.entries({ database, operatorLedgerPath, tlsKey, tlsCert })) {
     if (!path || !isAbsolute(path)) throw new Error(label + " must be an absolute, operator-controlled path");
   }
   const host = assertSafeGatewayBind(configuredHost || "127.0.0.1", remoteApproval);
@@ -29,9 +30,15 @@ async function start() {
     throw new Error("port must be in 1024..65535");
   }
 
-  const tokenHashes = parseCustomerTokenHashRecords(
-    JSON.parse(await readFile(tokenFile, "utf8")),
-  );
+  // Require physically separate operator-owned directory; never load a token
+  // list from a customer-restorable file. External authority is still required
+  // to defend against rollback of the operator ledger itself (P0 #176).
+  const [customerDir, operatorDir] = await Promise.all([
+    realpath(dirname(database)), realpath(dirname(operatorLedgerPath)),
+  ]);
+  if (customerDir === operatorDir || resolve(database) === resolve(operatorLedgerPath)) {
+    throw new Error("OPERATOR_LEDGER_MUST_BE_SEPARATE_FROM_CUSTOMER_DB");
+  }
   // TLS key and certificate must be supplied out of band. Never use a development
   // certificate for real customers; never print tokens or PEM material.
   const tlsOptions = {
@@ -39,8 +46,15 @@ async function start() {
     cert: await readFile(tlsCert),
     minVersion: "TLSv1.2",
   };
-  const store = new SqliteCustomerSecurityStore(database);
-  const gateway = createCustomerOperatorGateway(store, tokenHashes);
+  const operatorLedger = new OperatorSqliteCustomerTokenLedger(operatorLedgerPath);
+  let store;
+  try {
+    store = new SqliteCustomerSecurityStore(database);
+  } catch (error) {
+    operatorLedger.close();
+    throw error;
+  }
+  const gateway = createCustomerOperatorGateway(store, operatorLedger);
   const server = createCustomerApiGatewayHttpsServer(gateway, tlsOptions);
   server.requestTimeout = 15_000;
   server.headersTimeout = 15_000;
@@ -49,6 +63,7 @@ async function start() {
   const close = () => {
     server.close(() => {
       store.close();
+      operatorLedger.close();
       process.exitCode = 0;
     });
   };
@@ -59,6 +74,7 @@ async function start() {
     process.exitCode = 1;
     server.close();
     store.close();
+    operatorLedger.close();
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
