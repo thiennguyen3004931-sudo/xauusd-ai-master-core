@@ -5,7 +5,7 @@ import { assertLicenseRecord } from "../../packages/license-service/dist/index.j
 import {
   CustomerApiGateway,
   InMemoryFixedWindowCustomerApiRateLimiter,
-  Sha256CustomerApiKeyAuthenticator,
+  LedgerCustomerApiKeyAuthenticator,
 } from "../../packages/customer-runtime-session/dist/index.js";
 
 function exact(value, keys, name) {
@@ -90,22 +90,19 @@ export async function revokeCustomerGrant(store, grantId, now) {
   return Object.freeze({ code: result.code, grantId });
 }
 
-export function parseCustomerTokenHashRecords(value) {
-  if (!Array.isArray(value) || value.length === 0) throw new TypeError("token hash records must be a nonempty array");
-  for (const record of value) exact(record, ["customerId", "tokenSha256Hex"], "token hash record");
-  // Authenticator checks lowercase SHA-256, canonical customer IDs, duplicate hashes.
-  new Sha256CustomerApiKeyAuthenticator(value);
-  return value;
-}
-
-export function createCustomerOperatorGateway(store, tokenHashes, now = () => Date.now()) {
-  parseCustomerTokenHashRecords(tokenHashes);
+/** Gateway must authenticate against the operator's independently stored ledger.
+ * Never fall back to static token hashes or a customer-restorable snapshot. */
+export function createCustomerOperatorGateway(store, operatorLedger, now = () => Date.now()) {
+  if (!operatorLedger || typeof operatorLedger.getBySha256 !== "function") {
+    throw new Error("OPERATOR_TOKEN_LEDGER_REQUIRED");
+  }
+  const clock = { now };
   return new CustomerApiGateway({
     grants: store.grants,
     licenses: store.licenses,
     challenges: store.challenges,
-    clock: { now },
-    authenticator: new Sha256CustomerApiKeyAuthenticator(tokenHashes),
+    clock,
+    authenticator: new LedgerCustomerApiKeyAuthenticator(operatorLedger, clock),
     rateLimiter: new InMemoryFixedWindowCustomerApiRateLimiter(),
   });
 }
