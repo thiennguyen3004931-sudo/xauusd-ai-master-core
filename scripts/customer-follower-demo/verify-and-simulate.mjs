@@ -9,7 +9,7 @@ import {
 import {
   SqliteCustomerFollowerCommandJournal,
   DurableCustomerFollowerDispatcher,
-} from "../../packages/customer-follower-state/dist/index.js";
+} from "../../packages/customer-follower-state/dist/sqlite-command-journal.js";
 
 async function readBoundedJson(filename) {
   const bytes = await readFile(filename);
