@@ -67,6 +67,11 @@ const minRegimeConfidence = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_MIN_REGI
 const regimeCandleCount = clampInteger(process.env.ZIQ_PHASE7C_REGIME_CANDLE_COUNT, 320, 220, 1000);
 const m5CandleCount = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_M5_COUNT, 120, 30, 500);
 const m5ConfirmationCarryBars = 1;
+// Post-fill policy is intentionally NOT an environment toggle: SIDEWAY entry
+// filters do not remain position-exit signals. A filled position is protected
+// by its broker-native TP/SL and monotonic stop tightening only. Never allow
+// silent changes from operator settings or the recommended regime to close it.
+const brokerTpSlTrailOnly = true;
 const armed = truthy(process.env.ZIQ_PHASE7C_SIDEWAY_ARMED);
 const once = truthy(process.env.ZIQ_PHASE7C_SIDEWAY_ONCE);
 const workDir = process.env.ZIQ_PHASE7C_SIDEWAY_WORK_DIR?.trim() || path.resolve(".runtime", "phase7c-sideway");
@@ -131,10 +136,11 @@ console.log(`PHASE7C_SIDEWAY_MAX_M15_AGE_MS=${maxM15AgeMs}`);
 console.log(`PHASE7C_SIDEWAY_AUTO_LOT_MAX_AGE_MS=${autoLotMaxAgeMs}`);
 console.log("PHASE7C_SIDEWAY_ENTRY=M15_RANGING_PLUS_SUPPLY_DEMAND_EDGE_PLUS_M5_CONFIRMATION");
 console.log("PHASE7C_SIDEWAY_PLUS6=SL_TO_ENTRY");
-console.log("PHASE7C_SIDEWAY_PLUS10=PARTIAL_ONE_THIRD");
+console.log("PHASE7C_SIDEWAY_PLUS10=PARTIAL_DISABLED_WHILE_BROKER_TP_SL_TRAIL_ONLY");
 console.log(`PHASE7C_SIDEWAY_FAST_MOVE_PROFIT_LOCK=ON|ACTIVATION=+${FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE}|GIVEBACK=${FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE}|SOURCE=LIVE_BID_ASK`);
 console.log("PHASE7C_SIDEWAY_TP2=OPPOSITE_RANGE_BOUNDARY");
-console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_PLUS_FAST_MOVE_LOCK");
+console.log("PHASE7C_SIDEWAY_MANAGEMENT=BROKER_TP_SL_PLUS_MONOTONIC_STOP_TIGHTENING");
+console.log("PHASE7C_SIDEWAY_POST_ENTRY_REGIME_TIME_PARTIAL_SOFTWARE_CLOSE=DISABLED");
 console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY=REALIZED_NET_PNL_ALL_BOT_MAGICS");
 console.log(`PHASE7C_SIDEWAY_DAILY_RECOVERY_MAGICS=${[...dailyBotMagicNumbers].join(",")}`);
 console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY_TP=FULL_POSITION_ADAPTIVE_6_TO_10");
@@ -1233,6 +1239,9 @@ function recordManagementExitSideSample({ managed, quote, exitSidePrice }) {
 async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   const managed = state.managed;
 
+  // Legacy time-stop and regime-based liquidation are intentionally unreachable
+  // under the locked broker-target-only policy. Entry gating is unchanged.
+  if (!brokerTpSlTrailOnly) {
   if (Date.now() >= managed.timeStopAt) {
     await closeAll(position, `TIME_STOP_${maxHoldingMinutes}M`);
     return;
@@ -1267,6 +1276,7 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
     // Existing broker SL/TP remains active. A control API outage must never
     // trigger a blind close or abandon management state.
     journal("MANAGEMENT_REGIME_CHECK_ERROR", { ticket: managed.ticket, message: errorMessage(error) });
+  }
   }
 
   const holdM15CloseTime = Number(managed.lastRegimeCloseChecked ?? 0);
@@ -1323,7 +1333,7 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
     }
   }
 
-  if (managed.dailyMode === "RECOVERY_TP") {
+  if (!brokerTpSlTrailOnly && managed.dailyMode === "RECOVERY_TP") {
     if (await closeFixedTpIfTriggered(position, quote)) return;
 
     const hold =
@@ -1419,6 +1429,25 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
         }
       }
     }
+  }
+
+  // TP/SL are broker-native; never close at a secondary target, regime change,
+  // time limit or partial profit target. This applies to Recovery TP as well.
+  // Fast-move and +6 management above can only tighten the existing SL.
+  if (brokerTpSlTrailOnly) {
+    const holdKey = `${managed.ticket}|BROKER_TP_SL_TRAIL_ONLY`;
+    if (managed.lastHoldM15Key !== holdKey) {
+      managed.lastHoldM15Key = holdKey;
+      saveState();
+      journal("SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY", {
+        ticket: managed.ticket,
+        side: managed.side,
+        brokerStopLoss: Number(position.stopLoss),
+        brokerTakeProfit: Number(position.takeProfit),
+        disabledEarlyExits: ["REGIME_LEFT_RANGE", "TIME_STOP", "PLUS10_PARTIAL", "TP2_SOFTWARE_CLOSE", "FIXED_TP_SOFTWARE_CLOSE"],
+      });
+    }
+    return;
   }
 
   if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
