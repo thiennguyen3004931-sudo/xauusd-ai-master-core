@@ -1333,7 +1333,8 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
     }
   }
 
-  if (!brokerTpSlTrailOnly && managed.dailyMode === "RECOVERY_TP") {
+  if (!brokerTpSlTrailOnly) {
+  if (managed.dailyMode === "RECOVERY_TP") {
     if (await closeFixedTpIfTriggered(position, quote)) return;
 
     const hold =
@@ -1366,6 +1367,7 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
     }
 
     return;
+  }
   }
 
   const fastMove = fastMoveProfitLockCandidate({
