@@ -6,6 +6,7 @@ on:
     paths:
       - "packages/customer-runtime-session/src/operator-token-ledger.ts"
       - "packages/customer-runtime-session/src/operator-token-ledger.test.ts"
+      - "packages/customer-runtime-session/src/operator-ledger-gateway-e2e.test.ts"
       - "packages/customer-runtime-session/src/api-token-lifecycle.ts"
       - "packages/customer-runtime-session/src/index.ts"
       - "scripts/test-customer-runtime-session-boundary.mjs"
@@ -49,7 +50,7 @@ jobs:
             pnpm --filter "$pkg" build
           done
       - name: Test isolated ledger and dynamic token authenticator
-        run: pnpm --filter @xauusd/customer-runtime-session exec vitest run src/operator-token-ledger.test.ts src/api-token-lifecycle.test.ts src/api-gateway.test.ts
+        run: pnpm --filter @xauusd/customer-runtime-session exec vitest run src/operator-token-ledger.test.ts src/operator-ledger-gateway-e2e.test.ts src/api-token-lifecycle.test.ts src/api-gateway.test.ts
       - name: Typecheck
         run: pnpm --filter @xauusd/customer-runtime-session typecheck
       - name: Verify strict runtime security boundary
