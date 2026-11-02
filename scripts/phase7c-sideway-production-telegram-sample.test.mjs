@@ -75,7 +75,8 @@ test("Sideway production Telegram sample uses the real notifier for the complete
   }
 
   assert.match(notifications[0].text, /SIDEWAY PENDING/);
-  assert.match(notifications[0].text, /CHƯA VÀO MT5/);
+  // Pending means MT5 has not yet confirmed the fill; match current LIVE notifier wording.
+  assert.match(notifications[0].text, /CHỜ MT5 XÁC NHẬN/);
   assert.match(notifications[1].text, /SIDEWAY FILLED/);
   assert.match(notifications[1].text, /\+6 → BE/);
   assert.match(notifications[1].text, /\+10 → chốt 1\/3/i);
