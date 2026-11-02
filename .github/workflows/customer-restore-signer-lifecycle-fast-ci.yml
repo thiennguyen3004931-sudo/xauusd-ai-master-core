@@ -5,12 +5,18 @@ on:
     paths:
       - 'scripts/customer-restore-authority-key-lifecycle.mjs'
       - 'scripts/customer-restore-authority-key-lifecycle.test.mjs'
+      - 'scripts/customer-restore-authority-signed-proof.mjs'
+      - 'scripts/customer-restore-authority-compare.mjs'
+      - 'scripts/customer-restore-authority-proof-issuer.mjs'
       - '.github/workflows/customer-restore-signer-lifecycle-fast-ci.yml'
   push:
     branches: [main]
     paths:
       - 'scripts/customer-restore-authority-key-lifecycle.mjs'
       - 'scripts/customer-restore-authority-key-lifecycle.test.mjs'
+      - 'scripts/customer-restore-authority-signed-proof.mjs'
+      - 'scripts/customer-restore-authority-compare.mjs'
+      - 'scripts/customer-restore-authority-proof-issuer.mjs'
       - '.github/workflows/customer-restore-signer-lifecycle-fast-ci.yml'
   workflow_dispatch:
 
