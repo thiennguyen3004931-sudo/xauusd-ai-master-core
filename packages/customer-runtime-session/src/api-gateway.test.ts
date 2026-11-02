@@ -24,6 +24,8 @@ import {
   CUSTOMER_API_MAX_BODY_BYTES,
 } from "./api-gateway.js";
 import { InMemoryCustomerRuntimeChallengeStore } from "./session.js";
+import { LedgerCustomerApiKeyAuthenticator, type CustomerApiTokenLifecycleRecord } from "./api-token-lifecycle.js";
+import type { CustomerApiAuthenticator } from "./api-gateway.js";
 
 const NOW = 15_000_000;
 const TOKEN = "customer-api-token-001";
@@ -89,6 +91,7 @@ function request(
 async function selfManagedGateway(
   rateLimiter = new InMemoryFixedWindowCustomerApiRateLimiter(),
   customerId = "customer-api-001",
+  tokenAuthenticator?: CustomerApiAuthenticator,
 ) {
   const registry = new InMemoryCustomerGrantRegistryRepository();
   const store = new InMemoryCustomerRuntimeChallengeStore();
@@ -112,7 +115,7 @@ async function selfManagedGateway(
       licenses: resolver(license),
       challenges: store,
       clock,
-      authenticator: authenticator(customerId),
+      authenticator: tokenAuthenticator ?? authenticator(customerId),
       rateLimiter,
     }),
     clock,
@@ -330,4 +333,52 @@ describe("CustomerApiGateway", () => {
     });
     expect(wrongMedia.status).toBe(415);
   });
+
+  it("dynamically revokes Gateway challenge access and fails closed on token ledger outage", async () => {
+    let unavailable = false;
+    const tokenDigest = sha256CustomerApiToken(TOKEN);
+    const record: CustomerApiTokenLifecycleRecord = {
+      customerId: "customer-api-001",
+      tokenSha256Hex: tokenDigest,
+      status: "ACTIVE",
+      notBeforeMs: NOW - 100,
+      expiresAtMs: NOW + 50_000,
+      revokedAtMs: null,
+      generation: 1,
+    };
+    const tokenRecords = new Map<string, CustomerApiTokenLifecycleRecord>([[tokenDigest, record]]);
+    const tokenAuth = new LedgerCustomerApiKeyAuthenticator({
+      async getBySha256(hash) {
+        if (unavailable) throw new Error("synthetic ledger offline");
+        return tokenRecords.get(hash) ?? null;
+      },
+    }, { now: () => NOW });
+    const {gateway, license} = await selfManagedGateway(
+      new InMemoryFixedWindowCustomerApiRateLimiter(),
+      "customer-api-001",
+      tokenAuth,
+    );
+    const challenge = request("/v1/customer/runtime/challenge", {
+      productMode: "SELF_MANAGED",
+      grantId: "grant-api-self",
+      installationId: license.installationId,
+    });
+    expect((await gateway.handle(challenge)).status).toBe(200);
+    tokenRecords.set(tokenDigest, {
+      ...record,
+      status: "REVOKED",
+      revokedAtMs: NOW,
+      generation: 2,
+    });
+    const revoked = await gateway.handle(challenge);
+    expect(revoked.status).toBe(401);
+    tokenRecords.set(tokenDigest, record);
+    unavailable = true;
+    const outage = await gateway.handle(challenge);
+    expect(outage.status).toBe(503);
+    expect(JSON.parse(outage.body)).toEqual({ok: false, code: "AUTH_SOURCE_UNAVAILABLE"});
+    expect(outage.body).not.toContain(TOKEN);
+    expect(outage.body).not.toContain(tokenDigest);
+  });
+
 });
