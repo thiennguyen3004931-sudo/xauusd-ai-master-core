@@ -22,7 +22,10 @@ export function evaluateCustomerReleaseSnapshot({ sha, issues, workflowRuns }) {
     const matching = Array.isArray(workflowRuns)
       ? workflowRuns.filter(x => x && x.name === name && x.head_sha === cleanSha)
       : [];
-    const passed = matching.some(x => x.status === "completed" && x.conclusion === "success");
+    // A later failed or queued rerun on the same SHA invalidates older green evidence.
+    // Use GitHub's monotonic run ID rather than trusting array order.
+    const latest = matching.sort((a, b) => Number(b.id ?? 0) - Number(a.id ?? 0))[0];
+    const passed = Boolean(latest && latest.status === "completed" && latest.conclusion === "success");
     if (!passed) blockers.push("WORKFLOW_NOT_VERIFIED_" + name.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase());
     return { name, exactShaVerified: passed };
   });
