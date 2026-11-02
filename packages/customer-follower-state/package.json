@@ -16,7 +16,7 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "build": "tsup src/index.ts --format cjs,esm --dts --external node:sqlite",
     "test": "vitest run src/file-position-registry.test.ts && node --test tests/sqlite-command-journal.node.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
