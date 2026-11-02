@@ -35,3 +35,13 @@ test("unavailable issue evidence denies",()=>{
   const result=evaluate({sha,issues:{},workflowRuns:pass});
   assert.ok(result.blockers.includes("ISSUE_176_NOT_CLOSED"));
 });
+
+test("latest queued or failed rerun supersedes earlier green on identical SHA",()=>{
+  const old=pass.map((x,i)=>({...x,id:i+1}));
+  const failed={...old[0],id:100,status:"completed",conclusion:"failure"};
+  const queued={...old[1],id:101,status:"queued",conclusion:null};
+  const result=evaluate({sha,issues:{166:"closed",176:"closed"},workflowRuns:[...old,failed,queued]});
+  assert.equal(result.workflows[0].exactShaVerified,false);
+  assert.equal(result.workflows[1].exactShaVerified,false);
+  assert.equal(result.workflows[2].exactShaVerified,true);
+});
