@@ -1433,26 +1433,8 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
     }
   }
 
-  // TP/SL are broker-native; never close at a secondary target, regime change,
-  // time limit or partial profit target. This applies to Recovery TP as well.
-  // Fast-move and +6 management above can only tighten the existing SL.
-  if (brokerTpSlTrailOnly) {
-    const holdKey = `${managed.ticket}|BROKER_TP_SL_TRAIL_ONLY`;
-    if (managed.lastHoldM15Key !== holdKey) {
-      managed.lastHoldM15Key = holdKey;
-      saveState();
-      journal("SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY", {
-        ticket: managed.ticket,
-        side: managed.side,
-        brokerStopLoss: Number(position.stopLoss),
-        brokerTakeProfit: Number(position.takeProfit),
-        disabledEarlyExits: ["REGIME_LEFT_RANGE", "TIME_STOP", "PLUS10_PARTIAL", "TP2_SOFTWARE_CLOSE", "FIXED_TP_SOFTWARE_CLOSE"],
-      });
-    }
-    return;
-  }
-
   if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
+    if (!brokerTpSlTrailOnly) {
     const closeVolume = oneThirdPartialVolume(
       managed.initialVolume,
       Number(position.volume),
@@ -1490,6 +1472,26 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
         journal("PLUS10_PARTIAL_REJECTED", { ticket: managed.ticket, favorable, response });
       }
     }
+    }
+  }
+
+  // TP/SL are broker-native; never close at a secondary target, regime change,
+  // time limit or partial profit target. This applies to Recovery TP as well.
+  // Fast-move and +6 management above can only tighten the existing SL.
+  if (brokerTpSlTrailOnly) {
+    const holdKey = `${managed.ticket}|BROKER_TP_SL_TRAIL_ONLY`;
+    if (managed.lastHoldM15Key !== holdKey) {
+      managed.lastHoldM15Key = holdKey;
+      saveState();
+      journal("SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY", {
+        ticket: managed.ticket,
+        side: managed.side,
+        brokerStopLoss: Number(position.stopLoss),
+        brokerTakeProfit: Number(position.takeProfit),
+        disabledEarlyExits: ["REGIME_LEFT_RANGE", "TIME_STOP", "PLUS10_PARTIAL", "TP2_SOFTWARE_CLOSE", "FIXED_TP_SOFTWARE_CLOSE"],
+      });
+    }
+    return;
   }
 
   if (await closeFixedTpIfTriggered(position, quote)) return;
