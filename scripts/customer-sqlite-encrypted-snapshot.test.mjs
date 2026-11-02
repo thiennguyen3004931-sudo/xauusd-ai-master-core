@@ -32,8 +32,12 @@ test("online backup includes committed WAL changes while source SQLite connectio
     const created = await create(f);
     assert.equal(created.ok, true);
     assert.equal(created.encryptedArchiveOnly, true);
-    const inspection = await inspect(f);
+    // Inspect the decrypted archived SQLite itself: a source-only check could
+    // pass even when a broken backup silently omits the committed WAL pages.
+    const inspection = await inspect({ ...f, expectedSyntheticLicenseStatus: "REVOKED" });
     assert.equal(inspection.sqliteIntegrity, "ok");
+    await assert.rejects(() => inspect({ ...f, expectedSyntheticLicenseStatus: "ACTIVE" }),
+      /SYNTHETIC_SNAPSHOT_INSPECTION_DENIED/);
     assert.equal(inspection.sourceSnapshotSha256, created.sourceSnapshotSha256);
     assert.equal(inspection.restoresCustomerAccess, false);
     const entries = await readdir(f.testRoot);
