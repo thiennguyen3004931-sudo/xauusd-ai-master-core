@@ -30,6 +30,8 @@ function syntheticCycle({ dailyMode = "SIDEWAY_NATIVE", quoteBid = 2500, quoteAs
     maxHoldingMinutes: 180,
     maxQuoteAgeMs: 30000,
     maxM15AgeMs: 30000,
+    FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE: 10,
+    FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE: 10,
     symbol: "XAUUSD",
     regimeCandleCount: 320,
     Date: { now: () => 1000000000 },
