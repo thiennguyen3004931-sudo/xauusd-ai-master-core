@@ -38,7 +38,37 @@ The command prints `INSTALLATION_ID` and `INSTALLATION_PUBLIC_KEY`. Send those t
 
 Run this command once for a fresh installation. If any identity file already exists, it exits with `INSTALLATION_IDENTITY_ALREADY_EXISTS` and preserves the existing files. Reuse the enrolled identity for activation; do not delete the files to force regeneration. If initialization was interrupted or an identity file is missing, preserve the remaining files and use the approved recovery process with the administrator. Moving to a new PC requires the revocation and fresh-installation process in section 8.
 
-**Never send or copy `keys/installation-private.pem`.** The private key must remain on the machine where it was generated. Do not put it in GitHub, a ticket, chat, or a support bundle.
+**DPAPI-only new identity (Windows):** the generator now stores `keys/installation-private.dpapi` encrypted using Windows DPAPI `CurrentUser`. The public key and installation ID are separate files. The key can be decrypted only in an appropriate Windows user profile on the originating machine. Non-Windows generation fails closed; it does not fall back to plaintext. The activation utility validates the decrypted private/public key pair before making any network request.
+
+**Never send or copy** `keys/installation-private.dpapi` or any pre-existing `keys/installation-private.pem`. Neither belongs in GitHub, tickets, chats, support bundles or customer public archives. A legacy PEM is **not** silently migrated: a legacy PEM or mixed-state identity causes initialization/activation to refuse to proceed. Preserve all existing identity files; do not delete, regenerate or overwrite an enrolled identity. Migration requires a separate authorized tool and controlled procedure.
+
+**Release blocker remains:** DPAPI library/CLI synthetic CI is not evidence of the effective NTFS ACL, Windows user/profile recovery, anti-tampering by administrators or safe migration of existing installations. These checks plus customer-machine pilot and a trusted signed release are mandatory before any commercial handoff. Never move the DPAPI ciphertext to a different machine as a migration shortcut.
+
+### Legacy unencrypted PEM migration — controlled maintenance only
+
+A **separately confirmed** helper is available at `bin/migrate-legacy-installation-identity.mjs` for a legacy installation with `keys/installation-private.pem`, `keys/installation-public.txt` and `keys/installation-id.txt` already present. It is **not invoked automatically** by the identity generator or activation. Never run it as part of general installation or on a real customer's machine without a distinct operator-approved maintenance change window and verified backup/recovery plan.
+
+On an isolated Windows test installation **containing only synthetic keys**, the explicit migration command is:
+
+```powershell
+node .\bin\migrate-legacy-installation-identity.mjs --confirm-preserve-legacy-pem
+```
+
+It rejects missing confirmation, invalid or mismatched keys, a missing/partial identity and an existing `.dpapi` target. It uses exclusive file creation (`wx`), encrypts the same Ed25519 private key under the current Windows DPAPI profile and verifies that the newly written ciphertext decrypts to the enrolled public key. **The old PEM is intentionally left untouched, and activation remains BLOCKED while it exists.** The tool neither deletes the old PEM nor claims that ordinary deletion securely removes Windows backups/SSD history. Interrupted output must be handled manually; never overwrite, silently recover by re-enrollment, or delete an identity to make the command pass.
+
+The operator must separately review NTFS ACL inheritance, current user/profile, backup retention, matching license/grant/installation identity, and the authorized **post-verification disposition of legacy plaintext**. No automated cleanup or migration of any real customer key is authorized by this code merge. The helper is **not** an acceptance certificate for commercial release, SELF_MANAGED activation or COPY_FOLLOWER.
+
+### Offline customer-machine readiness preflight (read-only)
+
+On a **separately controlled Windows customer pilot PC**, run the local command below from the extracted customer release directory as the Windows user/profile that is intended to own the installation:
+
+```powershell
+node .\bin\check-customer-installation-readiness.mjs
+```
+
+This command has **no CLI arguments and no network/MT5 activity**. It checks for legacy plaintext PEM or missing/invalid identity files, invokes the conservative read-only NTFS ACL preflight for the `keys` folder and encrypted key, then verifies that the Windows CurrentUser DPAPI ciphertext decrypts to the registered public key. It never prints key material, account SIDs or local paths, modifies file permissions or authorizes customer activation.
+
+`CUSTOMER_INSTALLATION_OFFLINE_READINESS=PASS` means only the local checks completed under that Windows user at that moment. Separate host and account verification, recovery/backup evidence, grants, approved publisher signing, client consent, and DEMO acceptance are **NOT VERIFIED** by this command. A `BLOCKED` result must not be bypassed by disabling the audit, reusing a plaintext PEM or changing requested bot modes. Do not run the command against a real customer install before the operator approves that pilot's scope.
 
 ## 4. Administrator provisioning
 
@@ -69,6 +99,9 @@ config/customer-agent.json
 Set the approved HTTPS gateway URL, product mode, grant ID, MT5 login, broker server, and the allowed requested mode/sizing mode. Keep customer-specific configuration and credentials local; do not commit them.
 
 For the first SELF_MANAGED handoff, leave `requestedBotMode` as `PAUSE`. For COPY_FOLLOWER, use only the sizing mode explicitly authorized by the administrator.
+
+**Mandatory offline gate before activation (proposed software hardening):** when `node .\\bin\\activate-customer-agent.mjs` runs, it must first check the same installation's conservative read-only NTFS ACL policy and current-user DPAPI/private-public-key binding *before constructing any Gateway transport*. Run from the root of the extracted installation; the three identity-file configuration values must resolve exactly to `keys/installation-id.txt`, `keys/installation-public.txt`, and `keys/installation-private.dpapi` under that root. A different/relocated path, legacy PEM, inherited/broad ACL, wrong Windows user profile or failed DPAPI check **blocks activation**. Do not disable the gate, reset identity files or weaken NTFS permissions to make it pass. The gate does not change ACLs or activate MT5; a software check at a point in time is not full effective-permissions or customer-host acceptance. Real customer pilot use still requires separate operator approval.
+
 
 ## 6. Supply the API token and activate
 
@@ -144,3 +177,5 @@ Do not bypass an authentication, installation, account, sequence or replay check
 - LIVE ARM, Master BOT_MODE changes, account switching, and LIVE test orders: not part of customer package acceptance.
 
 The final production handoff requires a successful acceptance run on the exact final `main` commit, a verified package artifact, a successful customer installation/binding check, and separate approval for any real MT5 execution. Never infer current production BOT_MODE or ARM status from an old monitor snapshot when the bridge cannot be read.
+
+**Release status:** a passing ZIP/package checksum check is not a signed commercial release. Verify both the GitHub Actions outer artifact digest and inner customer ZIP digest; require trusted publisher signature before customer distribution. Keep a known-good rollback artifact and record the exact final-main CI evidence. No routine in this package authorizes MT5 DEMO or LIVE execution.

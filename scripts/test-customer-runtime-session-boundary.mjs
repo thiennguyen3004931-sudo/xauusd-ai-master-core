@@ -52,9 +52,13 @@ test("runtime session production source has no trading or MT5 dependency", async
     "position_modify",
     "position_close",
   ];
+  const operatorLedgerPath = path.join(sourceDir, "operator-token-ledger.ts");
   for (const file of files) {
     const content = await readFile(file, "utf8");
     for (const marker of forbidden) {
+      // Only the explicitly isolated operator-side SQLite adapter may inspect
+      // filesystem metadata. Trading, MT5, network and order APIs remain banned.
+      if (file === operatorLedgerPath && marker === "node:fs") continue;
       assert.equal(
         content.includes(marker),
         false,
@@ -62,6 +66,10 @@ test("runtime session production source has no trading or MT5 dependency", async
       );
     }
   }
+  const operatorSource = await readFile(operatorLedgerPath, "utf8");
+  assert.match(operatorSource, /from "node:fs"/);
+  assert.match(operatorSource, /initializeEmptyOperatorTokenLedger/);
+  assert.match(operatorSource, /OPERATOR_LEDGER_FILE_INVALID/);
 });
 
 
@@ -113,9 +121,23 @@ test("durable persistence is isolated to the SQLite security adapter", async () 
     const content = await readFile(file, "utf8");
     if (content.includes("node:sqlite")) sqliteUsers.push(path.relative(root, file));
   }
-  assert.deepEqual(sqliteUsers, [
+  assert.deepEqual(sqliteUsers.sort(), [
+    path.join("packages", "customer-runtime-session", "src", "operator-token-ledger.ts"),
     path.join("packages", "customer-runtime-session", "src", "sqlite-store.ts"),
   ]);
+
+  const operatorSource = await readFile(path.join(sourceDir, "operator-token-ledger.ts"), "utf8");
+  for (const required of [
+    "CREATE TABLE operator_token_records",
+    "PRAGMA journal_mode = WAL",
+    "PRAGMA synchronous = FULL",
+    "BEGIN IMMEDIATE",
+    "status = 'REVOKED'",
+    "generation = generation + 1",
+    "OPERATOR_LEDGER_OPEN_FAILED",
+  ]) {
+    assert.ok(operatorSource.includes(required), `Operator ledger missing: ${required}`);
+  }
 
   const source = await readFile(path.join(sourceDir, "sqlite-store.ts"), "utf8");
   for (const required of [

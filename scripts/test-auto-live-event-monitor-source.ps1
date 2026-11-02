@@ -77,13 +77,16 @@ $IssueReadIndex = $Monitor.IndexOf('$issue = Invoke-GitHubJson -Method Get', [Sy
 if ($NotifyGuardIndex -lt 0 -or $IssueReadIndex -lt 0 -or $NotifyGuardIndex -ge $IssueReadIndex) {
   throw 'Notify=false guard must exit before normal state persistence.'
 }
-$BridgeFailureCallIndex = $Monitor.IndexOf('Write-BridgeFailureState -FailureCategory $bridgeFailureCategory', [System.StringComparison]::Ordinal)
-if ($NotifyGuardIndex -lt 0 -or $BridgeFailureCallIndex -lt 0 -or $NotifyGuardIndex -ge $BridgeFailureCallIndex) {
-  throw 'Bridge failure persistence must be guarded by Notify=true.'
-}
+# Both bridge persistence call sites must have their OWN notify guard.
+# The planned-downtime handler legitimately occurs before the normal $Notify guard.
+# Do not compare against the first occurrence of a different branch's guard.
+Assert-Match $Monitor '(?s)if \(\$Notify\)\s*\{\s*Write-BridgeFailureState -FailureCategory \$bridgeFailureCategory -ExpectedOffline\s*Write-Host' 'expected downtime issue persistence requires explicit notify'
+Assert-Match $Monitor '(?s)if \(-not \$Notify\)\s*\{\s*Write-Host ''MONITOR_NOTIFY=FALSE''\s*Write-Host ''MONITOR_REPOSITORY_MUTATION=NONE''\s*throw "AUTO_LIVE_BRIDGE_READ_FAILED: \$bridgeFailureCategory"\s*\}\s*Write-BridgeFailureState -FailureCategory \$bridgeFailureCategory' 'unexpected bridge failure issue persistence requires explicit notify'
 
 Assert-Literal $Monitor 'Read-BridgeArray -Uri "$bridgeBase/v1/positions?symbol=XAUUSD"' 'position read endpoint'
 Assert-Literal $Monitor 'Read-BridgeArray -Uri "$bridgeBase/v1/orders?symbol=XAUUSD"' 'pending-order read endpoint'
+Assert-Literal $Monitor '$envInfo = Assert-Phase7CAccountEnv -EnvFile $envFile -AccountMode LIVE' 'read-only config permits disabled trading'
+Assert-NotMatch $Monitor 'Assert-Phase7CAccountEnv[^\r\n]*-RequireTrading' 'read-only monitor must not require trade execution enablement'
 Assert-Literal $Monitor 'Invoke-RestMethod -Uri "$bridgeBase/health"' 'MT5 bridge health read'
 Assert-Literal $Monitor "/api/v1/phase7c/lifecycle' -Method Get" 'lifecycle GET'
 Assert-Literal $Monitor "/api/v1/phase7c-live-arm-control/capability' -Method Get" 'ARM capability GET'
@@ -177,6 +180,17 @@ Assert-NotMatch $FailureHandler '(?m)^\s*(?:observedAt|botMode|armStatus|positio
 Assert-Literal $FailureHandler "Add-Member -NotePropertyName bridgeReadStatus -NotePropertyValue 'FAILED'" 'bridge failure state persistence'
 Assert-Literal $FailureHandler 'The issue''s existing bot mode, ARM, positions, pending orders, and strategy fields were **not refreshed**' 'historical snapshot warning'
 Assert-NotMatch $Monitor 'Invoke-GitHubJson\s+-Method\s+(?:Put|Delete)' 'unexpected GitHub mutation method'
+
+Assert-Literal $Monitor "auto-live-offline-lease.ps1" 'offline lease classifier is sourced'
+Assert-Literal $Monitor 'MONITOR_BRIDGE_READ_STATUS=OFFLINE_EXPECTED' 'explicit expected downtime status'
+Assert-Literal $Monitor "MONITOR_RUNTIME_HEALTH=NOT_VERIFIED" 'no false health classification'
+Assert-Literal $Monitor "MONITOR_DATA_FRESHNESS=UNAVAILABLE" 'no stale observation accepted as current'
+Assert-Literal $Monitor "BRIDGE_OFFLINE_EXPECTED" 'operator downtime is distinguishable in issue audit'
+Assert-Literal $Monitor 'Get-AutoLiveBridgeFailureCategory -Exception $_.Exception' 'HTTP-aware failure categorization'
+Assert-Literal $Monitor 'Test-AutoLiveExpectedOffline -FailureCategory $bridgeFailureCategory -LeaseState $offlineLeaseState' 'only verified connectivity downtime is expected'
+Assert-Literal $Workflow 'scripts/test-auto-live-offline-lease.ps1' 'offline lease regression executes on PR'
+Assert-Literal $Workflow 'scripts/ops/auto-live-offline-lease.ps1' 'offline lease changes trigger CI'
+Assert-Literal $Workflow 'scripts/ops/set-auto-live-monitor-offline-lease.ps1' 'operator declaration changes trigger CI'
 
 Write-Host 'AUTO_LIVE_MONITOR_SOURCE_CONTRACT=PASS'
 Write-Host 'PRODUCTION_HTTP_METHODS=GET_ONLY'

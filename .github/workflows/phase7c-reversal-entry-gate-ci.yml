@@ -10,6 +10,10 @@ on:
       - 'apps/api/src/services/phase7c-decision-monitor.service.ts'
       - 'apps/api/src/services/phase7c-live-regime.service.ts'
       - 'scripts/run-phase7b-demo-controller.ts'
+      - 'scripts/phase7c-auto-live-reversal-lock.mjs'
+      - 'scripts/phase7c-auto-live-reversal-lock.test.mjs'
+      - 'scripts/phase7c-reversal-trend-filter.test.mjs'
+      - 'apps/api/src/services/phase7c-reversal-trend-filter.ts'
       - 'scripts/run-phase7c-trend-controller.mjs'
       - 'scripts/phase7c-trend-mode-gate.mjs'
       - 'scripts/phase7c-trend-mode-gate.d.mts'
@@ -30,6 +34,10 @@ on:
       - 'apps/api/src/services/phase7c-decision-monitor.service.ts'
       - 'apps/api/src/services/phase7c-live-regime.service.ts'
       - 'scripts/run-phase7b-demo-controller.ts'
+      - 'scripts/phase7c-auto-live-reversal-lock.mjs'
+      - 'scripts/phase7c-auto-live-reversal-lock.test.mjs'
+      - 'scripts/phase7c-reversal-trend-filter.test.mjs'
+      - 'apps/api/src/services/phase7c-reversal-trend-filter.ts'
       - 'scripts/run-phase7c-trend-controller.mjs'
       - 'scripts/phase7c-trend-mode-gate.mjs'
       - 'scripts/phase7c-trend-mode-gate.d.mts'
@@ -80,6 +88,10 @@ jobs:
         run: pnpm --dir apps/api exec tsx ../../scripts/phase7b-live-entry-diagnostics.test.mjs
       - name: Run Phase7C decision monitor regression tests
         run: pnpm --dir apps/api exec tsx ../../scripts/phase7c-decision-monitor.test.mjs
+      - name: LIVE AUTO reversal new-order hard lock tests
+        run: node --test scripts/phase7c-auto-live-reversal-lock.test.mjs
+      - name: REVERSAL H1 H4 shadow trend filter tests
+        run: pnpm --dir apps/api exec tsx ../../scripts/phase7c-reversal-trend-filter.test.mjs
       - name: Run Trend AUTO reversal gate tests
         run: node --test scripts/phase7c-trend-mode-gate.test.mjs
       - name: Run Trend entry regime attribution tests

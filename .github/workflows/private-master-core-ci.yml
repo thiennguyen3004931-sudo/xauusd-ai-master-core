@@ -101,6 +101,24 @@ jobs:
       - name: Tracked-secret boundary
         run: node scripts/security/check-private-secrets.mjs --tracked
 
+      - name: Customer release Ed25519 attestation tamper regression
+        run: node --test scripts/security/customer-release-attestation.test.mjs
+
+      - name: Windows CurrentUser DPAPI foundation regression (synthetic memory only)
+        run: node --test scripts/customer-windows-dpapi-foundation.test.mjs
+
+      - name: Synthetic legacy PEM migration preservation and DPAPI verification (Windows only)
+        run: node --test scripts/customer-legacy-pem-migration.test.mjs
+
+      - name: Offline customer installation readiness fail-closed regression
+        run: node --test scripts/customer-offline-installation-readiness.test.mjs
+
+      - name: Offline customer readiness Windows positive and broad ACL synthetic regression
+        run: node --test scripts/customer-offline-readiness-positive-windows.test.mjs
+
+      - name: Windows customer key NTFS ACL conservative policy (synthetic SIDs only)
+        run: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-customer-key-ntfs-acl.ps1
+
       - name: Private bootstrap provenance tests
         run: node --test scripts/security/verify-private-bootstrap.test.mjs
 
@@ -155,6 +173,12 @@ jobs:
 
       - name: REVERSAL CHOCH direction entry contract
         run: node --test scripts/test-phase7c-reversal-entry-contract.mjs
+
+      - name: LIVE AUTO REVERSAL final-order hard lock regression
+        run: node --test scripts/phase7c-auto-live-reversal-lock.test.mjs
+
+      - name: REVERSAL H1 H4 read-only trend filter regression
+        run: pnpm --dir apps/api exec tsx ../../scripts/phase7c-reversal-trend-filter.test.mjs
 
       - name: New-machine bootstrap safety contract
         run: node --test scripts/test-phase7c-new-machine-installer-source.mjs

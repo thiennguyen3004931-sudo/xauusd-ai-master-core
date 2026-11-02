@@ -9,6 +9,7 @@ import {
   type StrategyContext,
 } from "@xauusd/strategy-engine";
 import { phase7CBotModeService } from "./phase7c-bot-mode.service";
+import { assessReversalTrendFilter } from "./phase7c-reversal-trend-filter";
 
 interface BridgeBar {
   openTime?: number;
@@ -137,6 +138,8 @@ export async function getPhase7CLiveRegime(symbol = "XAUUSD", count = 320) {
       }
     : null;
 
+  const reversalTrendFilter = assessReversalTrendFilter(candles, reversal?.side ?? null);
+
   return {
     symbol: normalizedSymbol,
     timeframe: Timeframe.M15,
@@ -146,6 +149,7 @@ export async function getPhase7CLiveRegime(symbol = "XAUUSD", count = 320) {
     activeMode: activeMode.mode,
     modeMatchesRecommendation: activeMode.mode === recommendedMode || activeMode.mode === "AUTO",
     reversal,
+    reversalTrendFilter,
     reasons: assessment.reasons,
     metrics: {
       ...assessment.metrics,

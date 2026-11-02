@@ -1,0 +1,58 @@
+# P0 #176 — Independent Restore Authority: Implementation and Acceptance Contract
+
+Status: **DESIGN / REVIEW ONLY**. No production restore, no trust-root deployment, no customer activation.
+
+## Security boundary
+
+The SQLite runtime database, its WAL/SHM, install folder, encrypted archive and any manifest bundled with the archive are **untrusted candidate state** on restore. A checksum, signed manifest stored in the same archive, SQLite integrity check, or green CI result cannot establish freshness.
+
+Before a customer Gateway binds a listener or a session is authorized, a separately controlled and authenticated authority MUST return a fresh, monotonic high-water statement for the exact customer, installation and license/grant binding. The authority and its signing key MUST be outside customer-restorable storage. If it cannot be contacted, authenticated, or its freshness cannot be established, the only permitted result is **BLOCKED**.
+
+## Minimum authority statement (versioned schema proposal)
+
+- `schemaVersion`, `authorityKeyId`, `issuedAt`, `expiresAt`, unpredictable `requestNonce` bound to the current validation request.
+- Canonical `customerId`, `installationId`, `licenseId`, `grantId`, and `bindingEpoch`; use stable opaque IDs, never raw tokens.
+- Monotonic `revocationGeneration`, `migrationGeneration`, `challengeConsumptionGeneration`, `auditHighWater`, `tokenGeneration`.
+- Explicit current authorization state (including revoked/expired), not just a hash of the snapshot.
+- Authenticated signature over a canonical serialization with domain separation and key-rotation policy. Pin an operator-controlled trust root outside the backup; reject stale, unknown or revoked keys.
+- The authority MUST enforce monotonic updates atomically, prevent rollback/reset of its own ledger, and retain durable revocation history.
+
+This is a contract proposal, not a claim that these fields or controls already exist.
+
+## Restore admission gate
+
+1. Enter quarantine; no API listener, session, copy follower, SELF_MANAGED executor or MT5 order path.
+2. Authenticate operator approval and obtain a consistent SQLite snapshot with SQLite backup API or verified WAL checkpoint; do not copy an active `.sqlite` alone.
+3. Verify archive integrity, encryption and recovery key authorization. These are necessary but **not** freshness proof.
+4. Issue a fresh nonce to the independent authority; verify identity, signature, key status, nonce, expiration and complete binding tuple.
+5. Compare restored license/grant status and all five generations against independent authority. Any lower, absent, ambiguous, or conflicting value => BLOCKED.
+6. Reject resurrected revoked licenses/grants, consumed challenges, missing migration audits and replayed/expired/revoked tokens, even when their historical signatures are valid.
+7. Log only sanitized decision codes and non-secret evidence. An approved reissue must use a new binding and independently audited operator authorization.
+8. Permit service startup only after a separate reviewed release gate; a PASS here is **not** permission to enable AUTO, ARM or trading.
+
+## Deterministic acceptance matrix
+
+| Synthetic scenario | Expected decision |
+| --- | --- |
+| Matching latest generation, valid nonce/signature and active binding | Eligible for *further* gates, not auto-activate |
+| Pre-revocation physical SQLite copy | BLOCKED |
+| Pre-migration copy with formerly unconsumed challenge | BLOCKED |
+| Missing independent authority / network timeout | BLOCKED |
+| Wrong customer, installation, license or grant tuple | BLOCKED |
+| Replayed signed authority response / wrong nonce / expired statement | BLOCKED |
+| Unknown, retired or revoked signing key | BLOCKED |
+| Authority generation below previously witnessed high-water | BLOCKED |
+| Old token after rotation or revocation | BLOCKED |
+| Corrupt archive, incomplete WAL snapshot or unapproved recovery key | BLOCKED |
+
+## Engineering sequence
+
+- **A:** Define versioned canonical statement and strict verifier, with pure synthetic negative tests; no Gateway integration.
+- **B:** Implement separately administered durable monotonic authority and key lifecycle; include concurrent-update and disaster-recovery tests.
+- **C:** Integrate fail-closed admission before Gateway/session start; prove no bypass in SELF_MANAGED and COPY_FOLLOWER.
+- **D:** WAL-consistent encrypted backup/recovery and token rotation/expiry; isolated host acceptance, audit, rollback-to-BLOCKED.
+- **E:** Independent security review and explicit operator release authorization. Keep issue #176 and parent #166 OPEN until all acceptance evidence exists.
+
+## Operational invariants
+
+No change to BOT_MODE, ARM, MT5 orders, production startup, runner services, real customer databases or secrets. AUTO LIVE REVERSAL new-entry hard lock remains in force. Do not use a synthetic PASS to approve Customer Release V1.
