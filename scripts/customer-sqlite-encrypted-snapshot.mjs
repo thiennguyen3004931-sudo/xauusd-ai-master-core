@@ -31,7 +31,7 @@ async function validateSandbox(root, filePath, mustExist) {
   }
   const target = resolve(filePath);
   const parent = await realpath(dirname(target));
-  if (!parent.startsWith(directory + sep)) throw new Error("SYNTHETIC_PATH_OUTSIDE_SANDBOX");
+  if (parent !== directory && !parent.startsWith(directory + sep)) throw new Error("SYNTHETIC_PATH_OUTSIDE_SANDBOX");
   if (mustExist) {
     const final = await realpath(target);
     const details = await lstat(target);
