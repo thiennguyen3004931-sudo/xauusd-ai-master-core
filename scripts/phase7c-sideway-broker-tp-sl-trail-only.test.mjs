@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
+import { transformPhase7CSidewayM5TrailingSource } from "./phase7c-m5-structural-trailing-source-adapter.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -131,5 +132,18 @@ test("native broker stop/take-profit remain untouched; no false repeated hold al
 test("legacy early-close code is inaccessible under forced broker-target policy", () => {
   assert.match(managedSource, /if \(!brokerTpSlTrailOnly\)\s*\{\s*if \(Date\.now\(\) >= managed\.timeStopAt\)/);
   assert.match(managedSource, /if \(!brokerTpSlTrailOnly\)\s*\{\s*if \(managed\.dailyMode === "RECOVERY_TP"\)/);
-  assert.match(managedSource, /if \(brokerTpSlTrailOnly\)\s*\{[\s\S]*?SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY[\s\S]*?return;\s*\}\s*if \(managed\.breakEvenApplied/);
+  assert.match(managedSource, /if \(managed\.breakEvenApplied[\s\S]*?if \(!brokerTpSlTrailOnly\)\s*\{[\s\S]*?SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY/);
+  assert.ok(managedSource.indexOf('SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY') < managedSource.indexOf('if (await closeFixedTpIfTriggered(position, quote)) return;', managedSource.indexOf('SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY')));
+});
+
+test("M5 structural SL adapter inserts stop-tightening before broker-only hold, without requiring partial close", () => {
+  const transformed = transformPhase7CSidewayM5TrailingSource(source);
+  assert.match(transformed, /managed\.partialApplied \|\| \(typeof brokerTpSlTrailOnly !== "undefined" && brokerTpSlTrailOnly\)/);
+  const m5Tighten = transformed.indexOf('journal("SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN"');
+  const hold = transformed.indexOf('journal("SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY"');
+  assert.ok(m5Tighten > 0 && hold > m5Tighten,
+    "M5 stop-tightening must be reachable before broker-only early return");
+  const m5Success = transformed.lastIndexOf("if (response.success)", m5Tighten);
+  assert.ok(m5Success > 0 && m5Success < m5Tighten);
+  assert.ok(transformed.includes('previousStopLoss: position.stopLoss'));
 });
