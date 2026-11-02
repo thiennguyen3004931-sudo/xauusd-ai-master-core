@@ -122,7 +122,13 @@ export async function createSyntheticEncryptedSqliteSnapshot({ testRoot, sourceP
 }
 
 /** Verify encrypted snapshot in a disposable scratch directory; never restore a live database. */
-export async function inspectSyntheticEncryptedSqliteSnapshot({ testRoot, archivePath, encryptionKey }) {
+export async function inspectSyntheticEncryptedSqliteSnapshot({ testRoot, archivePath, encryptionKey, expectedSyntheticLicenseStatus }) {
+  // Explicit synthetic fixture assertion: prove that the archived WAL state,
+  // not merely the still-open source database, contains the committed revoke.
+  if (expectedSyntheticLicenseStatus !== undefined &&
+      expectedSyntheticLicenseStatus !== "ACTIVE" && expectedSyntheticLicenseStatus !== "REVOKED") {
+    throw new Error("SYNTHETIC_EXPECTED_STATUS_INVALID");
+  }
   checkKey(encryptionKey);
   const root = await validateSandbox(testRoot, archivePath, true);
   const scratch = await mkdtemp(join(root.directory, "inspect-test-"));
@@ -141,6 +147,13 @@ export async function inspectSyntheticEncryptedSqliteSnapshot({ testRoot, archiv
     const temporary = join(scratch, "inspected.sqlite");
     await writeFile(temporary, decrypted, { flag: "wx", mode: 0o600 });
     assertIntegrity(temporary);
+    if (expectedSyntheticLicenseStatus !== undefined) {
+      const db = new DatabaseSync(temporary, { readOnly: true });
+      try {
+        const row = db.prepare("SELECT status FROM licenses WHERE license_id = ?").get("synthetic-license");
+        if (row?.status !== expectedSyntheticLicenseStatus) throw new Error("SYNTHETIC_WAL_STATE_MISMATCH");
+      } finally { db.close(); }
+    }
     return Object.freeze({ ok: true, sourceSnapshotSha256: envelope.plaintextSha256, sqliteIntegrity: "ok", restoresCustomerAccess: false });
   } catch {
     throw new Error("SYNTHETIC_SNAPSHOT_INSPECTION_DENIED");
