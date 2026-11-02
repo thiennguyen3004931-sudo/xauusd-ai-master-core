@@ -112,9 +112,9 @@ test("unknown, missing or malformed signer records never fall back to another ke
   reason(decide(proof(), { keyring: ring(7, { operatorV2: entry(second) }) }),
     "AUTHORITY_SIGNING_KEY_UNKNOWN");
   reason(decide(proof(), { keyring: { epoch: 7, keys: {} } }),
-    "AUTHORITY_SIGNING_KEY_UNKNOWN");
+    "AUTHORITY_KEYRING_INVALID");
   reason(decide(proof(), { keyring: { epoch: 7, keys: { operatorV1: { publicKeyPem: first.publicKeyPem } } } }),
-    "AUTHORITY_SIGNING_KEY_INVALID");
+    "AUTHORITY_KEYRING_INVALID");
   reason(decide(proof(), { keyring: null }), "AUTHORITY_KEYRING_INVALID");
   reason(decide(proof(), { keyring: { epoch: 7, keys: {}, extra: true } }),
     "AUTHORITY_KEYRING_INVALID");
