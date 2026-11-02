@@ -194,14 +194,47 @@ export class SqliteCustomerLicenseRepository
 
   async put(record: LicenseRecord): Promise<void> {
     assertLicenseRecord(record);
-    this.db
-      .prepare(`
-        INSERT INTO customer_license_records(license_id, payload_json)
-        VALUES (?, ?)
-        ON CONFLICT(license_id) DO UPDATE SET
-          payload_json = excluded.payload_json
-      `)
-      .run(record.licenseId, JSON.stringify(record));
+
+    // Keep an already revoked license immutable inside the live SQLite
+    // database. BEGIN IMMEDIATE serializes this check with concurrent writers
+    // so an older ACTIVE record cannot silently undo a committed revocation.
+    // This does NOT protect against restoring an older physical database
+    // backup; that needs an external trusted anti-rollback authority (#176).
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const currentRow = this.db
+        .prepare(
+          "SELECT payload_json FROM customer_license_records WHERE license_id = ?",
+        )
+        .get(record.licenseId) as SqlRow | undefined;
+
+      if (currentRow) {
+        const current = parseLicense(currentRow.payload_json);
+        if (
+          current.status === "REVOKED" &&
+          JSON.stringify(current) !== JSON.stringify(record)
+        ) {
+          throw new Error("CUSTOMER_LICENSE_REVOKED_IMMUTABLE");
+        }
+      }
+
+      this.db
+        .prepare(`
+          INSERT INTO customer_license_records(license_id, payload_json)
+          VALUES (?, ?)
+          ON CONFLICT(license_id) DO UPDATE SET
+            payload_json = excluded.payload_json
+        `)
+        .run(record.licenseId, JSON.stringify(record));
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // If SQLite already aborted the transaction, preserve original error.
+      }
+      throw error;
+    }
   }
 }
 
@@ -259,15 +292,47 @@ export class SqliteCustomerGrantRegistryRepository
       return result.changes === 1;
     }
 
-    const result = this.db
-      .prepare(`
-        UPDATE customer_grant_records
-        SET revision = ?, payload_json = ?
-        WHERE grant_id = ? AND revision = ?
-      `)
-      .run(next.revision, payload, grantId, expectedRevision);
+    // A revoked grant must never be restored to ACTIVE (or modified) by a
+    // stale writer. Serialize the state check with the revision CAS.
+    // Physical backup rollback remains a separate P0 gate (#176).
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const currentRow = this.db
+        .prepare(
+          "SELECT payload_json FROM customer_grant_records WHERE grant_id = ? AND revision = ?",
+        )
+        .get(grantId, expectedRevision) as SqlRow | undefined;
+      if (!currentRow) {
+        this.db.exec("ROLLBACK");
+        return false;
+      }
 
-    return result.changes === 1;
+      const current = parseGrant(currentRow.payload_json);
+      if (
+        current.status === "REVOKED" &&
+        JSON.stringify(current) !== payload
+      ) {
+        this.db.exec("ROLLBACK");
+        return false;
+      }
+
+      const result = this.db
+        .prepare(`
+          UPDATE customer_grant_records
+          SET revision = ?, payload_json = ?
+          WHERE grant_id = ? AND revision = ?
+        `)
+        .run(next.revision, payload, grantId, expectedRevision);
+      this.db.exec("COMMIT");
+      return result.changes === 1;
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // Preserve the original SQLite or validation failure.
+      }
+      throw error;
+    }
   }
 
   async list(): Promise<readonly CustomerProductGrantLifecycleRecord[]> {
