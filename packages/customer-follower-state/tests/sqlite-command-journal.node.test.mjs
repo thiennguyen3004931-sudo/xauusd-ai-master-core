@@ -11,7 +11,7 @@ import { CustomerFollowerExecutionAdapter } from "@xauusd/customer-agent";
 import {
   DurableCustomerFollowerDispatcher,
   SqliteCustomerFollowerCommandJournal,
-} from "../dist/index.js";
+} from "../dist/sqlite-command-journal.js";
 
 const binding = {
   licenseId: "synthetic-follower-license",
