@@ -125,4 +125,49 @@ describe("OperatorSqliteCustomerTokenLedger (isolated synthetic data only)", () 
     second.close();
     ledger.close();
   });
+  it("atomic rotation supports a bounded two-token overlap and deterministic old expiry", async () => {
+    const {operatorPath, ledger} = fresh();
+    expect(await ledger.registerToken(record())).toBe(true);
+    expect(await ledger.rotateToken(HASH, record(HASH_NEW), 1, NOW, 1000)).toBe(true);
+    expect(await auth(ledger).authenticate(TOKEN)).not.toBeNull();
+    expect(await auth(ledger).authenticate(TOKEN_NEW)).not.toBeNull();
+    expect(await auth(ledger, () => NOW + 1000).authenticate(TOKEN)).toBeNull();
+    expect(await auth(ledger, () => NOW + 1000).authenticate(TOKEN_NEW)).not.toBeNull();
+    ledger.close();
+    const again = new OperatorSqliteCustomerTokenLedger(operatorPath);
+    expect(await auth(again, () => NOW + 1001).authenticate(TOKEN)).toBeNull();
+    expect(await auth(again, () => NOW + 1001).authenticate(TOKEN_NEW)).not.toBeNull();
+    again.close();
+  });
+
+  it("zero-overlap rotation revokes old token in the same transaction", async () => {
+    const {ledger} = fresh();
+    expect(await ledger.registerToken(record())).toBe(true);
+    expect(await ledger.rotateToken(HASH, record(HASH_NEW), 1, NOW, 0)).toBe(true);
+    expect((await ledger.getBySha256(HASH))?.status).toBe("REVOKED");
+    expect(await auth(ledger).authenticate(TOKEN)).toBeNull();
+    expect(await auth(ledger).authenticate(TOKEN_NEW)).not.toBeNull();
+    ledger.close();
+  });
+
+  it("failed rotation never registers replacement token or modifies old token", async () => {
+    const {ledger} = fresh();
+    expect(await ledger.registerToken(record())).toBe(true);
+    expect(await ledger.rotateToken(HASH, record(HASH_NEW), 99, NOW, 2000)).toBe(false);
+    expect(await ledger.getBySha256(HASH_NEW)).toBeNull();
+    expect((await ledger.getBySha256(HASH))?.generation).toBe(1);
+    expect(await ledger.rotateToken(HASH, {...record(HASH_NEW), customerId:"other"}, 1, NOW, 2000)).toBe(false);
+    expect(await ledger.getBySha256(HASH_NEW)).toBeNull();
+    expect((await ledger.getBySha256(HASH))?.generation).toBe(1);
+    ledger.close();
+  });
+
+  it("atomic rotation refuses overlap exceeding maximum", async () => {
+    const {ledger} = fresh();
+    expect(await ledger.registerToken(record())).toBe(true);
+    expect(await ledger.rotateToken(HASH,record(HASH_NEW),1,NOW,60001)).toBe(false);
+    expect(await ledger.getBySha256(HASH_NEW)).toBeNull();
+    ledger.close();
+  });
+
 });
