@@ -6,7 +6,7 @@ This phase wires existing tested customer security contracts into a **local, ope
 
 - Windows Node.js 24.x + pnpm 10.18.0; run from **private Core repository root**.
 - Build `@xauusd/license-service`, `@xauusd/customer-product-access`, `@xauusd/customer-grant-registry`, `@xauusd/installation-proof`, `@xauusd/customer-runtime-gate` and `@xauusd/customer-runtime-session`. Run the accompanying CI before operational use.
-- Keep the SQLite database, hashed-customer-token file, TLS certificate and **private TLS key** on an access-controlled server disk, not in GitHub or the customer ZIP. Use restrictive NTFS ACLs and dedicated service identities.
+- Keep the customer SQLite database, **separate operator-owned token ledger**, TLS certificate and **private TLS key** on an access-controlled server disk, not in GitHub or the customer ZIP. Use restrictive NTFS ACLs and dedicated service identities.
 - Local operator approval via `XAUUSD_CUSTOMER_ADMIN_APPROVED=YES` is **only an explicit interactive safety confirmation, not authentication**. Real access control comes from the OS account/NTFS permissions and the private host. Never publish this CLI as an unauthenticated HTTP endpoint.
 - Do not run the listener as SYSTEM or as an internet-facing wildcard listener. For remote clients, choose a specific interface and explicitly set `XAUUSD_CUSTOMER_GATEWAY_ALLOW_REMOTE=YES`, configure firewalls and a valid HTTPS certificate, and perform an independent deployment security review.
 
@@ -88,20 +88,21 @@ Remove-Item Env:\XAUUSD_CUSTOMER_ADMIN_APPROVED
 
 All identity fields come from the **already enrolled parent license**, not the grant input. A grant cannot outlive its parent license or cross customer/installation identity.
 
-## 4. Configure customer bearer token hashes
+## 4. Operator-owned durable bearer token ledger (required)
 
-Create a cryptographically random per-customer bearer token using an approved password manager. Store **only the token SHA-256** in `C:\Secure\XAUUSD\customer-token-hashes.json` on the Gateway host:
+The Gateway no longer accepts a static list of SHA-256 token hashes. It requires an
+**existing** operator-managed SQLite token ledger, provisioned and maintained outside
+customer-restorable storage. It checks revocation, generation and expiry on every
+request, and returns a denial if the ledger is unavailable. Never copy the ledger,
+its WAL/SHM files or backups into a customer ZIP or customer restore scope.
 
-```json
-[
-  {
-    "customerId": "customer-unique-001",
-    "tokenSha256Hex": "<64-lowercase-hex-sha256-of-issued-customer-token>"
-  }
-]
-```
+Ledger initialization and registration require a separately authorized operator and
+independently reviewed NTFS ACL, audit and encrypted disaster-recovery procedures.
+This PR does **not** perform live token issuance or initialize a real ledger. The
+standalone synthetic ledger tests use only disposable test records.
 
-Do not store raw bearer tokens in this file or paste them into PowerShell command history. Distribute the raw token only through a secure customer onboarding channel; token rotation requires updating this file and restarting the listener.
+The ledger itself still needs an external monotonic authority and KMS-backed key
+custody before release. Local SQLite durability alone is not P0 anti-rollback proof.
 
 ## 5. Start HTTPS Gateway (staging)
 
@@ -109,7 +110,7 @@ Supply a properly issued TLS cert/key. The listener binds to `127.0.0.1:8443` un
 
 ```powershell
 $env:XAUUSD_CUSTOMER_GATEWAY_DB = 'C:\Secure\XAUUSD\customer.sqlite'
-$env:XAUUSD_CUSTOMER_GATEWAY_TOKEN_HASHES = 'C:\Secure\XAUUSD\customer-token-hashes.json'
+$env:XAUUSD_CUSTOMER_GATEWAY_OPERATOR_TOKEN_LEDGER = 'C:\\OperatorOnly\\XAUUSD\\tokens.sqlite'
 $env:XAUUSD_CUSTOMER_GATEWAY_TLS_KEY = 'C:\Secure\XAUUSD\server.key'
 $env:XAUUSD_CUSTOMER_GATEWAY_TLS_CERT = 'C:\Secure\XAUUSD\server.crt'
 node scripts/customer-ops/serve-gateway.mjs
