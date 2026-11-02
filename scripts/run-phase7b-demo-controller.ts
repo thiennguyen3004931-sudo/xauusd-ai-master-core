@@ -9,6 +9,7 @@ import {
   type Phase7BSignal,
 } from "@xauusd/risk-engine";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
+import { pauseDailyRecoveryForNewEntry } from "./phase7c-daily-recovery-pause.mjs";
 import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
 import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
 import { writeStateFileAtomicSync } from "./phase7c-atomic-state-write.mjs";
@@ -358,6 +359,7 @@ console.log("PHASE7B_DEMO_DAILY_RECOVERY_DAY=MT5_D1_CURRENT_BAR");
 console.log("PHASE7B_DEMO_DAILY_RECOVERY_TP=ADAPTIVE_6_TO_10");
 console.log("PHASE7B_DEMO_DAILY_RECOVERY_TARGET_NET_USD=1");
 console.log("PHASE7B_DEMO_DAILY_RECOVERY_LOT_ESCALATION=OFF");
+console.log("PHASE7B_DEMO_DAILY_RECOVERY_NEW_ENTRIES=TEMPORARILY_DISABLED");
 console.log("PHASE7B_DEMO_MAX_MANAGED_POSITIONS=1");
 console.log(`PHASE7B_DEMO_STATE=${statePath}`);
 console.log(`PHASE7B_DEMO_JOURNAL=${journalPath}`);
@@ -1280,7 +1282,7 @@ async function resolveDailyRecoveryPlan(
     ),
   );
 
-  return {
+  return pauseDailyRecoveryForNewEntry("TREND", {
     mode: "RECOVERY_TP",
     dayStartTime,
     dailyNetPnl: roundValue(dailyNetPnl, 4),
@@ -1291,7 +1293,7 @@ async function resolveDailyRecoveryPlan(
     canRecoverInOneTrade:
       rawTpDistance <= DAILY_RECOVERY_MAX_TP_DISTANCE + 1e-9,
     dealCount: dealCount,
-  };
+  });
 }
 
 async function readPhase7CReversalEntryContext(): Promise<ReversalEntryContext | null> {
