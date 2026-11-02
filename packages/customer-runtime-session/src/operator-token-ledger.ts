@@ -170,6 +170,80 @@ export class OperatorSqliteCustomerTokenLedger implements CustomerApiTokenLifecy
     }
   }
 
+  /**
+   * Operator-provisioned bounded overlap rotation. The new digest is inserted
+   * and the old expiry is shortened (or immediately revoked) in ONE transaction.
+   * No live administrative service, audit authorization, or plaintext tokens.
+   */
+  async rotateToken(
+    oldSha256Hex: string,
+    next: CustomerApiTokenLifecycleRecord,
+    expectedGeneration: number,
+    rotatedAtMs: number,
+    overlapMs: number,
+  ): Promise<boolean> {
+    if (!digest(oldSha256Hex) || !next || !digest(next.tokenSha256Hex) ||
+        oldSha256Hex === next.tokenSha256Hex || !identity(next.customerId) ||
+        next.status !== "ACTIVE" || next.revokedAtMs !== null || next.generation !== 1 ||
+        !safe(next.notBeforeMs) || !safe(next.expiresAtMs) || next.expiresAtMs <= next.notBeforeMs ||
+        !safe(expectedGeneration) || expectedGeneration < 1 ||
+        expectedGeneration >= Number.MAX_SAFE_INTEGER ||
+        !safe(rotatedAtMs) || !safe(overlapMs) || overlapMs > 60_000 ||
+        !safe(rotatedAtMs + overlapMs) ||
+        next.notBeforeMs > rotatedAtMs || next.expiresAtMs <= rotatedAtMs) return false;
+    let began = false;
+    try {
+      this.db.exec("BEGIN IMMEDIATE");
+      began = true;
+      const old = this.db.prepare(`
+        SELECT customer_id, status, not_before_ms, expires_at_ms, generation
+        FROM operator_token_records WHERE token_sha256_hex = ?
+      `).get(oldSha256Hex) as Record<string, unknown> | undefined;
+      if (!old || old.customer_id !== next.customerId || old.status !== "ACTIVE" ||
+          old.generation !== expectedGeneration || !safe(old.not_before_ms) ||
+          !safe(old.expires_at_ms) || rotatedAtMs < old.not_before_ms ||
+          rotatedAtMs >= old.expires_at_ms) {
+        this.db.exec("ROLLBACK");
+        began = false;
+        return false;
+      }
+      const newToken = this.db.prepare(`
+        INSERT OR IGNORE INTO operator_token_records
+          (token_sha256_hex, customer_id, status, not_before_ms, expires_at_ms, revoked_at_ms, generation)
+        VALUES (?, ?, 'ACTIVE', ?, ?, NULL, 1)
+      `).run(next.tokenSha256Hex, next.customerId, next.notBeforeMs, next.expiresAtMs);
+      if (Number(newToken.changes) !== 1) {
+        this.db.exec("ROLLBACK");
+        began = false;
+        return false;
+      }
+      const oldExpiry = Math.min(old.expires_at_ms, rotatedAtMs + overlapMs);
+      const noOverlap = oldExpiry <= rotatedAtMs;
+      const update = noOverlap
+        ? this.db.prepare(`
+            UPDATE operator_token_records SET status='REVOKED', revoked_at_ms=?,
+              generation=generation+1 WHERE token_sha256_hex=? AND status='ACTIVE' AND generation=?
+          `).run(rotatedAtMs, oldSha256Hex, expectedGeneration)
+        : this.db.prepare(`
+            UPDATE operator_token_records SET expires_at_ms=?, generation=generation+1
+            WHERE token_sha256_hex=? AND status='ACTIVE' AND generation=?
+          `).run(oldExpiry, oldSha256Hex, expectedGeneration);
+      if (Number(update.changes) !== 1) {
+        this.db.exec("ROLLBACK");
+        began = false;
+        return false;
+      }
+      this.db.exec("COMMIT");
+      began = false;
+      return true;
+    } catch {
+      if (began) {
+        try { this.db.exec("ROLLBACK"); } catch { /* uncertain => never report success */ }
+      }
+      throw new Error("OPERATOR_LEDGER_ROTATION_UNAVAILABLE");
+    }
+  }
+
   close(): void {
     this.db.close();
   }
