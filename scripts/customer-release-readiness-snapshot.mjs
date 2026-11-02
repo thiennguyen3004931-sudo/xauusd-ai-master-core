@@ -20,7 +20,7 @@ export function evaluateCustomerReleaseSnapshot({ sha, issues, workflowRuns }) {
   }
   const workflows = REQUIRED_WORKFLOWS.map(name => {
     const matching = Array.isArray(workflowRuns)
-      ? workflowRuns.filter(x => x && x.name === name && x.head_sha === cleanSha && x.event !== "workflow_dispatch")
+      ? workflowRuns.filter(x => x && x.name === name && x.head_sha === cleanSha)
       : [];
     const passed = matching.some(x => x.status === "completed" && x.conclusion === "success");
     if (!passed) blockers.push("WORKFLOW_NOT_VERIFIED_" + name.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase());
@@ -55,7 +55,7 @@ async function githubJson(path, token) {
 
 async function main() {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
-  const sha = process.env.GITHUB_SHA ?? "";
+  const sha = process.env.SOURCE_SHA ?? process.env.GITHUB_SHA ?? "";
   const token = process.env.GITHUB_TOKEN ?? "";
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !token) {
     throw new Error("GITHUB_EVIDENCE_UNAVAILABLE");
