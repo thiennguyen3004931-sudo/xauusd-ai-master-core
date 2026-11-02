@@ -200,15 +200,26 @@ export function transformPhase7CTrendM5TrailingSource(input) {
 export function transformPhase7CSidewayM5TrailingSource(input) {
   let source = prependImport(normalizeNewlines(input));
 
-  source = replaceOneOfRequired(
-    source,
-    [
-      'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING");',
-      'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_PLUS_FAST_MOVE_LOCK");',
-    ],
-    'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_M5_CONFIRMED_STRUCTURE_TRAILING");',
-    "Sideway management declaration",
-  );
+  const brokerOnlyDeclaration =
+    'console.log("PHASE7C_SIDEWAY_MANAGEMENT=BROKER_TP_SL_PLUS_MONOTONIC_STOP_TIGHTENING");';
+  if (source.includes(brokerOnlyDeclaration)) {
+    source = replaceRequired(
+      source,
+      brokerOnlyDeclaration,
+      'console.log("PHASE7C_SIDEWAY_MANAGEMENT=BROKER_TP_SL_PLUS_MONOTONIC_STOP_TIGHTENING_PLUS_M5_STRUCTURE");',
+      "Sideway broker-only management declaration",
+    );
+  } else {
+    source = replaceOneOfRequired(
+      source,
+      [
+        'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING");',
+        'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_PLUS_FAST_MOVE_LOCK");',
+      ],
+      'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_M5_CONFIRMED_STRUCTURE_TRAILING");',
+      "Sideway management declaration",
+    );
+  }
 
   source = replaceRequired(
     source,
@@ -308,7 +319,7 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
   );
 
   const trailingInsertion = `
-  if (managed.partialApplied) {
+  if (managed.partialApplied || (typeof brokerTpSlTrailOnly !== "undefined" && brokerTpSlTrailOnly)) {
     try {
       const snapshot = await loadSidewayM5ManagementSnapshot();
       const latestM5 = snapshot?.latest ?? null;
@@ -380,10 +391,17 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
   }
 `;
 
+  const brokerOnlyInsertionMarker =
+    "\n  // TP/SL are broker-native; never close at a secondary target, regime change,";
+  const legacyInsertionMarker =
+    "\n  if (await closeFixedTpIfTriggered(position, quote)) return;\n\n  // TP2 is already broker-protected on the position.";
+  const insertionMarker = source.includes(brokerOnlyInsertionMarker)
+    ? brokerOnlyInsertionMarker
+    : legacyInsertionMarker;
   source = replaceRequired(
     source,
-    "\n  if (await closeFixedTpIfTriggered(position, quote)) return;\n\n  // TP2 is already broker-protected on the position.",
-    `${trailingInsertion}\n  if (await closeFixedTpIfTriggered(position, quote)) return;\n\n  // TP2 is already broker-protected on the position.`,
+    insertionMarker,
+    `${trailingInsertion}${insertionMarker}`,
     "Sideway post-partial trailing insertion point",
   );
 
