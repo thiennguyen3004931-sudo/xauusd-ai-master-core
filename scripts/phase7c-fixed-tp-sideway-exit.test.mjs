@@ -91,7 +91,7 @@ test("Sideway broker-native Fixed TP/SL cannot be overridden by obsolete softwar
     "TIME_STOP and REGIME_LEFT_RANGE must be inaccessible under the locked post-fill policy");
   assert.ok(breakEvenIndex > regimeIndex,
     "BE/SL tightening remains reachable outside the legacy close guard");
-  assert.match(manage.slice(breakEvenIndex, recoveryIndex),
+  assert.match(manage.slice(breakEvenIndex, partialIndex),
     /if \(!brokerTpSlTrailOnly\)\s*\{\s*if \(managed\.dailyMode === "RECOVERY_TP"\)/,
     "legacy Recovery software close must be unreachable during broker-only management");
   assert.ok(partialIndex > recoveryIndex && holdIndex > partialIndex,
