@@ -279,7 +279,7 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
     return sidewayM5ManagementSnapshot;
   };
 
-  const fastMoveStructure = managed.partialApplied
+  const fastMoveStructure = managed.partialApplied || (typeof brokerTpSlTrailOnly !== "undefined" && brokerTpSlTrailOnly)
     ? await (async () => {
         const snapshot = await loadSidewayM5ManagementSnapshot();
         if (!snapshot?.latest || !snapshot.freshness?.fresh) return null;
@@ -311,10 +311,18 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
     `${fastMoveHandoffPrefix}  const fastMove = fastMoveProfitLockCandidate({`,
     "Sideway Fast-Move M5 ownership handoff",
   );
+  // The legacy strategy closed 1/3 at TP1, but the broker-only contract
+  // short-circuits that entire branch. Preserve both source layouts so the
+  // M5 Fast-Move ownership handoff is never lost after this strategy update.
+  const legacyHandoffAnchor =
+    "  }\\n\\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {";
+  const brokerOnlyHandoffAnchor =
+    "  }\\n\\n  // A native broker TP/SL is authoritative after entry; never even evaluate a";
+  const handoffAnchor = source.includes(brokerOnlyHandoffAnchor) ? brokerOnlyHandoffAnchor : legacyHandoffAnchor;
   source = replaceRequired(
     source,
-    "  }\n\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {",
-    "  }\n  }\n  }\n\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {",
+    handoffAnchor,
+    handoffAnchor.replace("  }\\n\\n", "  }\\n  }\\n  }\\n\\n"),
     "Sideway durable Fast-Move M5 handoff guard",
   );
 
