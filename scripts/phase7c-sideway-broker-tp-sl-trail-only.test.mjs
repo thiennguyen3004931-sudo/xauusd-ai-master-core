@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { transformPhase7CSidewayM5TrailingSource } from "./phase7c-m5-structural-trailing-source-adapter.mjs";
+import { tightestKnownStop } from "./phase7c-stop-monotonicity.mjs";
+import { evaluateM5StructuralTrail } from "./phase7c-m5-structural-trailing.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -159,4 +161,57 @@ test("M5 structural SL adapter inserts stop-tightening before broker-only hold, 
   const m5Success = transformed.lastIndexOf("if (response.success)", m5Tighten);
   assert.ok(m5Success > 0 && m5Success < m5Tighten);
   assert.ok(transformed.includes('previousStopLoss: position.stopLoss'));
+});
+
+test("M5 same-cycle trailing cannot reverse accepted BUY/SELL break-even moves", () => {
+  const transformed = transformPhase7CSidewayM5TrailingSource(source);
+  assert.match(
+    transformed,
+    /managed\.breakEvenApplied \? Number\(managed\.entry\) : 0/,
+    "BE floor must be included in M5 trailing's effective known-stop baseline",
+  );
+
+  for (const fixture of [
+    {
+      side: "BUY", staleStop: 2490, entry: 2500,
+      bid: 2507, ask: 2507.2, candidate: 2498,
+      bars: [
+        { low: 2500, high: 2508, closeTime: 1000 },
+        { low: 2499, high: 2507, closeTime: 2000 },
+        { low: 2502, high: 2510, closeTime: 3000 },
+      ],
+    },
+    {
+      side: "SELL", staleStop: 2510, entry: 2500,
+      bid: 2492.8, ask: 2493, candidate: 2502,
+      bars: [
+        { low: 2495, high: 2498, closeTime: 1000 },
+        { low: 2494, high: 2501, closeTime: 2000 },
+        { low: 2490, high: 2497, closeTime: 3000 },
+      ],
+    },
+  ]) {
+    const { side, staleStop, entry, bid, ask, candidate, bars } = fixture;
+    const input = {
+      side, bars, afterTimestamp: 0, atOrBefore: 3000,
+      currentStop: staleStop, bid, ask,
+      digits: 2, point: 0.01, stopsLevelTicks: 0, freezeLevelTicks: 0,
+    };
+
+    // A stale broker snapshot alone WOULD accept an unsafe rollback.
+    const stale = evaluateM5StructuralTrail({
+      ...input, lastStructuralStop: tightestKnownStop(side, staleStop),
+    });
+    assert.equal(stale.stopLoss, candidate);
+    assert.equal(stale.allowed, true, side + " demonstrates the same-cycle stale snapshot risk");
+
+    // After BE succeeds, the authoritative floor is the tightened entry.
+    const protectedStop = tightestKnownStop(side, staleStop, entry);
+    const protectedDecision = evaluateM5StructuralTrail({
+      ...input, lastStructuralStop: protectedStop,
+    });
+    assert.equal(protectedDecision.allowed, false, side + " must never loosen accepted BE");
+    assert.equal(protectedDecision.reason, "NOT_STRICTLY_TIGHTER");
+    assert.equal(protectedDecision.baseline, entry);
+  }
 });
