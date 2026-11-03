@@ -352,6 +352,10 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
             managed.side,
             Number(managed.lastStructuralStop ?? 0),
             Number(managed.fastMoveStop ?? 0),
+            // The broker position snapshot can be stale in the SAME cycle
+            // after +6 BE PATCH succeeds. Include the newly accepted BE
+            // floor so M5 must not undo a stricter SL before next poll.
+            managed.breakEvenApplied ? Number(managed.entry) : 0,
           ),
           bid: quote.bid,
           ask: quote.ask,
