@@ -18,69 +18,34 @@ const source = fs.readFileSync(
 );
 
 /*
- * Daily recovery contract:
- *
- * RECOVERY_TP is a full-position broker TP mode.
- *
- * Dynamic management may still move SL to BE at +6.
- * It must NOT execute the native Sideway +10 one-third partial.
- *
- * Required order:
- *
- *   +6 BE
- *      ↓
- *   RECOVERY_TP guard + return
- *      ↓
- *   native +10 partial
+ * Operator-accepted contract after disabling Daily Recovery for NEW entries:
+ * - Do not reinterpret old RECOVERY_TP positions or mutate their broker TP/SL.
+ * - A preexisting position still receives +6 BE and M5 stop tightening.
+ * - No software time/regime/recovery/partial/fixed TP2 close is reachable.
+ * - New negative-day SIDEWAY plans remain native via the canonical pause gate.
  */
+const manageStart = source.indexOf("async function managePosition(");
+const manageEnd = source.indexOf("async function closeAll(", manageStart);
+assert.ok(manageStart >= 0 && manageEnd > manageStart);
+const manage = source.slice(manageStart, manageEnd);
+const plus6Index = manage.indexOf("if (!managed.breakEvenApplied && favorable >= 6)");
+const recoveryGuardIndex = manage.indexOf('if (managed.dailyMode === "RECOVERY_TP")');
+const partialIndex = manage.indexOf("if (!brokerTpSlTrailOnly && managed.breakEvenApplied");
+const holdIndex = manage.indexOf('journal("SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY"');
+const lastSoftwareClose = manage.lastIndexOf("if (await closeFixedTpIfTriggered(position, quote)) return;");
 
-const plus6Index = source.indexOf(
-  'if (!managed.breakEvenApplied && favorable >= 6)',
-);
+assert.match(source, /const brokerTpSlTrailOnly = true;/);
+assert.match(source, /pauseDailyRecoveryForNewEntry\("SIDEWAY", \{[\s\S]*?mode: "RECOVERY_TP"/);
+assert.ok(plus6Index >= 0, "Sideway +6 BE must remain reachable.");
+assert.ok(recoveryGuardIndex > plus6Index, "Legacy Recovery path remains after BE and is never active.");
+assert.match(manage.slice(plus6Index, recoveryGuardIndex),
+  /if \(!brokerTpSlTrailOnly\)\s*\{\s*if \(managed\.dailyMode === "RECOVERY_TP"\)/);
+assert.ok(partialIndex > recoveryGuardIndex, "Legacy partial is still present but gated OFF.");
+assert.ok(holdIndex > partialIndex && lastSoftwareClose > holdIndex,
+  "Broker-only post-fill HOLD must return before discretionary close paths.");
+assert.match(manage.slice(holdIndex, lastSoftwareClose), /\breturn\s*;/,
+  "Broker-only post-fill handler must return rather than submit a software close.");
 
-const recoveryGuardIndex = source.indexOf(
-  'if (managed.dailyMode === "RECOVERY_TP")',
-);
-
-const partialIndex = source.indexOf(
-  'if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1))',
-);
-
-assert.ok(
-  plus6Index >= 0,
-  "Sideway +6 BE management block is missing.",
-);
-
-assert.ok(
-  partialIndex >= 0,
-  "Sideway +10 partial management block is missing.",
-);
-
-assert.ok(
-  recoveryGuardIndex >= 0,
-  "RED_TARGET: Sideway RECOVERY_TP must return after +6 BE and before +10 partial",
-);
-
-assert.ok(
-  plus6Index < recoveryGuardIndex,
-  "RECOVERY_TP guard must preserve +6 break-even management.",
-);
-
-assert.ok(
-  recoveryGuardIndex < partialIndex,
-  "RECOVERY_TP guard must execute before native +10 partial.",
-);
-
-const guardWindow = source.slice(
-  recoveryGuardIndex,
-  partialIndex,
-);
-
-assert.match(
-  guardWindow,
-  /\breturn\s*;/,
-  "RECOVERY_TP management guard must return before native partial.",
-);
 
 console.log(
   "SIDEWAY_RECOVERY_MANAGEMENT_CONTRACT=PASS",
