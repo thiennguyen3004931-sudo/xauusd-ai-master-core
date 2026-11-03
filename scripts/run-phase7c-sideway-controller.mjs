@@ -1433,8 +1433,9 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
     }
   }
 
-  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
-    if (!brokerTpSlTrailOnly) {
+  // A native broker TP/SL is authoritative after entry; never even evaluate a
+  // discretionary partial-close condition in this locked policy.
+  if (!brokerTpSlTrailOnly && managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
     const closeVolume = oneThirdPartialVolume(
       managed.initialVolume,
       Number(position.volume),
@@ -1471,7 +1472,6 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
       } else {
         journal("PLUS10_PARTIAL_REJECTED", { ticket: managed.ticket, favorable, response });
       }
-    }
     }
   }
 
