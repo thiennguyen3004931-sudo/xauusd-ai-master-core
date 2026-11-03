@@ -1,3 +1,4 @@
+import { pauseDailyRecoveryForNewEntry, assertDailyRecoveryPausedBeforeSend } from "./phase7c-daily-recovery-pause.mjs";
 const SUBMISSION_REGISTRY = Symbol.for("xauusd.phase7c.canonicalDailyRecoverySubmissions");
 const STRATEGY_NATIVE_MODE = Object.freeze({
   TREND: "TREND",
@@ -119,7 +120,7 @@ export async function fetchPhase7CCanonicalDailyRecoveryPlan({
     } catch {
       throw new Error("Canonical Daily Recovery returned invalid JSON.");
     }
-    return normalizeCanonicalView(view, { strategy, volume });
+    return pauseDailyRecoveryForNewEntry(strategy, normalizeCanonicalView(view, { strategy, volume }));
   } finally {
     clearTimeout(timeout);
   }
@@ -136,6 +137,7 @@ export function registerPhase7CCanonicalDailyRecoverySubmission({
   const volume = finiteNumber(rawVolume, "submission volume");
   if (!orderId || !(volume > 0)) throw new Error("Canonical Daily Recovery submission identity is invalid.");
   if (!plan || typeof plan !== "object") throw new Error("Canonical Daily Recovery submission plan is unavailable.");
+  assertDailyRecoveryPausedBeforeSend(strategy, plan);
   registry().set(strategy, Object.freeze({ orderId, volume, plan }));
 }
 
@@ -184,6 +186,10 @@ export async function verifyPhase7CCanonicalDailyRecoverySubmission({
     fetchImpl,
     env,
   });
+
+  // Defense in depth against stale or manually injected recovery snapshots.
+  assertDailyRecoveryPausedBeforeSend(strategy, submission.plan);
+  assertDailyRecoveryPausedBeforeSend(strategy, current);
 
   if (!plansEquivalent(submission.plan, current)) {
     throw new Error(
