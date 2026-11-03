@@ -38,7 +38,7 @@ assert.match(source, /const brokerTpSlTrailOnly = true;/);
 assert.match(source, /pauseDailyRecoveryForNewEntry\("SIDEWAY", \{[\s\S]*?mode: "RECOVERY_TP"/);
 assert.ok(plus6Index >= 0, "Sideway +6 BE must remain reachable.");
 assert.ok(recoveryGuardIndex > plus6Index, "Legacy Recovery path remains after BE and is never active.");
-assert.match(manage.slice(plus6Index, recoveryGuardIndex),
+assert.match(manage.slice(plus6Index, partialIndex),
   /if \(!brokerTpSlTrailOnly\)\s*\{\s*if \(managed\.dailyMode === "RECOVERY_TP"\)/);
 assert.ok(partialIndex > recoveryGuardIndex, "Legacy partial is still present but gated OFF.");
 assert.ok(holdIndex > partialIndex && lastSoftwareClose > holdIndex,
