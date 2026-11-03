@@ -176,10 +176,15 @@ function deferSidewayHandoffUntilAcceptedM5Tighten(source) {
     "Sideway premature Fast-Move M5 handoff block",
   );
 
+  const legacyCloseAnchor =
+    "  }\n  }\n  }\n\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {";
+  const brokerOnlyCloseAnchor =
+    "  }\n  }\n  }\n\n  // A native broker TP/SL is authoritative after entry; never even evaluate a";
+  const closeAnchor = source.includes(brokerOnlyCloseAnchor) ? brokerOnlyCloseAnchor : legacyCloseAnchor;
   source = replaceRequired(
     source,
-    "  }\n  }\n  }\n\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {",
-    "  }\n  }\n\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {",
+    closeAnchor,
+    closeAnchor.replace("  }\n  }\n  }\n\n", "  }\n  }\n\n"),
     "Sideway Fast-Move handoff guard closure",
   );
 
