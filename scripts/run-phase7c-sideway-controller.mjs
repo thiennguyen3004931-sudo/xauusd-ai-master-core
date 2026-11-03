@@ -20,6 +20,7 @@ import {
   targetReached,
 } from "./phase7c-sideway-logic.mjs";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
+import { pauseDailyRecoveryForNewEntry } from "./phase7c-daily-recovery-pause.mjs";
 import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
 import {
   buildFixedTpSnapshot,
@@ -145,6 +146,7 @@ console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY=REALIZED_NET_PNL_ALL_BOT_MAGICS");
 console.log(`PHASE7C_SIDEWAY_DAILY_RECOVERY_MAGICS=${[...dailyBotMagicNumbers].join(",")}`);
 console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY_TP=FULL_POSITION_ADAPTIVE_6_TO_10");
 console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY_LOT_ESCALATION=OFF");
+console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY_NEW_ENTRIES=TEMPORARILY_DISABLED");
 console.log("PHASE7C_SIDEWAY_CRASH_RECOVERY=PENDING_ENTRY_PLUS_PARTIAL_PLUS_BREAK_EVEN");
 console.log("PHASE7C_SIDEWAY_FINAL_GATE=FRESH_MODE_REGIME_QUOTE_PLUS_FINAL_AUTO_LOT");
 console.log("PHASE7C_SIDEWAY_FAIL_CLOSED=TRUE");
@@ -919,7 +921,7 @@ async function resolveDailyRecoveryPlan(
     ),
   );
 
-  return {
+  return pauseDailyRecoveryForNewEntry("SIDEWAY", {
     mode: "RECOVERY_TP",
     dayStartTime,
     dailyNetPnl,
@@ -930,7 +932,7 @@ async function resolveDailyRecoveryPlan(
     canRecoverInOneTrade:
       rawTpDistance <= DAILY_RECOVERY_MAX_TP_DISTANCE + 1e-9,
     dealCount: dealCount,
-  };
+  });
 }
 
 function roundRecoveryPrice(value, digits) {
