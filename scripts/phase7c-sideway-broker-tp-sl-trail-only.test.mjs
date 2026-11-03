@@ -13,14 +13,14 @@ const end = source.indexOf("async function closeAll(", start);
 assert.ok(start >= 0 && end > start, "SIDEWAY managed-position body required");
 const managedSource = source.slice(start, end);
 
-function syntheticCycle({ dailyMode = "SIDEWAY_NATIVE", quoteBid = 2500, quoteAsk = 2500.2 } = {}) {
+function syntheticCycle({ dailyMode = "SIDEWAY_NATIVE", side = "BUY", quoteBid = 2500, quoteAsk = 2500.2 } = {}) {
   const actions = [];
   const events = [];
   const managed = {
-    ticket: "synthetic-ticket-1", side: "BUY", entry: 2500,
+    ticket: "synthetic-ticket-1", side, entry: 2500,
     timeStopAt: 1, lastRegimeCloseChecked: 10, lastHoldM15Key: "",
     dailyMode, breakEvenApplied: false, fastMovePeakPrice: 2500,
-    fastMoveStop: 2490, fastMoveAttempt: 0, breakEvenAttempt: 0,
+    fastMoveStop: side === "BUY" ? 2490 : 2510, fastMoveAttempt: 0, breakEvenAttempt: 0,
     tp1: 2510, tp2: 2512, partialApplied: false, partialAttempt: 0,
     initialVolume: 0.03, expectedRemainingVolume: 0.03,
   };
@@ -56,7 +56,7 @@ function syntheticCycle({ dailyMode = "SIDEWAY_NATIVE", quoteBid = 2500, quoteAs
     canonicalHoldReason: () => null,
   });
   vm.runInContext(managedSource + "\nthis.managePosition = managePosition;", context);
-  const position = { ticket: managed.ticket, side: "LONG", entry: managed.entry, stopLoss: 2490, takeProfit: 2520, volume: 0.03 };
+  const position = { ticket: managed.ticket, side: side === "BUY" ? "LONG" : "SHORT", entry: managed.entry, stopLoss: side === "BUY" ? 2490 : 2510, takeProfit: side === "BUY" ? 2520 : 2480, volume: 0.03 };
   const quote = { bid: quoteBid, ask: quoteAsk, timestamp: 1000000000 };
   const spec = { digits: 2, stopsLevelTicks: 0, freezeLevelTicks: 0, point: 0.01, minVolume: 0.01, volumeStep: 0.01 };
   return { context, managed, actions, events, position, quote, spec };
@@ -110,6 +110,18 @@ test("after fill, +6 can move SL to entry but never submit CLOSE", async () => {
   assert.equal(f.actions[0].body.stopLoss, f.managed.entry);
   assert.equal(f.managed.breakEvenApplied, true);
   assert.equal(f.events.some(e => e.name === "PLUS6_SL_TO_ENTRY"), true);
+});
+
+test("reported SELL case: +7 favorable points tightens SL to break-even without closing on regime/time", async () => {
+  const f = syntheticCycle({ side: "SELL", quoteBid: 2492.7, quoteAsk: 2493 });
+  f.managed.lastRegimeCloseChecked = 0;
+  await f.context.managePosition(f.position, f.quote, f.spec);
+  assert.deepEqual(f.actions.map(x => x.method), ["PATCH"]);
+  assert.equal(f.actions[0].body.stopLoss, 2500);
+  assert.equal(f.actions[0].url.includes("/positions/"), true);
+  assert.equal(f.events.some(e => e.name === "PLUS6_SL_TO_ENTRY"), true);
+  assert.equal(f.events.some(e => e.name === "POSITION_CLOSED"), false);
+  assert.equal(f.events.some(e => e.name === "SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY"), true);
 });
 
 test("RECOVERY_TP also retains broker TP/SL and allows stop management", async () => {
