@@ -107,9 +107,12 @@ export class SqliteCustomerFollowerCommandJournal {
   }
 
   listReserved(): readonly FollowerCommandJournalRecord[] {
-    return this.db.prepare(
+    // node:sqlite returns null-prototype rows. Expose ordinary records to
+    // callers without changing the persisted reservation or replay semantics.
+    const rows = this.db.prepare(
       "SELECT command_id AS commandId, sequence, state FROM follower_command_journal WHERE state = 'RESERVED' ORDER BY sequence ASC",
     ).all() as unknown as readonly FollowerCommandJournalRecord[];
+    return rows.map(({ commandId, sequence, state }) => ({ commandId, sequence, state }));
   }
 
   close(): void {
