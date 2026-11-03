@@ -315,14 +315,14 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
   // short-circuits that entire branch. Preserve both source layouts so the
   // M5 Fast-Move ownership handoff is never lost after this strategy update.
   const legacyHandoffAnchor =
-    "  }\\n\\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {";
+    "  }\n\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {";
   const brokerOnlyHandoffAnchor =
-    "  }\\n\\n  // A native broker TP/SL is authoritative after entry; never even evaluate a";
+    "  }\n\n  // A native broker TP/SL is authoritative after entry; never even evaluate a";
   const handoffAnchor = source.includes(brokerOnlyHandoffAnchor) ? brokerOnlyHandoffAnchor : legacyHandoffAnchor;
   source = replaceRequired(
     source,
     handoffAnchor,
-    handoffAnchor.replace("  }\\n\\n", "  }\\n  }\\n  }\\n\\n"),
+    handoffAnchor.replace("  }\n\n", "  }\n  }\n  }\n\n"),
     "Sideway durable Fast-Move M5 handoff guard",
   );
 
