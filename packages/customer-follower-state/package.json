@@ -24,7 +24,7 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts src/sqlite-command-journal.ts --format cjs,esm --dts --platform node --external node:sqlite",
+    "build": "tsup src/index.ts src/sqlite-command-journal.ts --format cjs,esm --dts --platform node --external node:sqlite && node scripts/verify-built-in-sqlite.mjs",
     "test": "vitest run src/file-position-registry.test.ts && node --test tests/sqlite-command-journal.node.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
