@@ -200,15 +200,26 @@ export function transformPhase7CTrendM5TrailingSource(input) {
 export function transformPhase7CSidewayM5TrailingSource(input) {
   let source = prependImport(normalizeNewlines(input));
 
-  source = replaceOneOfRequired(
-    source,
-    [
-      'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING");',
-      'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_PLUS_FAST_MOVE_LOCK");',
-    ],
-    'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_M5_CONFIRMED_STRUCTURE_TRAILING");',
-    "Sideway management declaration",
-  );
+  const brokerOnlyDeclaration =
+    'console.log("PHASE7C_SIDEWAY_MANAGEMENT=BROKER_TP_SL_PLUS_MONOTONIC_STOP_TIGHTENING");';
+  if (source.includes(brokerOnlyDeclaration)) {
+    source = replaceRequired(
+      source,
+      brokerOnlyDeclaration,
+      'console.log("PHASE7C_SIDEWAY_MANAGEMENT=BROKER_TP_SL_PLUS_MONOTONIC_STOP_TIGHTENING_PLUS_M5_STRUCTURE");',
+      "Sideway broker-only management declaration",
+    );
+  } else {
+    source = replaceOneOfRequired(
+      source,
+      [
+        'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING");',
+        'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_PLUS_FAST_MOVE_LOCK");',
+      ],
+      'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_M5_CONFIRMED_STRUCTURE_TRAILING");',
+      "Sideway management declaration",
+    );
+  }
 
   source = replaceRequired(
     source,
@@ -268,7 +279,7 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
     return sidewayM5ManagementSnapshot;
   };
 
-  const fastMoveStructure = managed.partialApplied
+  const fastMoveStructure = managed.partialApplied || (typeof brokerTpSlTrailOnly !== "undefined" && brokerTpSlTrailOnly)
     ? await (async () => {
         const snapshot = await loadSidewayM5ManagementSnapshot();
         if (!snapshot?.latest || !snapshot.freshness?.fresh) return null;
@@ -300,15 +311,23 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
     `${fastMoveHandoffPrefix}  const fastMove = fastMoveProfitLockCandidate({`,
     "Sideway Fast-Move M5 ownership handoff",
   );
+  // The legacy strategy closed 1/3 at TP1, but the broker-only contract
+  // short-circuits that entire branch. Preserve both source layouts so the
+  // M5 Fast-Move ownership handoff is never lost after this strategy update.
+  const legacyHandoffAnchor =
+    "  }\n\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {";
+  const brokerOnlyHandoffAnchor =
+    "  }\n\n  // A native broker TP/SL is authoritative after entry; never even evaluate a";
+  const handoffAnchor = source.includes(brokerOnlyHandoffAnchor) ? brokerOnlyHandoffAnchor : legacyHandoffAnchor;
   source = replaceRequired(
     source,
-    "  }\n\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {",
-    "  }\n  }\n  }\n\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {",
+    handoffAnchor,
+    handoffAnchor.replace("  }\n\n", "  }\n  }\n  }\n\n"),
     "Sideway durable Fast-Move M5 handoff guard",
   );
 
   const trailingInsertion = `
-  if (managed.partialApplied) {
+  if (managed.partialApplied || (typeof brokerTpSlTrailOnly !== "undefined" && brokerTpSlTrailOnly)) {
     try {
       const snapshot = await loadSidewayM5ManagementSnapshot();
       const latestM5 = snapshot?.latest ?? null;
@@ -333,6 +352,10 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
             managed.side,
             Number(managed.lastStructuralStop ?? 0),
             Number(managed.fastMoveStop ?? 0),
+            // The broker position snapshot can be stale in the SAME cycle
+            // after +6 BE PATCH succeeds. Include the newly accepted BE
+            // floor so M5 must not undo a stricter SL before next poll.
+            managed.breakEvenApplied ? Number(managed.entry) : 0,
           ),
           bid: quote.bid,
           ask: quote.ask,
@@ -380,10 +403,17 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
   }
 `;
 
+  const brokerOnlyInsertionMarker =
+    "\n  // TP/SL are broker-native; never close at a secondary target, regime change,";
+  const legacyInsertionMarker =
+    "\n  if (await closeFixedTpIfTriggered(position, quote)) return;\n\n  // TP2 is already broker-protected on the position.";
+  const insertionMarker = source.includes(brokerOnlyInsertionMarker)
+    ? brokerOnlyInsertionMarker
+    : legacyInsertionMarker;
   source = replaceRequired(
     source,
-    "\n  if (await closeFixedTpIfTriggered(position, quote)) return;\n\n  // TP2 is already broker-protected on the position.",
-    `${trailingInsertion}\n  if (await closeFixedTpIfTriggered(position, quote)) return;\n\n  // TP2 is already broker-protected on the position.`,
+    insertionMarker,
+    `${trailingInsertion}${insertionMarker}`,
     "Sideway post-partial trailing insertion point",
   );
 
