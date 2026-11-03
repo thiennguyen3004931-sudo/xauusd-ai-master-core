@@ -73,36 +73,37 @@ test("Sideway Fixed TP lock contention fails closed and confirmed/replay outcome
     "RED_TARGET: first confirmation and deterministic replay must remain distinguishable.");
 });
 
-test("Sideway management preserves time/regime, +6/+10, Daily Recovery and TP2 precedence around Fixed TP", () => {
+test("Sideway broker-native Fixed TP/SL cannot be overridden by obsolete software exits", () => {
   const manage = block("async function managePosition(", "async function closeAll(");
+  assert.match(sidewaySource, /const brokerTpSlTrailOnly = true;/);
+
+  const legacyTimeGuard = manage.indexOf("if (!brokerTpSlTrailOnly) {");
   const timeIndex = manage.indexOf("if (Date.now() >= managed.timeStopAt)");
-  const regimeExitIndex = manage.indexOf('await closeAll(position, "REGIME_LEFT_RANGE")');
-  const beIndex = manage.indexOf("if (!managed.breakEvenApplied && favorable >= 6)");
+  const regimeIndex = manage.indexOf('await closeAll(position, "REGIME_LEFT_RANGE")');
+  const breakEvenIndex = manage.indexOf("if (!managed.breakEvenApplied && favorable >= 6)");
   const recoveryIndex = manage.indexOf('if (managed.dailyMode === "RECOVERY_TP")');
-  const partialIndex = manage.indexOf("if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1))");
+  const partialIndex = manage.indexOf("if (!brokerTpSlTrailOnly && managed.breakEvenApplied && !managed.partialApplied && targetReached(");
+  const holdIndex = manage.indexOf('journal("SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY"');
+  const finalFixedIndex = manage.lastIndexOf("if (await closeFixedTpIfTriggered(position, quote)) return;");
   const tp2Index = manage.indexOf("if (targetReached(managed.side, marketPrice, managed.tp2))");
-  const fixedCalls = [...manage.matchAll(/await closeFixedTpIfTriggered\(position,\s*quote\)/g)].map((match) => match.index);
-  const guardedCalls = [...manage.matchAll(/if\s*\(\s*await closeFixedTpIfTriggered\(position,\s*quote\)\s*\)\s*return\s*;/g)].map((match) => match.index);
 
-  assert.ok(timeIndex >= 0 && regimeExitIndex > timeIndex,
-    "existing time-stop and regime-invalidation exits must remain ahead of dynamic target management");
-  assert.ok(beIndex > regimeExitIndex,
-    "existing +6 break-even must remain after time/regime exits");
-  assert.ok(recoveryIndex > beIndex && partialIndex > recoveryIndex && tp2Index > partialIndex,
-    "existing Daily Recovery, +10 partial and TP2 ordering must remain structurally intact");
-  assert.equal(fixedCalls.length, 2,
-    "RED_TARGET: Sideway must monitor Fixed TP independently in Daily Recovery and normal management.");
-  assert.equal(guardedCalls.length, fixedCalls.length,
-    "RED_TARGET: every Fixed TP handled/blocked cycle must return before another close path can mutate.");
-
-  const recoveryReturn = manage.indexOf("\n    return;", recoveryIndex);
-  assert.ok(fixedCalls[0] > recoveryIndex && fixedCalls[0] < recoveryReturn,
-    "RED_TARGET: Daily Recovery broker TP remains intact while executor Fixed TP can independently win before recovery hold returns.");
-  assert.ok(fixedCalls[1] > partialIndex,
-    "RED_TARGET: normal Fixed TP must run after the existing +10 one-third partial so later targets preserve native partial first.");
-  assert.ok(fixedCalls[1] < tp2Index,
-    "RED_TARGET: after native +10 management, a reached Fixed TP returns before the existing TP2 fallback.");
+  assert.ok(legacyTimeGuard >= 0 && timeIndex > legacyTimeGuard && regimeIndex > timeIndex,
+    "TIME_STOP and REGIME_LEFT_RANGE must be inaccessible under the locked post-fill policy");
+  assert.ok(breakEvenIndex > regimeIndex,
+    "BE/SL tightening remains reachable outside the legacy close guard");
+  assert.match(manage.slice(breakEvenIndex, recoveryIndex),
+    /if \(!brokerTpSlTrailOnly\)\s*\{\s*if \(managed\.dailyMode === "RECOVERY_TP"\)/,
+    "legacy Recovery software close must be unreachable during broker-only management");
+  assert.ok(partialIndex > recoveryIndex && holdIndex > partialIndex,
+    "the entire one-third partial branch must require broker-only policy OFF");
+  assert.ok(finalFixedIndex > holdIndex && tp2Index > finalFixedIndex,
+    "broker-only HOLD returns before any discretionary Fixed TP or TP2 fallback close");
+  assert.match(manage.slice(holdIndex, finalFixedIndex), /\breturn\s*;/,
+    "broker-native TP/SL-only management must unconditionally return before legacy exits");
+  assert.equal([...manage.matchAll(/await closeFixedTpIfTriggered\(position,\s*quote\)/g)].length, 2,
+    "retain the legacy helper solely for backward-compatible source contracts without calling it");
 });
+
 
 test("existing Sideway native close paths and command identity stay untouched", () => {
   const closeAll = block("async function closeAll(", "async function controlGet(");
