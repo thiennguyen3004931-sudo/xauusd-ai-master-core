@@ -132,7 +132,7 @@ test("native broker stop/take-profit remain untouched; no false repeated hold al
 test("legacy early-close code is inaccessible under forced broker-target policy", () => {
   assert.match(managedSource, /if \(!brokerTpSlTrailOnly\)\s*\{\s*if \(Date\.now\(\) >= managed\.timeStopAt\)/);
   assert.match(managedSource, /if \(!brokerTpSlTrailOnly\)\s*\{\s*if \(managed\.dailyMode === "RECOVERY_TP"\)/);
-  assert.match(managedSource, /if \(managed\.breakEvenApplied[\s\S]*?if \(!brokerTpSlTrailOnly\)\s*\{[\s\S]*?SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY/);
+  assert.match(managedSource, /if \(!brokerTpSlTrailOnly && managed\.breakEvenApplied && !managed\.partialApplied && targetReached\(/);\n  assert.ok(managedSource.indexOf('if (!brokerTpSlTrailOnly && managed.breakEvenApplied') < managedSource.indexOf('SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY'));
   assert.ok(managedSource.indexOf('SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY') < managedSource.indexOf('if (await closeFixedTpIfTriggered(position, quote)) return;', managedSource.indexOf('SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY')));
 });
 
