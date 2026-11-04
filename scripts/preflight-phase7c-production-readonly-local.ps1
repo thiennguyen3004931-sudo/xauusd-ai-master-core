@@ -271,7 +271,24 @@ $taskState = 'UNAVAILABLE'
 $taskLastResult = 'UNAVAILABLE'
 $taskReadStatus = 'UNAVAILABLE'
 $taskOwnershipEvaluation = 'NOT_RUN'
+$taskRunnerHashStatus = 'NOT_RUN'
+$taskActionOwnershipStatus = 'NOT_RUN'
+$taskDriftEvaluationStatus = 'NOT_RUN'
+$taskPrincipalEvaluationStatus = 'NOT_RUN'
+$taskOwnershipErrorStage = 'NONE'
+$taskOwnershipErrorType = 'NONE'
 $task = $null
+$ownership = $null
+$principalCanonical = $false
+$runnerPath = ''
+$runnerSha = ''
+
+function Set-TaskOwnershipError([string]$Stage, [System.Exception]$Exception) {
+    if ($taskOwnershipErrorStage -eq 'NONE') {
+        $script:taskOwnershipErrorStage = $Stage
+        $script:taskOwnershipErrorType = if ($null -eq $Exception) { 'UNKNOWN' } else { $Exception.GetType().Name }
+    }
+}
 
 try {
     Import-Module ScheduledTasks -ErrorAction Stop
@@ -281,6 +298,7 @@ try {
 } catch {
     $taskReadStatus = Get-Phase7CScheduledTaskErrorClassification -Exception $_.Exception
     $taskDrift = @('TASK_PROVIDER_READ_FAILED')
+    Set-TaskOwnershipError -Stage 'TASK_PROVIDER_READ' -Exception $_.Exception
 }
 
 # LastTaskResult is operational telemetry only. Some ScheduledTasks providers/runners
@@ -299,13 +317,61 @@ if ($taskReadStatus -eq 'READABLE') {
     try {
         $runnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
         $runnerSha = (Get-FileHash -LiteralPath $runnerPath -Algorithm SHA256 -ErrorAction Stop).Hash
-        $ownership = Test-Phase7CExecutorTaskActionOwnership -Actions $task.Actions -ExpectedRunnerPath $runnerPath -ExpectedRunnerSha256 $runnerSha
-        $taskDrift = @(Get-Phase7CExecutorTaskDrift -Task $task)
-        $taskOwnershipCanonical = [bool]$ownership.owned -and [bool]$ownership.canonical -and -not [bool]$ownership.repairRequired -and $taskDrift.Count -eq 0 -and (Test-SystemTaskPrincipal $task.Principal)
-        $taskOwnershipEvaluation = if ($taskOwnershipCanonical) { 'PASS' } else { 'NOT_CANONICAL' }
+        $taskRunnerHashStatus = 'PASS'
     } catch {
+        $taskRunnerHashStatus = 'ERROR'
+        Set-TaskOwnershipError -Stage 'RUNNER_HASH' -Exception $_.Exception
+        Add-Blocked 'TASK_RUNNER_HASH_EVALUATION_FAILED'
+    }
+
+    if ($taskRunnerHashStatus -eq 'PASS') {
+        try {
+            $ownership = Test-Phase7CExecutorTaskActionOwnership -Actions $task.Actions -ExpectedRunnerPath $runnerPath -ExpectedRunnerSha256 $runnerSha
+            $taskActionOwnershipStatus = 'PASS'
+        } catch {
+            $taskActionOwnershipStatus = 'ERROR'
+            Set-TaskOwnershipError -Stage 'ACTION_OWNERSHIP' -Exception $_.Exception
+            Add-Blocked 'TASK_ACTION_OWNERSHIP_EVALUATION_FAILED'
+        }
+    }
+
+    try {
+        $taskDrift = @(Get-Phase7CExecutorTaskDrift -Task $task)
+        $taskDriftEvaluationStatus = 'PASS'
+    } catch {
+        $taskDrift = @('TASK_DRIFT_EVALUATION_FAILED')
+        $taskDriftEvaluationStatus = 'ERROR'
+        Set-TaskOwnershipError -Stage 'TASK_DRIFT' -Exception $_.Exception
+        Add-Blocked 'TASK_DRIFT_EVALUATION_FAILED'
+    }
+
+    try {
+        $principalCanonical = Test-SystemTaskPrincipal $task.Principal
+        $taskPrincipalEvaluationStatus = if ($principalCanonical) { 'PASS' } else { 'NOT_CANONICAL' }
+    } catch {
+        $principalCanonical = $false
+        $taskPrincipalEvaluationStatus = 'ERROR'
+        Set-TaskOwnershipError -Stage 'TASK_PRINCIPAL' -Exception $_.Exception
+        Add-Blocked 'TASK_PRINCIPAL_EVALUATION_FAILED'
+    }
+
+    $taskEvaluationComplete =
+        $taskRunnerHashStatus -eq 'PASS' -and
+        $taskActionOwnershipStatus -eq 'PASS' -and
+        $taskDriftEvaluationStatus -eq 'PASS' -and
+        $taskPrincipalEvaluationStatus -in @('PASS','NOT_CANONICAL')
+
+    if ($taskEvaluationComplete) {
+        $taskOwnershipCanonical =
+            $null -ne $ownership -and
+            [bool]$ownership.owned -and
+            [bool]$ownership.canonical -and
+            -not [bool]$ownership.repairRequired -and
+            $taskDrift.Count -eq 0 -and
+            $principalCanonical
+        $taskOwnershipEvaluation = if ($taskOwnershipCanonical) { 'PASS' } else { 'NOT_CANONICAL' }
+    } else {
         $taskOwnershipCanonical = $false
-        $taskDrift = @('TASK_OWNERSHIP_EVALUATION_FAILED')
         $taskOwnershipEvaluation = 'ERROR'
     }
 }
@@ -430,6 +496,12 @@ Write-Host "TASK_STATE=$taskState"
 Write-Host "TASK_LAST_RESULT=$taskLastResult"
 Write-Host "TASK_READ_STATUS=$taskReadStatus"
 Write-Host "TASK_OWNERSHIP_EVALUATION=$taskOwnershipEvaluation"
+Write-Host "TASK_RUNNER_HASH_STATUS=$taskRunnerHashStatus"
+Write-Host "TASK_ACTION_OWNERSHIP_STATUS=$taskActionOwnershipStatus"
+Write-Host "TASK_DRIFT_EVALUATION_STATUS=$taskDriftEvaluationStatus"
+Write-Host "TASK_PRINCIPAL_EVALUATION_STATUS=$taskPrincipalEvaluationStatus"
+Write-Host "TASK_OWNERSHIP_ERROR_STAGE=$taskOwnershipErrorStage"
+Write-Host "TASK_OWNERSHIP_ERROR_TYPE=$taskOwnershipErrorType"
 Write-Host "RUNTIME_SOURCE_OVERALL=$runtimeSourceOverall"
 Write-Host "RUNTIME_SOURCE_NON_EXACT_COMPONENTS=$nonExactOutput"
 Write-Host "RECOVERY_REQUIRED=$recoveryRequired"
