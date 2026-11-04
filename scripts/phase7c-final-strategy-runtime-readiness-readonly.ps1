@@ -86,6 +86,9 @@ try {
   $taskReadStatus = Read-Key 'TASK_READ_STATUS'
   $taskOwnershipEvaluation = Read-Key 'TASK_OWNERSHIP_EVALUATION'
   $taskRunnerHashStatus = Read-Key 'TASK_RUNNER_HASH_STATUS'
+  $taskRunnerPathStatus = Read-Key 'TASK_RUNNER_PATH_STATUS'
+  $taskRunnerShaStatus = Read-Key 'TASK_RUNNER_SHA_STATUS'
+  $taskRunnerMissingCommand = Read-Key 'TASK_RUNNER_MISSING_COMMAND'
   $taskActionOwnershipStatus = Read-Key 'TASK_ACTION_OWNERSHIP_STATUS'
   $taskDriftEvaluationStatus = Read-Key 'TASK_DRIFT_EVALUATION_STATUS'
   $taskPrincipalEvaluationStatus = Read-Key 'TASK_PRINCIPAL_EVALUATION_STATUS'
@@ -129,6 +132,9 @@ try {
   Write-Host "FINAL_STRATEGY_TASK_READ_STATUS=$taskReadStatus"
   Write-Host "FINAL_STRATEGY_TASK_OWNERSHIP_EVALUATION=$taskOwnershipEvaluation"
   Write-Host "FINAL_STRATEGY_TASK_RUNNER_HASH_STATUS=$taskRunnerHashStatus"
+  Write-Host "FINAL_STRATEGY_TASK_RUNNER_PATH_STATUS=$taskRunnerPathStatus"
+  Write-Host "FINAL_STRATEGY_TASK_RUNNER_SHA_STATUS=$taskRunnerShaStatus"
+  Write-Host "FINAL_STRATEGY_TASK_RUNNER_MISSING_COMMAND=$taskRunnerMissingCommand"
   Write-Host "FINAL_STRATEGY_TASK_ACTION_OWNERSHIP_STATUS=$taskActionOwnershipStatus"
   Write-Host "FINAL_STRATEGY_TASK_DRIFT_EVALUATION_STATUS=$taskDriftEvaluationStatus"
   Write-Host "FINAL_STRATEGY_TASK_PRINCIPAL_EVALUATION_STATUS=$taskPrincipalEvaluationStatus"
