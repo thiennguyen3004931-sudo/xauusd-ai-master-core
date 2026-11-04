@@ -3,8 +3,8 @@
  *
  * Two DIFFERENT pinned signature roots and independently verified keyring
  * epochs must validate a fresh candidate and separately obtained high-water witness.
- * Witness signatures use a dedicated domain that cannot be replayed as
- * operator authority proofs. This cannot establish that either
+ * Witness signatures use a purpose-specific domain and a previously trusted
+ * independent monotonic checkpoint is required. Neither check establishes that
  * trusted root is independently administered, the witness is non-rollbackable,
  * or a live customer Gateway is safe to start. Never wire into live startup.
  *
@@ -18,18 +18,60 @@ const reject = reasonCode => Object.freeze({
 });
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
+const BINDING = Object.freeze(["customerId", "installationId", "licenseId", "grantId", "bindingEpoch"]);
+const COUNTERS = Object.freeze([
+  "revocationGeneration", "migrationGeneration", "challengeConsumptionGeneration",
+  "auditHighWater", "tokenGeneration",
+]);
+const FLOOR_FIELDS = Object.freeze([
+  ...BINDING, ...COUNTERS, "authorizationState", "witnessKeyringEpoch",
+]);
+const nonnegative = value => Number.isSafeInteger(value) && value >= 0;
+
+/**
+ * A previously trusted, externally persisted high-water checkpoint is required,
+ * even if TWO current request-bound signatures validate. This is only a pure
+ * comparison; the caller MUST independently authenticate the checkpoint and
+ * prove it cannot be rolled back together with either signed statement.
+ */
+function compareToTrustedCheckpoint(witness, checkpoint, witnessTrustedEpoch) {
+  if (!object(checkpoint)) return "INDEPENDENT_CHECKPOINT_REQUIRED";
+  if (Object.keys(checkpoint).sort().join("|") !== [...FLOOR_FIELDS].sort().join("|") ||
+      !["ACTIVE", "REVOKED", "EXPIRED"].includes(checkpoint.authorizationState) ||
+      !Number.isSafeInteger(checkpoint.witnessKeyringEpoch) ||
+      checkpoint.witnessKeyringEpoch < 1) return "INDEPENDENT_CHECKPOINT_INVALID";
+  for (const field of BINDING) {
+    if (typeof checkpoint[field] !== "string" || !checkpoint[field] ||
+        checkpoint[field] !== witness[field]) return "INDEPENDENT_CHECKPOINT_BINDING_MISMATCH";
+  }
+  for (const field of COUNTERS) {
+    if (!nonnegative(checkpoint[field])) return "INDEPENDENT_CHECKPOINT_INVALID";
+    if (!nonnegative(witness[field]) || witness[field] < checkpoint[field]) {
+      return "INDEPENDENT_CHECKPOINT_GENERATION_ROLLBACK";
+    }
+  }
+  if (!Number.isSafeInteger(witnessTrustedEpoch) ||
+      witnessTrustedEpoch < checkpoint.witnessKeyringEpoch) {
+    return "INDEPENDENT_CHECKPOINT_EPOCH_ROLLBACK";
+  }
+  // A previously witnessed REVOKED/EXPIRED state cannot silently be restored
+  // to ACTIVE. Reissue needs a new audited binding and independent approval.
+  if (checkpoint.authorizationState !== "ACTIVE") return "INDEPENDENT_CHECKPOINT_NOT_ACTIVE";
+  return null;
+}
+
 /**
  * A result of evidenceMatched=true is a synthetic cross-proof comparison,
  * NOT an admission decision, release signature or license activation.
  *
- * The witness keyring, its expected digest/epoch, and fresh witness proof MUST
- * come from a separately controlled, durable anti-rollback trust domain.
- * Caller-supplied pins and signatures alone do not supply that boundary.
+ * The witness keyring, digest/epoch, fresh proof AND monotonic checkpoint MUST
+ * originate from a separately controlled, authenticated anti-rollback domain.
+ * Caller-supplied values alone do not supply that security boundary.
  */
 export function compareRestoreWithIndependentWitness({
   restored, operatorProof, operatorKeyring, operatorTrustedEpoch, operatorTrustedDigest,
   witnessProof, witnessKeyring, witnessTrustedEpoch, witnessTrustedDigest,
-  expectedNonce, nowMs,
+  trustedWitnessCheckpoint, expectedNonce, nowMs,
 } = {}) {
   if (!object(restored) || !object(operatorProof) || !object(witnessProof) ||
       !object(operatorProof.statement) || !object(witnessProof.statement) ||
@@ -39,6 +81,7 @@ export function compareRestoreWithIndependentWitness({
       !Number.isSafeInteger(nowMs) || nowMs < 0) {
     return reject("INDEPENDENT_WITNESS_REQUIRED");
   }
+  if (!object(trustedWitnessCheckpoint)) return reject("INDEPENDENT_CHECKPOINT_REQUIRED");
   const operatorKeyId = operatorProof.statement.authorityKeyId;
   const witnessKeyId = witnessProof.statement.authorityKeyId;
   if (typeof operatorKeyId !== "string" || typeof witnessKeyId !== "string" ||
@@ -88,6 +131,10 @@ export function compareRestoreWithIndependentWitness({
   if (!witnessDecision.allowed) {
     return reject("INDEPENDENT_WITNESS_" + witnessDecision.reasonCode);
   }
+  const checkpointProblem = compareToTrustedCheckpoint(
+    witnessProof.statement, trustedWitnessCheckpoint, witnessTrustedEpoch,
+  );
+  if (checkpointProblem) return reject(checkpointProblem);
   return Object.freeze({
     evidenceMatched: true,
     customerAuthorizationAllowed: false,
