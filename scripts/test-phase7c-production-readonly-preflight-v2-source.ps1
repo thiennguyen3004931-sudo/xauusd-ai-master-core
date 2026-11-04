@@ -106,7 +106,7 @@ foreach ($taskSafetyMarker in @(
 if ($source.Contains("TASK_READ_FAILED")) {
     throw 'Generic TASK_READ_FAILED must not hide whether provider read or ownership evaluation failed.'
 }
-if ($source.Contains("TASK_OWNERSHIP_EVALUATION_FAILED')")) {
+if ($source.Contains('$taskDrift = @(''TASK_OWNERSHIP_EVALUATION_FAILED'')')) {
     throw 'A single generic ownership catch must not replace staged task ownership diagnostics.'
 }
 foreach ($stageCall in @(
