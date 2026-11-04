@@ -16,6 +16,53 @@ if (@($errors).Count -ne 0) {
     throw "Production read-only preflight has PowerShell parse errors: $(@($errors | ForEach-Object Message) -join '; ')"
 }
 
+# Execute only the extracted read-only hash helper on the repository source,
+# without invoking the production preflight or accessing live control endpoints.
+$hashFunction = @($ast.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Get-Phase7CReadOnlyRunnerSha256'
+}, $true))
+if ($hashFunction.Count -ne 1) {
+    throw 'Expected exactly one independent read-only runner SHA-256 helper.'
+}
+$sourceHash = $hashFunction[0].Extent.Text
+foreach ($requiredHashContract in @(
+    '[System.IO.File]::OpenRead($Path)',
+    '[System.Security.Cryptography.SHA256]::Create()',
+    'ComputeHash($stream)',
+    '$stream.Dispose()',
+    '$hasher.Dispose()'
+)) {
+    if (-not $sourceHash.Contains($requiredHashContract)) {
+        throw "Read-only SHA-256 helper missing safety boundary: $requiredHashContract"
+    }
+}
+if ($sourceHash -match '\bGet-FileHash\b') {
+    throw 'Read-only SHA-256 helper must not depend on Get-FileHash availability.'
+}
+. ([scriptblock]::Create($sourceHash))
+$referenceHasher = [System.Security.Cryptography.SHA256]::Create()
+try {
+    $referenceBytes = [System.IO.File]::ReadAllBytes($ProbePath)
+    $expectedHash = [System.BitConverter]::ToString($referenceHasher.ComputeHash($referenceBytes)).Replace('-', '')
+} finally {
+    $referenceHasher.Dispose()
+}
+# Prove helper is independent of the unavailable cmdlet on a safe test file.
+function Get-FileHash { throw 'SYNTHETIC_COMMAND_NOT_FOUND' }
+$actualHash = Get-Phase7CReadOnlyRunnerSha256 -Path $ProbePath
+if ($actualHash -cne $expectedHash) {
+    throw 'Read-only SHA-256 helper produced the wrong digest.'
+}
+$missingHashRejected = $false
+try {
+    [void](Get-Phase7CReadOnlyRunnerSha256 -Path (Join-Path $PSScriptRoot 'non-existent-sha-fixture.txt'))
+} catch {
+    $missingHashRejected = $true
+}
+if (-not $missingHashRejected) { throw 'Missing runner file must fail closed.' }
+
 $requiredMarkers = @(
     'READ_ONLY=TRUE',
     'HTTP_METHODS=GET_ONLY',
