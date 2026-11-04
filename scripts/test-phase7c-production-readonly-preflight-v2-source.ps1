@@ -66,6 +66,12 @@ $requiredEvidence = @(
     'TASK_DRIFT=',
     'TASK_READ_STATUS=',
     'TASK_OWNERSHIP_EVALUATION=',
+    'TASK_RUNNER_HASH_STATUS=',
+    'TASK_ACTION_OWNERSHIP_STATUS=',
+    'TASK_DRIFT_EVALUATION_STATUS=',
+    'TASK_PRINCIPAL_EVALUATION_STATUS=',
+    'TASK_OWNERSHIP_ERROR_STAGE=',
+    'TASK_OWNERSHIP_ERROR_TYPE=',
     'RUNTIME_SOURCE_OVERALL=',
     'RECOVERY_MUTATION_ALLOWED=',
     'BLOCKED_BY='
@@ -81,7 +87,17 @@ foreach ($taskSafetyMarker in @(
     "TASK_PROVIDER_READ_FAILED",
     "TASK_OWNERSHIP_EVALUATION_FAILED",
     "TASK_READ_STATUS=",
-    "TASK_OWNERSHIP_EVALUATION="
+    "TASK_OWNERSHIP_EVALUATION=",
+    "TASK_RUNNER_HASH_STATUS=",
+    "TASK_ACTION_OWNERSHIP_STATUS=",
+    "TASK_DRIFT_EVALUATION_STATUS=",
+    "TASK_PRINCIPAL_EVALUATION_STATUS=",
+    "TASK_OWNERSHIP_ERROR_STAGE=",
+    "TASK_OWNERSHIP_ERROR_TYPE=",
+    "TASK_RUNNER_HASH_EVALUATION_FAILED",
+    "TASK_ACTION_OWNERSHIP_EVALUATION_FAILED",
+    "TASK_DRIFT_EVALUATION_FAILED",
+    "TASK_PRINCIPAL_EVALUATION_FAILED"
 )) {
     if (-not $source.Contains($taskSafetyMarker)) {
         throw "Missing fail-closed task ownership/optional telemetry separation: $taskSafetyMarker"
@@ -89,6 +105,19 @@ foreach ($taskSafetyMarker in @(
 }
 if ($source.Contains("TASK_READ_FAILED")) {
     throw 'Generic TASK_READ_FAILED must not hide whether provider read or ownership evaluation failed.'
+}
+if ($source.Contains("TASK_OWNERSHIP_EVALUATION_FAILED')")) {
+    throw 'A single generic ownership catch must not replace staged task ownership diagnostics.'
+}
+foreach ($stageCall in @(
+    "Set-TaskOwnershipError -Stage 'RUNNER_HASH'",
+    "Set-TaskOwnershipError -Stage 'ACTION_OWNERSHIP'",
+    "Set-TaskOwnershipError -Stage 'TASK_DRIFT'",
+    "Set-TaskOwnershipError -Stage 'TASK_PRINCIPAL'"
+)) {
+    if (-not $source.Contains($stageCall)) {
+        throw "Missing staged task ownership failure classification: $stageCall"
+    }
 }
 $lastTaskResultIndex = $source.IndexOf("PSObject.Properties['LastTaskResult']", [System.StringComparison]::Ordinal)
 $ownershipEvalIndex = $source.IndexOf('Test-Phase7CExecutorTaskActionOwnership', [System.StringComparison]::Ordinal)
