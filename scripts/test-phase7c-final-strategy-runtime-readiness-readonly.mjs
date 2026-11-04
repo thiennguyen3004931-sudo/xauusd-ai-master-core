@@ -2,8 +2,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const workflowPath = resolve(process.cwd(), ".github", "workflows", "phase7c-final-strategy-runtime-readiness-readonly.yml");
-const workflow = readFileSync(workflowPath, "utf8");
+const workflow = readFileSync(
+  resolve(process.cwd(), ".github", "workflows", "phase7c-final-strategy-runtime-readiness-readonly.yml"),
+  "utf8",
+);
+const wrapper = readFileSync(
+  resolve(process.cwd(), "scripts", "phase7c-final-strategy-runtime-readiness-readonly.ps1"),
+  "utf8",
+);
+const combined = workflow + "\n" + wrapper;
 
 for (const required of [
   "Phase7C Final Strategy Runtime Readiness Read-Only",
@@ -21,8 +28,9 @@ for (const required of [
   "$botMode -eq 'PAUSE'",
   "$positions -eq '0'",
   "$pending -eq '0'",
+  "FINAL_STRATEGY_RAW_ACCOUNT_IDENTITY_PRINTED=FALSE",
 ]) {
-  assert.ok(workflow.includes(required), `missing runtime-readiness safety contract: ${required}`);
+  assert.ok(combined.includes(required), `missing runtime-readiness safety contract: ${required}`);
 }
 
 for (const forbidden of [
@@ -45,9 +53,9 @@ for (const forbidden of [
   "git merge",
 ]) {
   assert.equal(
-    workflow.includes(forbidden),
+    combined.includes(forbidden),
     false,
-    `read-only runtime-readiness workflow must not contain mutation primitive: ${forbidden}`,
+    `read-only runtime-readiness path must not contain mutation primitive: ${forbidden}`,
   );
 }
 
@@ -56,20 +64,12 @@ assert.match(
   /EXPECTED_MAIN:\s*\$\{\{\s*github\.event\.pull_request\.base\.sha\s*\|\|\s*github\.sha\s*\}\}/,
   "read-only diagnostic must pin expected source to PR base/main SHA",
 );
-assert.match(
-  workflow,
-  /persist-credentials:\s*false/,
-  "diagnostic checkout must not retain GitHub write credentials",
-);
-assert.match(
-  workflow,
-  /RedirectStandardOutput/,
-  "canonical preflight raw output should be captured instead of directly printing account identifiers",
-);
-assert.match(
-  workflow,
-  /Remove-Item -LiteralPath \$stdout,\$stderr/,
-  "captured raw preflight files must be removed",
-);
+assert.match(workflow, /persist-credentials:\s*false/);
+assert.match(wrapper, /RedirectStandardOutput/);
+assert.match(wrapper, /RedirectStandardError/);
+assert.match(wrapper, /Remove-Item -LiteralPath \$stdout,\$stderr/);
+assert.match(wrapper, /\$proc\.ExitCode -notin @\(0,2\)/);
+assert.match(wrapper, /\$runtimeOverall -eq 'EXACT_MATCH'/);
+assert.match(wrapper, /\$classification -eq 'NO_RECOVERY_REQUIRED'/);
 
 console.log("PHASE7C_FINAL_STRATEGY_RUNTIME_READINESS_READONLY_CONTRACT=PASS");
