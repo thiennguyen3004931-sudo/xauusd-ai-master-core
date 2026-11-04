@@ -121,6 +121,80 @@ try {
   Write-Host "FINAL_STRATEGY_TASK_READY=$($taskReady.ToString().ToUpperInvariant())"
   Write-Host "FINAL_STRATEGY_TARGET_EXACT=$($targetExact.ToString().ToUpperInvariant())"
   Write-Host "FINAL_STRATEGY_DEPLOYMENT_READY_WITHOUT_ARM_MUTATION=$($readyWithoutArmMutation.ToString().ToUpperInvariant())"
+
+  # Independent, sanitized task probe. This is deliberately read-only and separates
+  # provider/action/hash/drift/principal failures that the canonical preflight groups
+  # into TASK_READ_FAILED.
+  $taskProbeProvider = 'UNAVAILABLE'
+  $taskProbeOwnership = 'UNAVAILABLE'
+  $taskProbeOwned = $false
+  $taskProbeCanonical = $false
+  $taskProbeRepairRequired = $false
+  $taskProbePrincipalCanonical = $false
+  $taskProbeDrift = 'UNAVAILABLE'
+  $taskProbeRunnerHash = 'UNAVAILABLE'
+  try {
+    Import-Module ScheduledTasks -ErrorAction Stop
+    $taskProbe = Get-ScheduledTask -TaskName 'XAUUSD-Phase7C-Executors' -ErrorAction Stop
+    $taskProbeProvider = 'READABLE'
+
+    $ownershipLibrary = Join-Path $PSScriptRoot 'lib\phase7c-scheduled-task-ownership.ps1'
+    if (-not (Test-Path -LiteralPath $ownershipLibrary -PathType Leaf)) {
+      throw 'Task ownership library is unavailable.'
+    }
+    . $ownershipLibrary
+
+    $runnerPath = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot 'scripts\run-phase7c-executor-task-runner-local.ps1'))
+    try {
+      $runnerHash = (Get-FileHash -LiteralPath $runnerPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToUpperInvariant()
+      $taskProbeRunnerHash = 'READABLE'
+      $ownershipProbe = Test-Phase7CExecutorTaskActionOwnership -Actions $taskProbe.Actions -ExpectedRunnerPath $runnerPath -ExpectedRunnerSha256 $runnerHash
+      $taskProbeOwned = [bool]$ownershipProbe.owned
+      $taskProbeCanonical = [bool]$ownershipProbe.canonical
+      $taskProbeRepairRequired = [bool]$ownershipProbe.repairRequired
+      $taskProbeOwnership = [string]$ownershipProbe.reason
+    } catch {
+      $taskProbeRunnerHash = 'ERROR'
+      $taskProbeOwnership = 'OWNERSHIP_EVALUATION_ERROR'
+    }
+
+    try {
+      $driftProbe = @(Get-Phase7CExecutorTaskDrift -Task $taskProbe)
+      $taskProbeDrift = if ($driftProbe.Count -eq 0) { 'NONE' } else { @($driftProbe) -join '|' }
+    } catch {
+      $taskProbeDrift = 'DRIFT_EVALUATION_ERROR'
+    }
+
+    try {
+      $principal = $taskProbe.Principal
+      $user = if ($null -eq $principal) { '' } else { ([string]$principal.UserId).Trim() }
+      $systemUser = $user -in @('SYSTEM','NT AUTHORITY\SYSTEM','S-1-5-18')
+      $taskProbePrincipalCanonical = (
+        $null -ne $principal -and
+        $systemUser -and
+        ([string]$principal.LogonType) -eq 'ServiceAccount' -and
+        ([string]$principal.RunLevel) -eq 'Highest'
+      )
+    } catch {
+      $taskProbePrincipalCanonical = $false
+    }
+  } catch {
+    try {
+      $taskProbeProvider = Get-Phase7CScheduledTaskErrorClassification -Exception $_.Exception
+    } catch {
+      $taskProbeProvider = 'PROVIDER_ERROR'
+    }
+  }
+
+  Write-Host "FINAL_STRATEGY_TASK_PROBE_PROVIDER=$taskProbeProvider"
+  Write-Host "FINAL_STRATEGY_TASK_PROBE_RUNNER_HASH=$taskProbeRunnerHash"
+  Write-Host "FINAL_STRATEGY_TASK_PROBE_OWNED=$($taskProbeOwned.ToString().ToUpperInvariant())"
+  Write-Host "FINAL_STRATEGY_TASK_PROBE_CANONICAL=$($taskProbeCanonical.ToString().ToUpperInvariant())"
+  Write-Host "FINAL_STRATEGY_TASK_PROBE_REPAIR_REQUIRED=$($taskProbeRepairRequired.ToString().ToUpperInvariant())"
+  Write-Host "FINAL_STRATEGY_TASK_PROBE_OWNERSHIP_REASON=$taskProbeOwnership"
+  Write-Host "FINAL_STRATEGY_TASK_PROBE_DRIFT=$taskProbeDrift"
+  Write-Host "FINAL_STRATEGY_TASK_PROBE_PRINCIPAL_CANONICAL=$($taskProbePrincipalCanonical.ToString().ToUpperInvariant())"
+
   Write-Host 'FINAL_STRATEGY_RAW_ACCOUNT_IDENTITY_PRINTED=FALSE'
 } finally {
   Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
