@@ -110,3 +110,47 @@ test('known gap: if BOTH checkpoint and proof roll back, pure comparison cannot 
   assert.equal(result.brokerExecutionAllowed,false);
   // This demonstrates the need for a genuine independent anti-rollback root, not a feature PASS.
 });
+
+test('known gap: forged witness root and rolled-back checkpoint can agree but never enable broker',()=>{
+  // The pure comparator CANNOT authenticate the provenance of its caller-supplied
+  // "trusted" root/checkpoint. Only an external, non-rollbackable authority can.
+  const attackerPair=generateKeyPairSync('ed25519');
+  const attackerPublicKeyPem=attackerPair.publicKey.export({format:'pem',type:'spki'}).toString();
+  const attackerPublicKeySha256=createHash('sha256')
+    .update(attackerPair.publicKey.export({format:'der',type:'spki'})).digest('hex');
+  const swappedRoot={...root,keyId:'synthetic-swapped-witness-key',
+    publicKeyPem:attackerPublicKeyPem,publicKeySha256:attackerPublicKeySha256};
+  const older={...localJournal,maxSequence:2,
+    journalDigestSha256:digest('synthetic-older-command-journal')};
+  const statement={
+    schemaVersion:1,authorityKeyId:swappedRoot.keyId,keyEpoch:swappedRoot.keyEpoch,
+    requestNonce:NONCE,issuedAt:NOW,expiresAt:NOW+10_000,...older,
+  };
+  const fields=[
+    statement.schemaVersion,statement.authorityKeyId,statement.keyEpoch,
+    statement.requestNonce,statement.issuedAt,statement.expiresAt,
+    statement.binding.licenseId,statement.binding.installationId,
+    statement.binding.mt5Login,statement.binding.brokerServer,
+    statement.binding.allowedSymbols,statement.maxSequence,
+    statement.journalDigestSha256,statement.pendingReservedCount,
+  ];
+  const forgedProof={
+    statement,
+    signatureBase64:signEd25519(
+      null,Buffer.from(FOLLOWER_WITNESS_DOMAIN+JSON.stringify(fields)),
+      attackerPair.privateKey,
+    ).toString('base64'),
+  };
+  const injected={
+    localJournal:older,witnessProof:forgedProof,
+    trustedCheckpoint:{...older,keyEpoch:swappedRoot.keyEpoch},
+    trustedWitnessRoot:swappedRoot,
+  };
+  assert.deepEqual(evaluate(injected),{
+    evidenceMatched:true,brokerExecutionAllowed:false,
+    reasonCode:'SYNTHETIC_FOLLOWER_WITNESS_MATCH_ONLY',
+  });
+  // Holding the genuine independently pinned root defeats key substitution.
+  denied(evaluate({...injected,trustedWitnessRoot:root}),
+    'WITNESS_ROOT_OR_EPOCH_MISMATCH');
+});
