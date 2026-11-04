@@ -272,6 +272,9 @@ $taskLastResult = 'UNAVAILABLE'
 $taskReadStatus = 'UNAVAILABLE'
 $taskOwnershipEvaluation = 'NOT_RUN'
 $taskRunnerHashStatus = 'NOT_RUN'
+$taskRunnerPathStatus = 'NOT_RUN'
+$taskRunnerShaStatus = 'NOT_RUN'
+$taskRunnerMissingCommand = 'NONE'
 $taskActionOwnershipStatus = 'NOT_RUN'
 $taskDriftEvaluationStatus = 'NOT_RUN'
 $taskPrincipalEvaluationStatus = 'NOT_RUN'
@@ -314,14 +317,38 @@ if ($taskReadStatus -eq 'READABLE') {
         $taskLastResult = 'UNAVAILABLE'
     }
 
+    # Keep PATH and SHA validation independent so a missing PowerShell command
+    # cannot be mistaken for ScheduledTask ownership drift. Never fall back to
+    # a caller-supplied hash or mark a skipped check as a passing proof.
     try {
         $runnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
-        $runnerSha = (Get-FileHash -LiteralPath $runnerPath -Algorithm SHA256 -ErrorAction Stop).Hash
-        $taskRunnerHashStatus = 'PASS'
+        $taskRunnerPathStatus = 'PASS'
     } catch {
+        $taskRunnerPathStatus = 'ERROR'
         $taskRunnerHashStatus = 'ERROR'
-        Set-TaskOwnershipError -Stage 'RUNNER_HASH' -Exception $_.Exception
-        Add-Blocked 'TASK_RUNNER_HASH_EVALUATION_FAILED'
+        if ($_.Exception -is [System.Management.Automation.CommandNotFoundException]) {
+            $missing = ([string]$_.Exception.CommandName).Trim()
+            $taskRunnerMissingCommand = if ($missing -in @('Get-Phase7CExecutorTaskRunnerPath','Join-Path')) { $missing } else { 'OTHER_OR_UNKNOWN' }
+        }
+        Set-TaskOwnershipError -Stage 'RUNNER_PATH' -Exception $_.Exception
+        Add-Blocked 'TASK_RUNNER_PATH_EVALUATION_FAILED'
+    }
+
+    if ($taskRunnerPathStatus -eq 'PASS') {
+        try {
+            $runnerSha = (Get-FileHash -LiteralPath $runnerPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            $taskRunnerShaStatus = 'PASS'
+            $taskRunnerHashStatus = 'PASS'
+        } catch {
+            $taskRunnerShaStatus = 'ERROR'
+            $taskRunnerHashStatus = 'ERROR'
+            if ($_.Exception -is [System.Management.Automation.CommandNotFoundException]) {
+                $missing = ([string]$_.Exception.CommandName).Trim()
+                $taskRunnerMissingCommand = if ($missing -in @('Get-FileHash')) { $missing } else { 'OTHER_OR_UNKNOWN' }
+            }
+            Set-TaskOwnershipError -Stage 'RUNNER_HASH' -Exception $_.Exception
+            Add-Blocked 'TASK_RUNNER_HASH_EVALUATION_FAILED'
+        }
     }
 
     if ($taskRunnerHashStatus -eq 'PASS') {
@@ -497,6 +524,9 @@ Write-Host "TASK_LAST_RESULT=$taskLastResult"
 Write-Host "TASK_READ_STATUS=$taskReadStatus"
 Write-Host "TASK_OWNERSHIP_EVALUATION=$taskOwnershipEvaluation"
 Write-Host "TASK_RUNNER_HASH_STATUS=$taskRunnerHashStatus"
+Write-Host "TASK_RUNNER_PATH_STATUS=$taskRunnerPathStatus"
+Write-Host "TASK_RUNNER_SHA_STATUS=$taskRunnerShaStatus"
+Write-Host "TASK_RUNNER_MISSING_COMMAND=$taskRunnerMissingCommand"
 Write-Host "TASK_ACTION_OWNERSHIP_STATUS=$taskActionOwnershipStatus"
 Write-Host "TASK_DRIFT_EVALUATION_STATUS=$taskDriftEvaluationStatus"
 Write-Host "TASK_PRINCIPAL_EVALUATION_STATUS=$taskPrincipalEvaluationStatus"
