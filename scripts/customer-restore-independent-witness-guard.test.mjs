@@ -38,6 +38,9 @@ const roots = Object.freeze({
   operatorTrustedDigest: fingerprintRestoreAuthorityKeyring(operatorKeyring),
   witnessKeyring, witnessTrustedEpoch: 11,
   witnessTrustedDigest: fingerprintRestoreAuthorityKeyring(witnessKeyring),
+  // Test fixture only: a real checkpoint MUST be durably authenticated and
+  // stored separately from both operator and witness restorable state.
+  trustedWitnessCheckpoint: { ...active, witnessKeyringEpoch: 11 },
 });
 function sign(authority, role, key, nonce = NONCE, at = NOW) {
   const proof = issueRestoreAuthorityProof({
@@ -168,6 +171,65 @@ test("substituted witness key at same epoch is refused by independently held dig
   denied(check(active, {
     witnessKeyring: wrongRing,
   }), "INDEPENDENT_WITNESS_AUTHORITY_KEYRING_DIGEST_MISMATCH");
+});
+
+
+test("missing or malformed independently persisted checkpoint denies even matching dual signatures", () => {
+  denied(check(active, { trustedWitnessCheckpoint: undefined }),
+    "INDEPENDENT_CHECKPOINT_REQUIRED");
+  denied(check(active, { trustedWitnessCheckpoint: {} }),
+    "INDEPENDENT_CHECKPOINT_INVALID");
+  denied(check(active, { trustedWitnessCheckpoint: {
+    ...roots.trustedWitnessCheckpoint, tokenGeneration: -1,
+  } }), "INDEPENDENT_CHECKPOINT_INVALID");
+  denied(check(active, { trustedWitnessCheckpoint: {
+    ...roots.trustedWitnessCheckpoint, untrustedExtra: true,
+  } }), "INDEPENDENT_CHECKPOINT_INVALID");
+});
+
+for (const mode of ["SELF_MANAGED", "COPY_FOLLOWER"]) {
+  test(mode + ": two freshly signed OLD proofs cannot bypass a newer trusted high-water floor", () => {
+    const floor = {
+      ...active, authorizationState: "REVOKED",
+      revocationGeneration: 2, auditHighWater: 2, witnessKeyringEpoch: 11,
+    };
+    const bothOldProofs = check(active, {
+      operatorProof: sign(active, "operatorV1", operatorKey),
+      witnessProof: sign(active, "witnessV1", witnessKey),
+      trustedWitnessCheckpoint: floor,
+    });
+    denied(bothOldProofs, "INDEPENDENT_CHECKPOINT_GENERATION_ROLLBACK");
+    // This fixture deliberately demonstrates that a rolled-back *checkpoint*
+    // would still pass the pure comparison: independence is an external gate.
+    const restoredOldFloor = check(active);
+    assert.equal(restoredOldFloor.evidenceMatched, true);
+    assert.equal(restoredOldFloor.customerAuthorizationAllowed, false);
+  });
+}
+
+test("checkpoint rejects rollback of all monotonic counters and witness signer epoch", () => {
+  for (const counter of [
+    "revocationGeneration", "migrationGeneration", "challengeConsumptionGeneration",
+    "auditHighWater", "tokenGeneration",
+  ]) {
+    denied(check(active, { trustedWitnessCheckpoint: {
+      ...roots.trustedWitnessCheckpoint, [counter]: 2,
+    } }), "INDEPENDENT_CHECKPOINT_GENERATION_ROLLBACK");
+  }
+  denied(check(active, {
+    trustedWitnessCheckpoint: { ...roots.trustedWitnessCheckpoint, witnessKeyringEpoch: 12 },
+  }), "INDEPENDENT_CHECKPOINT_EPOCH_ROLLBACK");
+});
+
+test("checkpoint binding conflict and prior revoked/expired states always fail closed", () => {
+  denied(check(active, { trustedWitnessCheckpoint: {
+    ...roots.trustedWitnessCheckpoint, bindingEpoch: "different-binding",
+  } }), "INDEPENDENT_CHECKPOINT_BINDING_MISMATCH");
+  for (const state of ["REVOKED", "EXPIRED"]) {
+    denied(check(active, { trustedWitnessCheckpoint: {
+      ...roots.trustedWitnessCheckpoint, authorizationState: state,
+    } }), "INDEPENDENT_CHECKPOINT_NOT_ACTIVE");
+  }
 });
 
 test("witness signature replay for a different nonce or after expiry is rejected", () => {
