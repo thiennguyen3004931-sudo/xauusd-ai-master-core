@@ -67,6 +67,9 @@ $requiredEvidence = @(
     'TASK_READ_STATUS=',
     'TASK_OWNERSHIP_EVALUATION=',
     'TASK_RUNNER_HASH_STATUS=',
+    'TASK_RUNNER_PATH_STATUS=',
+    'TASK_RUNNER_SHA_STATUS=',
+    'TASK_RUNNER_MISSING_COMMAND=',
     'TASK_ACTION_OWNERSHIP_STATUS=',
     'TASK_DRIFT_EVALUATION_STATUS=',
     'TASK_PRINCIPAL_EVALUATION_STATUS=',
@@ -88,6 +91,10 @@ foreach ($taskSafetyMarker in @(
     "TASK_READ_STATUS=",
     "TASK_OWNERSHIP_EVALUATION=",
     "TASK_RUNNER_HASH_STATUS=",
+    "TASK_RUNNER_PATH_STATUS=",
+    "TASK_RUNNER_SHA_STATUS=",
+    "TASK_RUNNER_MISSING_COMMAND=",
+    "TASK_RUNNER_PATH_EVALUATION_FAILED",
     "TASK_ACTION_OWNERSHIP_STATUS=",
     "TASK_DRIFT_EVALUATION_STATUS=",
     "TASK_PRINCIPAL_EVALUATION_STATUS=",
@@ -109,6 +116,7 @@ if ($source.Contains('$taskDrift = @(''TASK_OWNERSHIP_EVALUATION_FAILED'')')) {
     throw 'A single generic ownership catch must not replace staged task ownership diagnostics.'
 }
 foreach ($stageCall in @(
+    "Set-TaskOwnershipError -Stage 'RUNNER_PATH'",
     "Set-TaskOwnershipError -Stage 'RUNNER_HASH'",
     "Set-TaskOwnershipError -Stage 'ACTION_OWNERSHIP'",
     "Set-TaskOwnershipError -Stage 'TASK_DRIFT'",
