@@ -7,7 +7,7 @@
  * No network, filesystem, secret-key access, customer activation or MT5 I/O.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
-import { verifySignedRestoreAuthority } from "./customer-restore-authority-signed-proof.mjs";
+import { verifySignedRestoreAuthority, verifySignedRestoreWitness } from "./customer-restore-authority-signed-proof.mjs";
 
 const deny = reasonCode => Object.freeze({ allowed: false, reasonCode });
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -54,10 +54,10 @@ export function fingerprintRestoreAuthorityKeyring(keyring) {
  * A PASS is ONLY a cryptographic/counter comparison; it never authorizes
  * Gateway startup, trading, restore, customer release or live access.
  */
-export function verifyRestoreAuthorityWithKeyLifecycle({
+function verifyRestoreProofWithKeyLifecycle({
   restored, statement, signatureBase64, keyring,
   trustedKeyringEpoch, trustedKeyringSha256Hex, expectedNonce, nowMs,
-} = {}) {
+} = {}, verifyProof) {
   try {
     if (!safeMs(nowMs) || !Number.isSafeInteger(trustedKeyringEpoch) ||
         trustedKeyringEpoch < 1) return deny("AUTHORITY_TRUST_ANCHOR_MISSING");
@@ -103,11 +103,20 @@ export function verifyRestoreAuthorityWithKeyLifecycle({
     // No untrusted fallback key, including on lookup or signature failure.
     const trustedPublicKeys = Object.create(null);
     trustedPublicKeys[statement.authorityKeyId] = entry.publicKeyPem;
-    return verifySignedRestoreAuthority({
+    return verifyProof({
       restored, statement, signatureBase64, trustedPublicKeys,
       expectedNonce, nowMs,
     });
   } catch {
     return deny("AUTHORITY_KEYRING_UNAVAILABLE");
   }
+}
+
+/** Keep operator and witness purposes fixed; callers cannot choose the domain. */
+export function verifyRestoreAuthorityWithKeyLifecycle(args = {}) {
+  return verifyRestoreProofWithKeyLifecycle(args, verifySignedRestoreAuthority);
+}
+
+export function verifyRestoreWitnessWithKeyLifecycle(args = {}) {
+  return verifyRestoreProofWithKeyLifecycle(args, verifySignedRestoreWitness);
 }
