@@ -90,7 +90,7 @@ const sidewayLive = transformPhase7CSidewaySource(sidewaySource);
 assert.match(sidewayLive, /health\.accountMode !== "real"/);
 for (const marker of [
   "PHASE7C_SIDEWAY_PLUS6=SL_TO_ENTRY",
-  "PHASE7C_SIDEWAY_PLUS10=PARTIAL_ONE_THIRD",
+  "PHASE7C_SIDEWAY_PLUS10=PARTIAL_DISABLED_WHILE_BROKER_TP_SL_TRAIL_ONLY",
   "PHASE7C_SIDEWAY_DAILY_RECOVERY_LOT_ESCALATION=OFF",
 ]) {
   assert.ok(sidewaySource.includes(marker), `Sideway canonical source missing strategy marker: ${marker}`);

@@ -97,7 +97,7 @@ assert.ok(
 );
 assert.ok(
   canonicalExecutor.includes('const expectedDailyMode = dailyNetPnl < 0 ? "RECOVERY_TP" : "NORMAL"'),
-  "Canonical positive/flat day must normalize only to NORMAL; negative day to RECOVERY_TP.",
+  "Canonical view must preserve reported positive/flat NORMAL and negative RECOVERY_TP for integrity checks, even when execution is paused.",
 );
 assert.ok(
   canonicalExecutor.includes("submission snapshot is missing"),
@@ -179,9 +179,11 @@ const negativePlan = await fetchPhase7CCanonicalDailyRecoveryPlan({
   volume: 0.03,
   fetchImpl: async () => jsonResponse(canonicalView({ dailyNetPnl: -20 })),
 });
-assert.equal(negativePlan.mode, "RECOVERY_TP");
+assert.equal(negativePlan.mode, "SIDEWAY_NATIVE");
 assert.equal(negativePlan.canonicalDailyMode, "RECOVERY_TP");
-assert.equal(negativePlan.tpDistance, 7);
+assert.equal(negativePlan.dailyNetPnl, -20);
+assert.equal(negativePlan.tpDistance, 0);
+assert.equal(negativePlan.recoveryEntryPaused, true);
 
 registerPhase7CCanonicalDailyRecoverySubmission({
   strategy: "TREND",

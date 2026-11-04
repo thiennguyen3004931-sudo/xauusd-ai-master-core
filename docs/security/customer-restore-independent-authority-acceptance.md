@@ -56,3 +56,40 @@ This is a contract proposal, not a claim that these fields or controls already e
 ## Operational invariants
 
 No change to BOT_MODE, ARM, MT5 orders, production startup, runner services, real customer databases or secrets. AUTO LIVE REVERSAL new-entry hard lock remains in force. Do not use a synthetic PASS to approve Customer Release V1.
+
+## Synthetic dual-proof witness review (2026-11-03)
+
+`scripts/customer-restore-independent-witness-guard.mjs` is a pure, **non-operational** second-proof comparison. It verifies an already fresh signed operator statement against a fresh signature from a *different Ed25519 key*, and requires both the operator and witness keyrings to match separately provided trusted SHA-256 fingerprints and pinned epochs; signer revocation and validity windows are checked. The witness represents an independently stored monotonic high-water reference, but that independence is an external operational requirement, not a property created by this code. It deliberately returns `customerAuthorizationAllowed: false` even on matching evidence. Synthetic tests demonstrate that restoring BOTH an old customer SQLite and an old operator authority file (a case the single proof accepts) is detected when the separately held witness has a later revoke/audit generation; they also exercise challenge/token/migration rollback, identity swap, wrong root, nonce replay, expiration and same-key alias.
+
+**This code DOES NOT provide the trusted external witness.** Two different keypairs do not establish separate administration, irreversibility, availability or non-rollbackable storage; an old *witness file and its signatures* can still be replayed together if the trusted monotonic checkpoint is itself restorable. Production must pin the independent key and highest observed epoch/counter to a separately authorized and non-restorable KMS/HSM/operator trust domain, atomically advance that checkpoint, authenticate all transport, enforce fail-closed Gateway pre-listener/session quarantine, and obtain human acceptance. Never wire the synthetic comparator directly to production startup or treat its test PASS as authorization.
+
+## Monotonic high-water checkpoint supplement (2026-11-04)
+
+The synthetic dual-proof comparator now additionally requires a `trustedWitnessCheckpoint`
+whose exact binding tuple, five monotonic generations, authorization state and
+witness signing-key epoch can be checked against the fresh signed witness.
+**This is a pure comparison, not a trust-anchor implementation.** An absent,
+malformed, wrong-binding, lower-generation, lower-epoch or previously revoked/
+expired checkpoint rejects with a sanitized reason code. All results retain
+`customerAuthorizationAllowed: false`.
+
+A key security regression demonstrates that **two new, correctly signed proofs
+over the same OLD state** can agree with each other. A newer, independently held
+high-water floor still detects the rollback. If that floor is also rolled back,
+the comparison may report synthetic agreement; therefore the system must
+independently authenticate the checkpoint and atomically persist its monotonic
+advance outside every customer/operator/witness backup scope before any
+Gateway/session admission. Storing a user-provided checkpoint, keyring digest
+or pinned epoch in a restorable file is **not** production protection.
+
+A real accepted design still requires a separately administered durable authority
+or KMS/HSM, recovery and compromise playbook, protected transport and key
+rotation, fail-closed pre-listener Gateway quarantine, Windows ACL/DPAPI review,
+independent audit, and explicit customer-host release sign-off. #176 and #166
+remain **OPEN/BLOCKED**; there is no real customer backup, access or MT5 action.
+
+## Separate signing purposes (2026-11-04, synthetic code only)
+
+Operator authority assertions are signed with the fixed domain `XAUUSD-CUSTOMER-RESTORE-AUTHORITY-V1`, while independent high-water witness assertions now require `XAUUSD-CUSTOMER-RESTORE-WITNESS-V1`. Both use the existing canonical field sequence, with explicit fixed-purpose issuers/verifiers and the previously required pinned signer keyring+epoch validation. A witness-domain signature must not validate as an operator authority proof, and an operator-domain signature must not validate as a witness, even if the signature comes from a formally trusted key. Synthetic cross-domain replay tests cover both directions. The independent witness comparator continues to return `customerAuthorizationAllowed: false` even on a matching proof pair.
+
+This cryptographic purpose separation **does not** implement independently administered key custody, non-rollbackable high-water storage, authenticated witness retrieval, pre-listener Gateway quarantine or live customer activation. No production proof format is migrated or issued by this PR. #176 and #166 remain release blockers.

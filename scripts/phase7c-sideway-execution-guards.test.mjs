@@ -170,18 +170,18 @@ test("auto lot snapshot fails closed on stale or unsafe payloads", () => {
   assert.equal(validateAutoLotSnapshot(unapproved, expected).reason, "AUTO_LOT_PREVIEW_NOT_APPROVED");
 });
 
-test("Sideway +10 partial is impossible until +6 BE succeeds and +6 uses canonical event names", () => {
+test("Sideway +10 partial is locked OFF after fill; +6 BE still uses canonical event names", () => {
   const plus6Index = sidewayControllerSource.indexOf(
     'if (!managed.breakEvenApplied && favorable >= 6)',
   );
   const plus10Index = sidewayControllerSource.indexOf(
-    'if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1))',
+    'if (!brokerTpSlTrailOnly && managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1))',
   );
 
   assert.ok(plus6Index >= 0, "Sideway +6 BE block must exist");
   assert.ok(
     plus10Index > plus6Index,
-    "Sideway +10 partial must execute only after breakEvenApplied is true",
+    "the legacy partial must be policy-disabled and must never precede break-even",
   );
   assert.match(
     sidewayControllerSource,
