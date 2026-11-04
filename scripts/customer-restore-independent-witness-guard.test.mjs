@@ -4,6 +4,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { compareRestoreWithIndependentWitness as compare } from "./customer-restore-independent-witness-guard.mjs";
 import { issueRestoreAuthorityProof } from "./customer-restore-authority-proof-issuer.mjs";
 import { verifySignedRestoreAuthority } from "./customer-restore-authority-signed-proof.mjs";
+import { fingerprintRestoreAuthorityKeyring } from "./customer-restore-authority-key-lifecycle.mjs";
 
 const NOW = 1_800_000_000_000;
 const NONCE = "synthetic-fresh-nonce-across-two-separate-authorities";
@@ -24,9 +25,19 @@ const active = Object.freeze({
   revocationGeneration: 1, migrationGeneration: 1,
   challengeConsumptionGeneration: 1, auditHighWater: 1, tokenGeneration: 1,
 });
+const operatorKeyring = { epoch: 7, keys: { operatorV1: {
+  publicKeyPem: operatorKey.publicKeyPem, status: "ACTIVE",
+  notBeforeMs: NOW - 30_000, notAfterMs: NOW + 30_000,
+} } };
+const witnessKeyring = { epoch: 11, keys: { witnessV1: {
+  publicKeyPem: witnessKey.publicKeyPem, status: "ACTIVE",
+  notBeforeMs: NOW - 30_000, notAfterMs: NOW + 30_000,
+} } };
 const roots = Object.freeze({
-  trustedOperatorPublicKeys: { operatorV1: operatorKey.publicKeyPem },
-  trustedWitnessPublicKeys: { witnessV1: witnessKey.publicKeyPem },
+  operatorKeyring, operatorTrustedEpoch: 7,
+  operatorTrustedDigest: fingerprintRestoreAuthorityKeyring(operatorKeyring),
+  witnessKeyring, witnessTrustedEpoch: 11,
+  witnessTrustedDigest: fingerprintRestoreAuthorityKeyring(witnessKeyring),
 });
 function sign(authority, role, key, nonce = NONCE, at = NOW) {
   const proof = issueRestoreAuthorityProof({
@@ -77,7 +88,7 @@ for (const mode of ["SELF_MANAGED", "COPY_FOLLOWER"]) {
     assert.equal(verifySignedRestoreAuthority({
       restored: oldCandidate, statement: oldOperatorProof.statement,
       signatureBase64: oldOperatorProof.signatureBase64,
-      trustedPublicKeys: roots.trustedOperatorPublicKeys,
+      trustedPublicKeys: { operatorV1: operatorKey.publicKeyPem },
       expectedNonce: NONCE, nowMs: NOW + 1000,
     }).allowed, true, "original single-proof check demonstrably accepts the combined rollback");
 
@@ -110,7 +121,7 @@ test("proofs with wrong witness signer and missing pinned root never reconcile",
     witnessProof: sign(active, "witnessV1", rogueKey),
   }), "INDEPENDENT_WITNESS_AUTHORITY_SIGNATURE_INVALID");
   denied(check(active, {
-    trustedWitnessPublicKeys: {},
+    witnessKeyring: { epoch: 11, keys: {} },
   }), "INDEPENDENT_WITNESS_ROOT_UNAVAILABLE");
   denied(check(active, {
     witnessProof: undefined,
@@ -120,8 +131,43 @@ test("proofs with wrong witness signer and missing pinned root never reconcile",
 test("same key under different IDs cannot masquerade as independent witness", () => {
   denied(check(active, {
     witnessProof: sign(active, "witnessV1", operatorKey),
-    trustedWitnessPublicKeys: { witnessV1: operatorKey.publicKeyPem },
+    witnessKeyring: { epoch: 11, keys: { witnessV1: { ...witnessKeyring.keys.witnessV1, publicKeyPem: operatorKey.publicKeyPem } } },
   }), "INDEPENDENT_WITNESS_ROOT_NOT_SEPARATE");
+});
+
+test("trusted witness epoch/digest and revoked signer status are mandatory", () => {
+  denied(check(active, {
+    witnessTrustedDigest: "0".repeat(64),
+  }), "INDEPENDENT_WITNESS_AUTHORITY_KEYRING_DIGEST_MISMATCH");
+  denied(check(active, {
+    witnessTrustedDigest: undefined,
+  }), "INDEPENDENT_WITNESS_AUTHORITY_TRUSTED_KEYRING_DIGEST_MISSING");
+  denied(check(active, {
+    witnessTrustedEpoch: 12,
+  }), "INDEPENDENT_WITNESS_AUTHORITY_KEYRING_ROLLBACK");
+  denied(check(active, {
+    operatorTrustedEpoch: 8,
+  }), "OPERATOR_PROOF_AUTHORITY_KEYRING_ROLLBACK");
+  const revokedKeyring = {
+    epoch: 11, keys: {
+      witnessV1: { ...witnessKeyring.keys.witnessV1, status: "REVOKED" },
+    },
+  };
+  denied(check(active, {
+    witnessKeyring: revokedKeyring,
+    // Synthetic fixture simulates a pinned revised keyring; still denied.
+    witnessTrustedDigest: fingerprintRestoreAuthorityKeyring(revokedKeyring),
+  }), "INDEPENDENT_WITNESS_AUTHORITY_SIGNING_KEY_REVOKED");
+});
+
+test("substituted witness key at same epoch is refused by independently held digest", () => {
+  const wrongRing = {
+    epoch: 11,
+    keys: { witnessV1: { ...witnessKeyring.keys.witnessV1, publicKeyPem: rogueKey.publicKeyPem } },
+  };
+  denied(check(active, {
+    witnessKeyring: wrongRing,
+  }), "INDEPENDENT_WITNESS_AUTHORITY_KEYRING_DIGEST_MISMATCH");
 });
 
 test("witness signature replay for a different nonce or after expiry is rejected", () => {
@@ -136,7 +182,7 @@ test("witness signature replay for a different nonce or after expiry is rejected
 test("identity replacement, missing witness, and invalid root format all fail closed", () => {
   denied(check({ ...active, installationId: "another-synthetic-installation" }),
     "OPERATOR_PROOF_RESTORE_BINDING_MISMATCH");
-  denied(check(active, { trustedWitnessPublicKeys: { witnessV1: "malformed-public-key" } }),
+  denied(check(active, { witnessKeyring: { epoch: 11, keys: { witnessV1: { ...witnessKeyring.keys.witnessV1, publicKeyPem: "malformed-public-key" } } } }),
     "INDEPENDENT_WITNESS_ROOT_INVALID");
   denied(compare(), "INDEPENDENT_WITNESS_REQUIRED");
 });
