@@ -55,3 +55,9 @@ node scripts/customer-follower-demo/verify-and-simulate.mjs C:\DemoFollower\copy
 - Require independent documented approval before any actual LIVE execution.
 
 Never infer LIVE readiness from this CLI or green CI. Track production runtime work in [Issue #160](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/issues/160).
+
+## P0 #176: SQLite journal rollback is NOT independently prevented
+
+This durable journal prevents duplicate command IDs and decreasing sequences across ordinary process restarts **only while the same intact SQLite state persists**. Copying back a previous SQLite database/WAL checkpoint can remove newer reservations and permit a previously executed signed command to be presented again. A signed command, local journal, or matching SHA-256 alone is not an external monotonic high-water authority.
+
+Therefore this runner remains `SIMULATED_ONLY`. Before any real follower executor is allowed, require an operator-controlled, independently authenticated and non-restorable monotonic command/sequence witness; fail-closed on missing/stale authority and reconcile broker position state after ambiguous dispatch before ever permitting a new order. This source-only demo does **not** meet Customer Release #166 or restore security #176 acceptance. Do not deploy on the production bot host, run LIVE or use actual customer credentials.
