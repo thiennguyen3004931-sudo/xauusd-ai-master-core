@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { compareRestoreWithIndependentWitness as compare } from "./customer-restore-independent-witness-guard.mjs";
-import { issueRestoreAuthorityProof } from "./customer-restore-authority-proof-issuer.mjs";
+import { issueRestoreAuthorityProof, issueRestoreWitnessProof } from "./customer-restore-authority-proof-issuer.mjs";
 import { verifySignedRestoreAuthority } from "./customer-restore-authority-signed-proof.mjs";
 import { fingerprintRestoreAuthorityKeyring } from "./customer-restore-authority-key-lifecycle.mjs";
 
@@ -40,7 +40,8 @@ const roots = Object.freeze({
   witnessTrustedDigest: fingerprintRestoreAuthorityKeyring(witnessKeyring),
 });
 function sign(authority, role, key, nonce = NONCE, at = NOW) {
-  const proof = issueRestoreAuthorityProof({
+  const issuer = role === "witnessV1" ? issueRestoreWitnessProof : issueRestoreAuthorityProof;
+  const proof = issuer({
     authority, authorityKeyId: role,
     privateKeyPem: key.privateKeyPem, requestNonce: nonce,
     nowMs: at, ttlMs: 10_000,
@@ -133,6 +134,30 @@ test("same key under different IDs cannot masquerade as independent witness", ()
     witnessProof: sign(active, "witnessV1", operatorKey),
     witnessKeyring: { epoch: 11, keys: { witnessV1: { ...witnessKeyring.keys.witnessV1, publicKeyPem: operatorKey.publicKeyPem } } },
   }), "INDEPENDENT_WITNESS_ROOT_NOT_SEPARATE");
+});
+
+test("cross-domain replay: an operator-domain signature cannot authenticate a witness proof", () => {
+  const forgedWitness = issueRestoreAuthorityProof({
+    authority: active, authorityKeyId: "witnessV1",
+    privateKeyPem: witnessKey.privateKeyPem,
+    requestNonce: NONCE, nowMs: NOW, ttlMs: 10_000,
+  });
+  assert.equal(forgedWitness.ok, true);
+  denied(check(active, {
+    witnessProof: forgedWitness,
+  }), "INDEPENDENT_WITNESS_AUTHORITY_SIGNATURE_INVALID");
+});
+
+test("cross-domain replay: a witness-domain signature cannot authenticate an operator proof", () => {
+  const forgedOperator = issueRestoreWitnessProof({
+    authority: active, authorityKeyId: "operatorV1",
+    privateKeyPem: operatorKey.privateKeyPem,
+    requestNonce: NONCE, nowMs: NOW, ttlMs: 10_000,
+  });
+  assert.equal(forgedOperator.ok, true);
+  denied(check(active, {
+    operatorProof: forgedOperator,
+  }), "OPERATOR_PROOF_AUTHORITY_SIGNATURE_INVALID");
 });
 
 test("trusted witness epoch/digest and revoked signer status are mandatory", () => {
