@@ -34,6 +34,10 @@ jobs:
       - name: Source safety contract
         run: node scripts/test-phase7c-final-strategy-runtime-readiness-readonly.mjs
 
+      - name: Canonical production preflight source regression
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-phase7c-production-readonly-preflight-v2-source.ps1
+
       - name: Read-only runtime readiness diagnostic
         shell: pwsh
         env:
