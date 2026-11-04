@@ -1,0 +1,36 @@
+name: Customer Follower Journal Witness Proof (Synthetic Only)
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/customer-follower-journal-witness-compare.mjs'
+      - 'scripts/customer-follower-journal-witness-compare.test.mjs'
+      - 'scripts/customer-follower-journal-witness-README.md'
+      - '.github/workflows/customer-follower-journal-witness-proof-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  follower-journal-witness-synthetic:
+    name: Follower rollback and fork negative tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify witness fail-closed contract (no broker / MT5)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test scripts/customer-follower-journal-witness-compare.test.mjs
+      - name: Safety declaration
+        shell: bash
+        run: |
+          echo 'SYNTHETIC_PROOF_ONLY=true'
+          echo 'BROKER_EXECUTION_ALLOWED=false'
+          echo 'WITNESS_BACKEND_IMPLEMENTED=false'
+          echo 'CUSTOMER_RELEASE_AUTHORIZED=false'
