@@ -87,3 +87,9 @@ or KMS/HSM, recovery and compromise playbook, protected transport and key
 rotation, fail-closed pre-listener Gateway quarantine, Windows ACL/DPAPI review,
 independent audit, and explicit customer-host release sign-off. #176 and #166
 remain **OPEN/BLOCKED**; there is no real customer backup, access or MT5 action.
+
+## Separate signing purposes (2026-11-04, synthetic code only)
+
+Operator authority assertions are signed with the fixed domain `XAUUSD-CUSTOMER-RESTORE-AUTHORITY-V1`, while independent high-water witness assertions now require `XAUUSD-CUSTOMER-RESTORE-WITNESS-V1`. Both use the existing canonical field sequence, with explicit fixed-purpose issuers/verifiers and the previously required pinned signer keyring+epoch validation. A witness-domain signature must not validate as an operator authority proof, and an operator-domain signature must not validate as a witness, even if the signature comes from a formally trusted key. Synthetic cross-domain replay tests cover both directions. The independent witness comparator continues to return `customerAuthorizationAllowed: false` even on a matching proof pair.
+
+This cryptographic purpose separation **does not** implement independently administered key custody, non-rollbackable high-water storage, authenticated witness retrieval, pre-listener Gateway quarantine or live customer activation. No production proof format is migrated or issued by this PR. #176 and #166 remain release blockers.

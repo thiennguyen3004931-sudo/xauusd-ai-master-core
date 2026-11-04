@@ -2,14 +2,16 @@
  * P0 #176, PURE SYNTHETIC REVIEW HELPER ONLY.
  *
  * Two DIFFERENT pinned signature roots and independently verified keyring
- * epochs must validate a fresh candidate and separately obtained high-water witness. This cannot establish that either
+ * epochs must validate a fresh candidate and separately obtained high-water witness.
+ * Witness signatures use a purpose-specific domain and a previously trusted
+ * independent monotonic checkpoint is required. Neither check establishes that
  * trusted root is independently administered, the witness is non-rollbackable,
  * or a live customer Gateway is safe to start. Never wire into live startup.
  *
  * No filesystem, network, Gateway, MT5, key issuance, or customer mutation.
  */
 import { createPublicKey } from "node:crypto";
-import { verifyRestoreAuthorityWithKeyLifecycle } from "./customer-restore-authority-key-lifecycle.mjs";
+import { verifyRestoreAuthorityWithKeyLifecycle, verifyRestoreWitnessWithKeyLifecycle } from "./customer-restore-authority-key-lifecycle.mjs";
 
 const reject = reasonCode => Object.freeze({
   evidenceMatched: false, customerAuthorizationAllowed: false, reasonCode,
@@ -118,7 +120,7 @@ export function compareRestoreWithIndependentWitness({
   // Compare the FULL operator statement (not only customer SQLite) to a
   // separately signed current witness. An old operator file plus old customer
   // copy passes the first check but MUST fail against a newer witness.
-  const witnessDecision = verifyRestoreAuthorityWithKeyLifecycle({
+  const witnessDecision = verifyRestoreWitnessWithKeyLifecycle({
     restored: operatorProof.statement,
     statement: witnessProof.statement,
     signatureBase64: witnessProof.signatureBase64,
