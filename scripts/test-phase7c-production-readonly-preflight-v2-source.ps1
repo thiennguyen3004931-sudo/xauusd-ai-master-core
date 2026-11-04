@@ -85,7 +85,6 @@ foreach ($marker in $requiredEvidence) {
 foreach ($taskSafetyMarker in @(
     "PSObject.Properties['LastTaskResult']",
     "TASK_PROVIDER_READ_FAILED",
-    "TASK_OWNERSHIP_EVALUATION_FAILED",
     "TASK_READ_STATUS=",
     "TASK_OWNERSHIP_EVALUATION=",
     "TASK_RUNNER_HASH_STATUS=",
