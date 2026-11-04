@@ -55,10 +55,16 @@ test("durable reservations deny duplicate command and non-monotonic sequence aft
   try {
     assert.deepEqual(restarted.reserve({ commandId: "one", sequence: 6 }), { ok: false, code: "REPLAYED_COMMAND" });
     assert.deepEqual(restarted.reserve({ commandId: "older", sequence: 4 }), { ok: false, code: "SEQUENCE_NOT_MONOTONIC" });
+    assert.deepEqual(restarted.reserve({ commandId: "next-while-reserved", sequence: 6 }), {
+      ok: false, code: "RECONCILIATION_REQUIRED",
+    });
     assert.deepEqual(restarted.listReserved(), [{ commandId: "one", sequence: 5, state: "RESERVED" }]);
     restarted.markDispatched("one");
     assert.deepEqual(restarted.listReserved(), []);
     assert.throws(() => restarted.markDispatched("one"), /FOLLOWER_JOURNAL_DISPATCH_TRANSITION_DENIED/);
+    assert.deepEqual(restarted.reserve({ commandId: "after-confirmed-dispatch", sequence: 6 }), {
+      ok: true, code: "RESERVED",
+    });
   } finally {
     restarted.close();
   }
@@ -138,6 +144,9 @@ test("uncertain fake executor failure remains RESERVED and cannot be retried", a
     assert.deepEqual(reopened.reserve({ commandId: "uncertain-2", sequence: 2 }), {
       ok: false, code: "REPLAYED_COMMAND",
     });
+    assert.deepEqual(reopened.reserve({ commandId: "different-after-uncertain", sequence: 3 }), {
+      ok: false, code: "RECONCILIATION_REQUIRED",
+    });
   } finally {
     reopened.close();
   }
@@ -150,6 +159,7 @@ test("P0 synthetic witness: restoring an older follower journal can resurrect a 
   const first = new SqliteCustomerFollowerCommandJournal(path, binding);
   try {
     assert.deepEqual(first.reserve({ commandId: "first", sequence: 1 }), { ok: true, code: "RESERVED" });
+    first.markDispatched("first");
   } finally { first.close(); }
 
   const oldSnapshot = path + ".pre-second-snapshot";
@@ -158,6 +168,7 @@ test("P0 synthetic witness: restoring an older follower journal can resurrect a 
   const second = new SqliteCustomerFollowerCommandJournal(path, binding);
   try {
     assert.deepEqual(second.reserve({ commandId: "second", sequence: 2 }), { ok: true, code: "RESERVED" });
+    second.markDispatched("second");
   } finally { second.close(); }
 
   // A local SQLite-only replay guard loses history after an authorized host's

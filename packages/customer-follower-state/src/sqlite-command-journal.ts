@@ -15,7 +15,7 @@ export interface FollowerCommandReservation {
 
 export type FollowerCommandReservationDecision =
   | { readonly ok: true; readonly code: "RESERVED" }
-  | { readonly ok: false; readonly code: "REPLAYED_COMMAND" | "SEQUENCE_NOT_MONOTONIC" };
+  | { readonly ok: false; readonly code: "REPLAYED_COMMAND" | "SEQUENCE_NOT_MONOTONIC" | "RECONCILIATION_REQUIRED" };
 
 export interface FollowerCommandJournalRecord extends FollowerCommandReservation {
   readonly state: "RESERVED" | "DISPATCHED";
@@ -87,6 +87,16 @@ export class SqliteCustomerFollowerCommandJournal {
       if (row.lastSequence !== null && request.sequence <= row.lastSequence) {
         this.db.exec("ROLLBACK");
         return { ok: false, code: "SEQUENCE_NOT_MONOTONIC" };
+      }
+      // A still-RESERVED command may have reached an executor. Reject all newer
+      // commands until explicit reconciliation. This guard runs inside the same
+      // BEGIN IMMEDIATE transaction as the sequence allocation.
+      const unresolved = this.db.prepare(
+        "SELECT 1 FROM follower_command_journal WHERE state = 'RESERVED' LIMIT 1",
+      ).get();
+      if (unresolved) {
+        this.db.exec("ROLLBACK");
+        return { ok: false, code: "RECONCILIATION_REQUIRED" };
       }
       this.db.prepare("INSERT INTO follower_command_journal(command_id, sequence, state) VALUES (?, ?, 'RESERVED')")
         .run(request.commandId, request.sequence);

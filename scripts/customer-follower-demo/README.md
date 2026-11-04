@@ -44,7 +44,7 @@ node scripts/customer-follower-demo/verify-and-simulate.mjs C:\DemoFollower\copy
 - Duplicate ID after restart: `REPLAYED_COMMAND`, no second execution.
 - Non-monotonic sequence after restart: `SEQUENCE_NOT_MONOTONIC`.
 - Tampered signature or wrong account/installation/key: denied before reservation.
-- On executor uncertainty, the reservation stays `RESERVED`, preventing automatic replay until independently reconciled. **A reserved order is not proof that any broker has filled it.**
+- On executor uncertainty, the reservation stays `RESERVED`. The original command is replay-denied and new commands receive `RECONCILIATION_REQUIRED` until the unresolved state is independently reconciled. **A reserved order is not proof that any broker has filled it.**
 
 ## Remaining before real follower deployment
 
