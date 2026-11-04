@@ -4,7 +4,7 @@
 // No MT5 connection or real order execution is possible here.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CustomerFollowerExecutionAdapter } from "@xauusd/customer-agent";
@@ -141,4 +141,32 @@ test("uncertain fake executor failure remains RESERVED and cannot be retried", a
   } finally {
     reopened.close();
   }
+});
+
+// A deliberately RED-SECURITY witness test: it demonstrates the gap in a
+// disposable CLOSED SQLite journal, not a successful production acceptance.
+test("P0 synthetic witness: restoring an older follower journal can resurrect a previously reserved ID", t => {
+  const path = fixture(t);
+  const first = new SqliteCustomerFollowerCommandJournal(path, binding);
+  try {
+    assert.deepEqual(first.reserve({ commandId: "first", sequence: 1 }), { ok: true, code: "RESERVED" });
+  } finally { first.close(); }
+
+  const oldSnapshot = path + ".pre-second-snapshot";
+  // Only a closed, disposable synthetic DB is copied; there are no open WAL writers.
+  copyFileSync(path, oldSnapshot);
+  const second = new SqliteCustomerFollowerCommandJournal(path, binding);
+  try {
+    assert.deepEqual(second.reserve({ commandId: "second", sequence: 2 }), { ok: true, code: "RESERVED" });
+  } finally { second.close(); }
+
+  // A local SQLite-only replay guard loses history after an authorized host's
+  // writable DB file is rolled back. Never use this demo for broker execution.
+  copyFileSync(oldSnapshot, path);
+  const restored = new SqliteCustomerFollowerCommandJournal(path, binding);
+  try {
+    assert.deepEqual(restored.reserve({ commandId: "second", sequence: 2 }),
+      { ok: true, code: "RESERVED" },
+      "expected known unsafe replay after rollback: independent monotonic authority is REQUIRED");
+  } finally { restored.close(); }
 });
