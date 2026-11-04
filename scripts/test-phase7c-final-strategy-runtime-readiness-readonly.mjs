@@ -28,6 +28,9 @@ for (const required of [
   "$botMode -eq 'PAUSE'",
   "$positions -eq '0'",
   "$pending -eq '0'",
+  "FINAL_STRATEGY_TASK_OWNERSHIP",
+  "FINAL_STRATEGY_TASK_DRIFT",
+  "FINAL_STRATEGY_TASK_READY",
   "FINAL_STRATEGY_RAW_ACCOUNT_IDENTITY_PRINTED=FALSE",
 ]) {
   assert.ok(combined.includes(required), `missing runtime-readiness safety contract: ${required}`);
@@ -71,5 +74,7 @@ assert.match(wrapper, /Remove-Item -LiteralPath \$stdout,\$stderr/);
 assert.match(wrapper, /\$proc\.ExitCode -notin @\(0,2\)/);
 assert.match(wrapper, /\$runtimeOverall -eq 'EXACT_MATCH'/);
 assert.match(wrapper, /\$classification -eq 'NO_RECOVERY_REQUIRED'/);
+assert.match(wrapper, /\$taskOwnership -eq 'CANONICAL_SYSTEM'/);
+assert.match(wrapper, /\$taskDrift -eq 'NONE'/);
 
 console.log("PHASE7C_FINAL_STRATEGY_RUNTIME_READINESS_READONLY_CONTRACT=PASS");
