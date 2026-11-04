@@ -1,0 +1,14 @@
+# COPY_FOLLOWER journal witness — P0 review-only contract (#176, #160)
+
+The pure function `compareFollowerJournalWithWitness` and its Node test suite model **negative** security decisions for a future independently witnessed COPY_FOLLOWER command journal. This file is a proposed design/test artifact only. It is not used by `CustomerFollowerExecutionAdapter`, the local demo runner, Master bot, customer Gateway or MT5. It has no database, network or broker I/O. No real customer IDs or signing keys are used.
+
+A synthetic statement is signed using the distinct `XAUUSD-FOLLOWER-JOURNAL-WITNESS-V1` domain. It binds the specific license, installation, MT5 login, broker server and sorted allowed symbols, a journal high-water sequence, a digest of the *whole canonical journal state*, unresolved reservation count, key epoch, request nonce and validity window. A separately supplied **pinned witness key** and **trusted high-water checkpoint** are compared with the local journal snapshot. Mismatch, stale nonce/time, invalid signature or key pin, old sequence, same-sequence journal fork, newer local state that the witness has not observed, wrong follower binding and unresolved reservations fail closed.
+
+## Security limitations — NOT satisfied by this PR
+
+- There is **no independent monotonic authority service**, trusted remote read, KMS/HSM/TPM trust root, transport, durable checkpoint CAS, or operational key-rotation process. The caller can *claim* the checkpoint is independent, but this helper cannot prove it. The unit tests explicitly demonstrate that rolling back the checkpoint **together** with the journal and proof is undetectable by a pure comparison.
+- There is no canonical SQLite journal snapshotter, no hash definition for serialized SQLite rows, and no atomic handoff between a DB reservation and an independently durable witness. A fake caller-supplied journal digest is not sufficient for security. The future design must bind the actual canonical journal and persist the independent monotonic checkpoint **before any externally observable order**; crash, outage and uncertain broker reconciliation remain separate fail-closed requirements.
+- A matching witness result has `evidenceMatched=true` and **always** `brokerExecutionAllowed=false`. No code consuming this helper may treat a match as authorization to enable the customer runtime, change BOT_MODE/ARM, or send MT5 orders.
+- Do not merge this helper into an execution/admission path, distribute it as a production rollback solution, or mark #176, #160 or #166 complete based on green CI. An independent security review and controlled host/MT5 DEMO acceptance are outstanding.
+
+To run tests in a disposable checkout: `node --test scripts/customer-follower-journal-witness-compare.test.mjs` (Node.js 24 in CI). Tests generate ephemeral Ed25519 keys and synthetic state only.
