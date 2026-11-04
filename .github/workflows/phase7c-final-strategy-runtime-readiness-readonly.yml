@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/phase7c-final-strategy-runtime-readiness-readonly.yml"
+      - "scripts/phase7c-final-strategy-runtime-readiness-readonly.ps1"
       - "scripts/test-phase7c-final-strategy-runtime-readiness-readonly.mjs"
       - "scripts/preflight-phase7c-production-readonly-local.ps1"
   workflow_dispatch:
@@ -39,97 +40,7 @@ jobs:
           EXPECTED_MAIN: ${{ github.event.pull_request.base.sha || github.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
-          Set-StrictMode -Version Latest
-
-          $preflight = Join-Path $PWD 'scripts\preflight-phase7c-production-readonly-local.ps1'
-          if (-not (Test-Path -LiteralPath $preflight -PathType Leaf)) {
-            throw "Canonical read-only preflight missing: $preflight"
-          }
-          if ($env:EXPECTED_MAIN -notmatch '^[0-9a-fA-F]{40}$') {
-            throw "EXPECTED_MAIN must be an exact Git SHA."
-          }
-          if (-not (Test-Path -LiteralPath $env:PRODUCTION_ROOT -PathType Container)) {
-            throw "Production root unavailable."
-          }
-
-          $stdout = Join-Path $env:RUNNER_TEMP ("final-strategy-readiness-" + [guid]::NewGuid().ToString('N') + ".out")
-          $stderr = Join-Path $env:RUNNER_TEMP ("final-strategy-readiness-" + [guid]::NewGuid().ToString('N') + ".err")
-          try {
-            $args = @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$preflight,'-ProjectRoot',$env:PRODUCTION_ROOT,'-ExpectedMainCommit',$env:EXPECTED_MAIN,'-TimeoutSeconds','12')
-            $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $args -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-            $text = if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout -Raw } else { '' }
-            $errText = if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr -Raw } else { '' }
-
-            function Read-Key([string]$Name) {
-              $m = [regex]::Match($text, "(?m)^" + [regex]::Escape($Name) + "=(.*)$")
-              if (-not $m.Success) { return '' }
-              return $m.Groups[1].Value.Trim()
-            }
-
-            foreach ($required in @('READ_ONLY=TRUE','HTTP_METHODS=GET_ONLY','GIT_MUTATION=NONE','MODE_MUTATION=NONE','ARM_MUTATION=NONE','ORDER_MUTATION=NONE','POSITION_MUTATION=NONE','LIVE_TEST_ORDER=NONE')) {
-              if (-not $text.Contains($required)) {
-                throw "Missing read-only safety marker: $required"
-              }
-            }
-
-            $expected = Read-Key 'EXPECTED_MAIN'
-            $localHead = Read-Key 'LOCAL_HEAD'
-            $deploymentSource = Read-Key 'DEPLOYMENT_SOURCE_COMMIT'
-            $botMode = Read-Key 'BOT_MODE'
-            $arm = Read-Key 'ARM'
-            $positions = Read-Key 'XAUUSD_POSITIONS'
-            $pending = Read-Key 'XAUUSD_PENDING_ORDERS'
-            $runtimeOverall = Read-Key 'RUNTIME_SOURCE_OVERALL'
-            $classification = Read-Key 'PREFLIGHT_CLASSIFICATION'
-            $blockedBy = Read-Key 'BLOCKED_BY'
-
-            if ($proc.ExitCode -notin @(0,2)) {
-              throw "Canonical preflight unexpected exit=$($proc.ExitCode). stderrPresent=$(-not [string]::IsNullOrWhiteSpace($errText))"
-            }
-
-            $targetExact = ($expected -eq $env:EXPECTED_MAIN.ToLowerInvariant() -and $localHead -eq $expected -and $deploymentSource -eq $expected -and $runtimeOverall -eq 'EXACT_MATCH')
-            $flat = $positions -eq '0' -and $pending -eq '0'
-            $noArmMutationReady = ($targetExact -and $flat -and $botMode -eq 'PAUSE' -and $arm -eq 'DISARMED' -and $classification -eq 'NO_RECOVERY_REQUIRED')
-
-            Write-Host "FINAL_STRATEGY_EXPECTED_MAIN=$expected"
-            Write-Host "FINAL_STRATEGY_PRODUCTION_HEAD=$localHead"
-            Write-Host "FINAL_STRATEGY_DEPLOYMENT_SOURCE=$deploymentSource"
-            Write-Host "FINAL_STRATEGY_RUNTIME_SOURCE_OVERALL=$runtimeOverall"
-            Write-Host "FINAL_STRATEGY_BOT_MODE=$botMode"
-            Write-Host "FINAL_STRATEGY_ARM=$arm"
-            Write-Host "FINAL_STRATEGY_XAUUSD_POSITIONS=$positions"
-            Write-Host "FINAL_STRATEGY_XAUUSD_PENDING_ORDERS=$pending"
-            Write-Host "FINAL_STRATEGY_PREFLIGHT_CLASSIFICATION=$classification"
-            Write-Host "FINAL_STRATEGY_BLOCKED_BY=$blockedBy"
-            Write-Host "FINAL_STRATEGY_TARGET_EXACT=$($targetExact.ToString().ToUpperInvariant())"
-            Write-Host "FINAL_STRATEGY_DEPLOYMENT_READY_WITHOUT_ARM_MUTATION=$($noArmMutationReady.ToString().ToUpperInvariant())"
-            Write-Host 'FINAL_STRATEGY_RUNTIME_CHECK_READ_ONLY=TRUE'
-            Write-Host 'FINAL_STRATEGY_PRODUCTION_MUTATION=NONE'
-            Write-Host 'FINAL_STRATEGY_ORDER_MUTATION=NONE'
-            Write-Host 'FINAL_STRATEGY_POSITION_MUTATION=NONE'
-            Write-Host 'FINAL_STRATEGY_ARM_MUTATION=NONE'
-            Write-Host 'FINAL_STRATEGY_MODE_MUTATION=NONE'
-
-            if ($env:GITHUB_STEP_SUMMARY) {
-              @"
-### Final Strategy runtime readiness — read-only
-- Expected main: $expected
-- Production HEAD: $localHead
-- Deployment source: $deploymentSource
-- Runtime component verdict: **$runtimeOverall**
-- BOT_MODE: **$botMode**
-- ARM: **$arm**
-- XAUUSD positions / pending: **$positions / $pending**
-- Preflight classification: **$classification**
-- Exact target: **$targetExact**
-- Ready without ARM mutation: **$noArmMutationReady**
-
-This is diagnostic evidence only. It does not deploy, switch account, change BOT_MODE/ARM, or send/modify/close orders.
-"@ | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-            }
-          } finally {
-            Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
-          }
+          & .\scripts\phase7c-final-strategy-runtime-readiness-readonly.ps1 -ProjectRoot $env:PRODUCTION_ROOT -ExpectedMainCommit $env:EXPECTED_MAIN
 
       - name: Safety boundary
         shell: pwsh
