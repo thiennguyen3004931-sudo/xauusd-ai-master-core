@@ -83,6 +83,14 @@ try {
   $taskOwnership = Read-Key 'TASK_OWNERSHIP'
   $taskDrift = Read-Key 'TASK_DRIFT'
   $taskState = Read-Key 'TASK_STATE'
+  $taskReadStatus = Read-Key 'TASK_READ_STATUS'
+  $taskOwnershipEvaluation = Read-Key 'TASK_OWNERSHIP_EVALUATION'
+  $taskRunnerHashStatus = Read-Key 'TASK_RUNNER_HASH_STATUS'
+  $taskActionOwnershipStatus = Read-Key 'TASK_ACTION_OWNERSHIP_STATUS'
+  $taskDriftEvaluationStatus = Read-Key 'TASK_DRIFT_EVALUATION_STATUS'
+  $taskPrincipalEvaluationStatus = Read-Key 'TASK_PRINCIPAL_EVALUATION_STATUS'
+  $taskOwnershipErrorStage = Read-Key 'TASK_OWNERSHIP_ERROR_STAGE'
+  $taskOwnershipErrorType = Read-Key 'TASK_OWNERSHIP_ERROR_TYPE'
 
   if ([string]::IsNullOrWhiteSpace($classification)) {
     throw 'Canonical preflight classification is unavailable.'
@@ -118,6 +126,14 @@ try {
   Write-Host "FINAL_STRATEGY_TASK_OWNERSHIP=$taskOwnership"
   Write-Host "FINAL_STRATEGY_TASK_DRIFT=$taskDrift"
   Write-Host "FINAL_STRATEGY_TASK_STATE=$taskState"
+  Write-Host "FINAL_STRATEGY_TASK_READ_STATUS=$taskReadStatus"
+  Write-Host "FINAL_STRATEGY_TASK_OWNERSHIP_EVALUATION=$taskOwnershipEvaluation"
+  Write-Host "FINAL_STRATEGY_TASK_RUNNER_HASH_STATUS=$taskRunnerHashStatus"
+  Write-Host "FINAL_STRATEGY_TASK_ACTION_OWNERSHIP_STATUS=$taskActionOwnershipStatus"
+  Write-Host "FINAL_STRATEGY_TASK_DRIFT_EVALUATION_STATUS=$taskDriftEvaluationStatus"
+  Write-Host "FINAL_STRATEGY_TASK_PRINCIPAL_EVALUATION_STATUS=$taskPrincipalEvaluationStatus"
+  Write-Host "FINAL_STRATEGY_TASK_OWNERSHIP_ERROR_STAGE=$taskOwnershipErrorStage"
+  Write-Host "FINAL_STRATEGY_TASK_OWNERSHIP_ERROR_TYPE=$taskOwnershipErrorType"
   Write-Host "FINAL_STRATEGY_TASK_READY=$($taskReady.ToString().ToUpperInvariant())"
   Write-Host "FINAL_STRATEGY_TARGET_EXACT=$($targetExact.ToString().ToUpperInvariant())"
   Write-Host "FINAL_STRATEGY_DEPLOYMENT_READY_WITHOUT_ARM_MUTATION=$($readyWithoutArmMutation.ToString().ToUpperInvariant())"
