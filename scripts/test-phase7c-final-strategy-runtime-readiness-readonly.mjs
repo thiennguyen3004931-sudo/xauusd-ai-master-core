@@ -31,6 +31,11 @@ for (const required of [
   "FINAL_STRATEGY_TASK_OWNERSHIP",
   "FINAL_STRATEGY_TASK_DRIFT",
   "FINAL_STRATEGY_TASK_READY",
+  "FINAL_STRATEGY_TASK_PROBE_PROVIDER",
+  "FINAL_STRATEGY_TASK_PROBE_RUNNER_HASH",
+  "FINAL_STRATEGY_TASK_PROBE_OWNERSHIP_REASON",
+  "FINAL_STRATEGY_TASK_PROBE_DRIFT",
+  "FINAL_STRATEGY_TASK_PROBE_PRINCIPAL_CANONICAL",
   "FINAL_STRATEGY_RAW_ACCOUNT_IDENTITY_PRINTED=FALSE",
 ]) {
   assert.ok(combined.includes(required), `missing runtime-readiness safety contract: ${required}`);
@@ -76,5 +81,8 @@ assert.match(wrapper, /\$runtimeOverall -eq 'EXACT_MATCH'/);
 assert.match(wrapper, /\$classification -eq 'NO_RECOVERY_REQUIRED'/);
 assert.match(wrapper, /\$taskOwnership -eq 'CANONICAL_SYSTEM'/);
 assert.match(wrapper, /\$taskDrift -eq 'NONE'/);
+assert.match(wrapper, /Get-ScheduledTask -TaskName 'XAUUSD-Phase7C-Executors'/);
+assert.match(wrapper, /Test-Phase7CExecutorTaskActionOwnership/);
+assert.match(wrapper, /Get-Phase7CExecutorTaskDrift/);
 
 console.log("PHASE7C_FINAL_STRATEGY_RUNTIME_READINESS_READONLY_CONTRACT=PASS");
