@@ -80,6 +80,9 @@ try {
   $runtimeOverall = Read-Key 'RUNTIME_SOURCE_OVERALL'
   $classification = Read-Key 'PREFLIGHT_CLASSIFICATION'
   $blockedBy = Read-Key 'BLOCKED_BY'
+  $taskOwnership = Read-Key 'TASK_OWNERSHIP'
+  $taskDrift = Read-Key 'TASK_DRIFT'
+  $taskState = Read-Key 'TASK_STATE'
 
   if ([string]::IsNullOrWhiteSpace($classification)) {
     throw 'Canonical preflight classification is unavailable.'
@@ -92,9 +95,11 @@ try {
     $runtimeOverall -eq 'EXACT_MATCH'
   )
   $flat = $positions -eq '0' -and $pending -eq '0'
+  $taskReady = $taskOwnership -eq 'CANONICAL_SYSTEM' -and $taskDrift -eq 'NONE'
   $readyWithoutArmMutation = (
     $targetExact -and
     $flat -and
+    $taskReady -and
     $botMode -eq 'PAUSE' -and
     $arm -eq 'DISARMED' -and
     $classification -eq 'NO_RECOVERY_REQUIRED'
@@ -110,6 +115,10 @@ try {
   Write-Host "FINAL_STRATEGY_XAUUSD_PENDING_ORDERS=$pending"
   Write-Host "FINAL_STRATEGY_PREFLIGHT_CLASSIFICATION=$classification"
   Write-Host "FINAL_STRATEGY_BLOCKED_BY=$blockedBy"
+  Write-Host "FINAL_STRATEGY_TASK_OWNERSHIP=$taskOwnership"
+  Write-Host "FINAL_STRATEGY_TASK_DRIFT=$taskDrift"
+  Write-Host "FINAL_STRATEGY_TASK_STATE=$taskState"
+  Write-Host "FINAL_STRATEGY_TASK_READY=$($taskReady.ToString().ToUpperInvariant())"
   Write-Host "FINAL_STRATEGY_TARGET_EXACT=$($targetExact.ToString().ToUpperInvariant())"
   Write-Host "FINAL_STRATEGY_DEPLOYMENT_READY_WITHOUT_ARM_MUTATION=$($readyWithoutArmMutation.ToString().ToUpperInvariant())"
   Write-Host 'FINAL_STRATEGY_RAW_ACCOUNT_IDENTITY_PRINTED=FALSE'
