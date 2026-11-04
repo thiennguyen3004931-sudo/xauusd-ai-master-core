@@ -285,7 +285,7 @@ try {
 
 # LastTaskResult is operational telemetry only. Some ScheduledTasks providers/runners
 # omit this property under StrictMode. Missing telemetry must never downgrade an
-# otherwise provably canonical task to TASK_READ_FAILED.
+# otherwise provably canonical task to a generic task-read failure.
 if ($taskReadStatus -eq 'READABLE') {
     try {
         $taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction Stop
