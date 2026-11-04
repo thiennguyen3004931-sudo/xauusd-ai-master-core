@@ -64,12 +64,36 @@ $requiredEvidence = @(
     'LIVE_AUTHORIZATION_VALID=',
     'TASK_OWNERSHIP=',
     'TASK_DRIFT=',
+    'TASK_READ_STATUS=',
+    'TASK_OWNERSHIP_EVALUATION=',
     'RUNTIME_SOURCE_OVERALL=',
     'RECOVERY_MUTATION_ALLOWED=',
     'BLOCKED_BY='
 )
 foreach ($marker in $requiredEvidence) {
     if (-not $source.Contains($marker)) { throw "Missing production preflight evidence output: $marker" }
+}
+
+# ScheduledTask LastTaskResult is optional telemetry. Under StrictMode its absence
+# must not collapse a readable/canonical task into a generic ownership failure.
+foreach ($taskSafetyMarker in @(
+    "PSObject.Properties['LastTaskResult']",
+    "TASK_PROVIDER_READ_FAILED",
+    "TASK_OWNERSHIP_EVALUATION_FAILED",
+    "TASK_READ_STATUS=",
+    "TASK_OWNERSHIP_EVALUATION="
+)) {
+    if (-not $source.Contains($taskSafetyMarker)) {
+        throw "Missing fail-closed task ownership/optional telemetry separation: $taskSafetyMarker"
+    }
+}
+if ($source.Contains("TASK_READ_FAILED")) {
+    throw 'Generic TASK_READ_FAILED must not hide whether provider read or ownership evaluation failed.'
+}
+$lastTaskResultIndex = $source.IndexOf("PSObject.Properties['LastTaskResult']", [System.StringComparison]::Ordinal)
+$ownershipEvalIndex = $source.IndexOf('Test-Phase7CExecutorTaskActionOwnership', [System.StringComparison]::Ordinal)
+if ($lastTaskResultIndex -lt 0 -or $ownershipEvalIndex -lt 0 -or $lastTaskResultIndex -ge $ownershipEvalIndex) {
+    throw 'Optional LastTaskResult telemetry guard must be isolated before canonical ownership evaluation.'
 }
 
 $requiredEndpoints = @(
