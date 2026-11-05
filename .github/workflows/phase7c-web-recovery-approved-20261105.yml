@@ -1,0 +1,41 @@
+name: Phase7C Approved PAUSE and Web Recovery 20261105
+
+# Authorized by the user's approval of SEMI -> PAUSE, Web/API recovery, stay PAUSE.
+on:
+  push:
+    branches: [ops/web-recovery-approved-20261105]
+    paths:
+      - '.github/workflows/phase7c-web-recovery-approved-20261105.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase7c-approved-web-recovery-20261105
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test mode approval, provenance, idempotence and pause barrier
+        shell: powershell
+        run: node --experimental-strip-types --test scripts/ops/set-phase7c-pause-for-web-recovery.test.mjs
+      - name: Validate existing recovery and GET-only contracts
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-phase7c-manual-web-task-recovery-source.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'CANONICAL_RECOVERY_CONTRACT_FAILED' }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-phase7c-one-shot-web-evidence-readonly-source.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'CANONICAL_READONLY_CONTRACT_FAILED' }
+      - name: User-approved PAUSE and canonical Web task recovery
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ops/recover-phase7c-web-user-approved-20261105.ps1 -OperatorConfirmation 'USER_APPROVED_SEMI_TO_PAUSE_WEB_RECOVERY_20261105'
