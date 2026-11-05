@@ -53,6 +53,46 @@ try {
   if ($logonType -notin @('None','Password','S4U','Interactive','Group','ServiceAccount','InteractiveOrPassword','InteractiveToken')) { $logonType = 'UNKNOWN' }
   Write-Host "WEB_STARTUP_TASK_LOGON_TYPE=$logonType"
   try {
+    $principalId = [string]$task.Principal.UserId
+    $principalSid = if ($principalId -match '^S-\d-(?:\d+-)+\d+$') { ([Security.Principal.SecurityIdentifier]::new($principalId)).Value } else { ([Security.Principal.NTAccount]::new($principalId)).Translate([Security.Principal.SecurityIdentifier]).Value }
+    $runnerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    Flag 'TASK_PRINCIPAL_MATCHES_RUNNER_USER' ($principalSid -eq $runnerSid)
+    $sessions = @(Get-CimInstance Win32_LogonSession -Filter 'LogonType=2 OR LogonType=10 OR LogonType=11' -ErrorAction Stop)
+    $matchingSessions = 0
+    foreach ($session in $sessions) {
+      $accounts = @(Get-CimAssociatedInstance -InputObject $session -Association Win32_LoggedOnUser -ResultClassName Win32_Account -ErrorAction Stop)
+      if (@($accounts | Where-Object { [string]$_.SID -eq $principalSid }).Count -gt 0) { $matchingSessions++ }
+    }
+    Flag 'TASK_PRINCIPAL_INTERACTIVE_LOGON_PRESENT' ($matchingSessions -gt 0)
+    $matchingShells = 0
+    foreach ($shell in @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction Stop)) {
+      $owner = Invoke-CimMethod -InputObject $shell -MethodName GetOwnerSid -ErrorAction Stop
+      if ([int]$owner.ReturnValue -eq 0 -and [string]$owner.Sid -eq $principalSid) { $matchingShells++ }
+    }
+    Flag 'TASK_PRINCIPAL_DESKTOP_SHELL_PRESENT' ($matchingShells -gt 0)
+    Flag 'RUNNER_PROCESS_INTERACTIVE_SESSION' ([Diagnostics.Process]::GetCurrentProcess().SessionId -gt 0)
+    $principalId=$null; $principalSid=$null; $runnerSid=$null; $accounts=$null; $sessions=$null; $owner=$null
+  } catch { Flag 'TASK_PRINCIPAL_SESSION_OBSERVATION_AVAILABLE' $false }
+  try {
+    $scheduler = New-Object -ComObject 'Schedule.Service'
+    [void]$scheduler.Connect()
+    $registeredTask = $scheduler.GetFolder('\').GetTask('XAUUSD-Phase7B-Web')
+    Write-Host ('WEB_STARTUP_SCHEDULER_RUNNING_INSTANCE_COUNT=' + [int]($registeredTask.GetInstances(0).Count))
+    $schedulerLog = Get-WinEvent -ListLog 'Microsoft-Windows-TaskScheduler/Operational' -ErrorAction Stop
+    Flag 'TASK_SCHEDULER_OPERATIONAL_LOG_ENABLED' ([bool]$schedulerLog.IsEnabled)
+  } catch { Flag 'TASK_COM_OR_LOG_METADATA_OBSERVATION_AVAILABLE' $false }
+  try {
+    . (Join-Path $root 'scripts\lib\phase7c-account-mode.ps1')
+    $webInfo = Assert-Phase7CAccountEnv -EnvFile $envArg -AccountMode 'LIVE'
+    Flag 'WEB_ENV_VALID_FOR_LIVE_CONTEXT' $true
+    $executorInfo = Assert-Phase7CAccountEnv -EnvFile $executorEnv -AccountMode 'LIVE' -RequireTrading
+    Flag 'WEB_AND_EXECUTOR_BROKER_HOST_MATCH' ([string]$webInfo.bridgeHost -ieq [string]$executorInfo.bridgeHost)
+    Flag 'WEB_AND_EXECUTOR_BROKER_PORT_MATCH' ([int]$webInfo.bridgePort -eq [int]$executorInfo.bridgePort)
+    Flag 'WEB_AND_EXECUTOR_API_KEY_MATCH' ([string]$webInfo.apiKey -ceq [string]$executorInfo.apiKey)
+    $webInfo=$null; $executorInfo=$null
+  } catch { Flag 'WEB_ENV_LIVE_COMPARISON_AVAILABLE' $false }
+
+  try {
     $batteries = @(Get-CimInstance -Namespace 'root\wmi' -ClassName BatteryStatus -ErrorAction Stop)
     Flag 'BATTERY_POWER_STATUS_AVAILABLE' ($batteries.Count -gt 0)
     if ($batteries.Count -gt 0) { Flag 'BATTERY_POWER_ONLINE' (@($batteries | Where-Object { -not [bool]$_.PowerOnline }).Count -eq 0) }
