@@ -49,7 +49,7 @@ function New-Phase7CWebTaskRepairPlan {
     [string]$ExpectedPowerShell
   )
   if ($CurrentUserSid -notmatch '^S-\d-(?:\d+-)+\d+$' -or $CurrentUserSid -in @('S-1-5-18','S-1-5-19','S-1-5-20')) { throw 'WEB_REPAIR_INTERACTIVE_USER_REQUIRED' }
-  if (-not [IO.Path]::IsPathRooted($LiveEnvPath) -or $LiveEnvPath -match '["\r\n]') { throw 'WEB_REPAIR_LIVE_ENV_PATH_INVALID' }
+  if ($LiveEnvPath -match '["\r\n]' -or -not [IO.Path]::IsPathRooted($LiveEnvPath)) { throw 'WEB_REPAIR_LIVE_ENV_PATH_INVALID' }
   $doc = Read-Phase7CWebTaskXml $TaskXml
   $ns = Get-Phase7CWebTaskNamespaces $doc
   if ($doc.SelectNodes('/t:Task/t:Principals/t:Principal',$ns).Count -ne 1 -or $doc.SelectNodes('/t:Task/t:Actions/*',$ns).Count -ne 1 -or $doc.SelectNodes('/t:Task/t:Actions/t:Exec',$ns).Count -ne 1) { throw 'WEB_REPAIR_TASK_SHAPE_INVALID' }
