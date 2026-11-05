@@ -217,3 +217,39 @@ try {
 }
 Write-Host 'WEB_STARTUP_TASK_MODE_ARM_ORDER_MUTATION=NONE'
 Write-Host 'WEB_STARTUP_HTTP_METHODS=GET_ONLY'
+
+# Inspect authoritative XML and COM principal without printing identity or task XML.
+try {
+  $currentSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  $xml=New-Object System.Xml.XmlDocument
+  $xml.XmlResolver=$null
+  $xml.LoadXml((Export-ScheduledTask -TaskName 'XAUUSD-Phase7B-Web' -TaskPath '\'))
+  $ns=[System.Xml.XmlNamespaceManager]::new($xml.NameTable)
+  $ns.AddNamespace('t','http://schemas.microsoft.com/windows/2004/02/mit/task')
+  $xmlUser=[string]$xml.SelectSingleNode('/t:Task/t:Principals/t:Principal/t:UserId',$ns).InnerText
+  Flag 'XML_PRINCIPAL_IS_SID' ($xmlUser -match '^S-\d-(?:\d+-)+\d+$')
+  Flag 'XML_PRINCIPAL_MATCHES_CURRENT_SID' ($xmlUser -eq $currentSid)
+  $svc=New-Object -ComObject 'Schedule.Service'
+  [void]$svc.Connect()
+  $folder=$svc.GetFolder('\')
+  $registered=$folder.GetTask('XAUUSD-Phase7B-Web')
+  $definition=$registered.Definition
+  $comUser=[string]$definition.Principal.UserId
+  Flag 'COM_PRINCIPAL_IS_SID' ($comUser -match '^S-\d-(?:\d+-)+\d+$')
+  Flag 'COM_PRINCIPAL_MATCHES_CURRENT_SID' ($comUser -eq $currentSid)
+  $descriptor=[string]$registered.GetSecurityDescriptor(7)
+  Flag 'TASK_SECURITY_DESCRIPTOR_AVAILABLE' (-not [string]::IsNullOrWhiteSpace($descriptor))
+  $backups=@(Get-ChildItem -LiteralPath (Join-Path $runtime 'phase7b-web-recovery-backups') -Filter '*.xml' -File)
+  Write-Host ('WEB_STARTUP_REPAIR_BACKUP_COUNT='+$backups.Count)
+  if ($backups.Count -eq 1) {
+    . (Join-Path $PSScriptRoot 'phase7c-web-task-repair-plan.ps1')
+    $before=Get-Content -LiteralPath $backups[0].FullName -Raw
+    $savedAcl=Get-Content -LiteralPath ([IO.Path]::ChangeExtension($backups[0].FullName,'.sddl')) -Raw
+    Flag 'REPAIR_OTHER_XML_FIELDS_UNCHANGED' (Test-Phase7CWebTaskOnlyApprovedFields $before $xml.OuterXml)
+    Flag 'REPAIR_ACCESS_DESCRIPTOR_UNCHANGED' ($savedAcl -ceq $descriptor)
+  }
+} catch {
+  DiagnosticError 'XML_COM_PRINCIPAL' $_
+  Write-Host ('WEB_STARTUP_XML_COM_ERROR_TYPE='+$_.Exception.GetType().FullName)
+  Write-Host ('WEB_STARTUP_XML_COM_ERROR_LINE='+$_.InvocationInfo.ScriptLineNumber)
+}

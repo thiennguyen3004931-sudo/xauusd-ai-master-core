@@ -45,9 +45,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'MODE_RECOVERY_CONTRACT_FAILED' }
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-phase7c-manual-web-task-recovery-source.ps1
           if ($LASTEXITCODE -ne 0) { throw 'CANONICAL_RECOVERY_CONTRACT_FAILED' }
-      - name: Read-only production plan for the two observed Web task faults
+      - name: Observe exported XML identity and preserved task security, read only
         shell: powershell
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ops/repair-phase7c-web-task-approved-restore-20261105.ps1
-      - name: Restore only Web task identity reference and LIVE profile, then guarded start
-        shell: powershell
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ops/repair-phase7c-web-task-approved-restore-20261105.ps1 -Apply -OperatorConfirmation 'CONFIRM_WEB_TASK_RESTORE_ONLY_PAUSE_DISARMED'
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ops/observe-phase7c-web-startup-readonly-20261105.ps1
