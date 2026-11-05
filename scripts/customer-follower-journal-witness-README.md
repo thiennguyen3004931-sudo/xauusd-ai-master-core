@@ -33,6 +33,14 @@ Tests use the existing `FileAuthorityFixture` in a dedicated temporary directory
 
 The production adapter must authenticate checkpoint reads and writes, serialize changes per binding, retain monotonic state outside customer and operator restore media, and preserve the root and key epoch through recovery. A local directory and a caller-supplied confirmation model behavior for review. They provide no authority isolation, broker evidence or operational durability attestation.
 
+## Abrupt process exit evidence
+
+Two Linux tests create disposable SQLite and checkpoint files, then start a separate Node worker. The worker commits a new WAL reservation and terminates itself with SIGKILL, either before or after the synthetic checkpoint transaction completes. It skips graceful SQLite close and application cleanup.
+
+After the journal-only cut point, a new reader observes the committed reservation while the checkpoint retains its prior revision. The comparator returns `LOCAL_JOURNAL_AHEAD_OF_WITNESS`. After the checkpoint cut point, reopening both stores observes revision 1 and a matching digest, but the command remains RESERVED and returns `UNRESOLVED_RESERVATIONS`. A retry from revision 0 is rejected as a CAS conflict.
+
+These two completed-commit cut points exercise local process-crash recovery on Linux. Windows recovery, machine power loss, failure during checkpoint file replacement and authenticated broker reconciliation require separate acceptance evidence. The test worker opens only paths created by the disposable fixtures.
+
 ## Security limitations — NOT satisfied by this PR
 
 - There is **no independent monotonic authority service**, trusted remote read, KMS/HSM/TPM trust root, transport, operational checkpoint store, or key-rotation process. The unit tests explicitly demonstrate that rolling back the checkpoint **together** with the journal and proof is undetectable by a pure comparison.

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, sign as signEd25519 } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -460,3 +461,85 @@ test('a lost commit response stays blocked and a stale retry cannot commit again
     localJournal: local, witnessProof: proof(local, { checkpointRevision: 1 }), trustedCheckpoint: latest,
   }), 'UNRESOLVED_RESERVATIONS');
 });
+
+const crashWorker = `
+  import { DatabaseSync } from 'node:sqlite';
+  const [path, phase, directory, bindingKey, coordinatorUrl, fixtureUrl] = process.argv.slice(1);
+  const db = new DatabaseSync(path);
+  db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA wal_autocheckpoint = 0;');
+  const binding = JSON.parse(db.prepare('SELECT payload FROM follower_binding WHERE id = 1').get().payload);
+  const journal = () => ({
+    binding,
+    records: db.prepare('SELECT command_id AS commandId, sequence, state FROM follower_command_journal').all(),
+  });
+  const journalBefore = journal();
+  db.exec("INSERT INTO follower_command_journal VALUES ('synthetic-crash-reservation', 2, 'RESERVED')");
+  if (phase === 'checkpoint') {
+    const { advanceSyntheticFollowerCheckpoint } = await import(coordinatorUrl);
+    const { FileAuthorityFixture } = await import(fixtureUrl);
+    const result = await advanceSyntheticFollowerCheckpoint({
+      adapter: new FileAuthorityFixture(directory), bindingKey, expectedRevision: 0,
+      journalBefore, journalAfter: journal(),
+    });
+    if (!result.ok || result.brokerExecutionAllowed !== false) throw new Error('checkpoint transition failed');
+  }
+  // Kill only this disposable worker. No graceful SQLite close or finally runs.
+  process.kill(process.pid, 'SIGKILL');
+  throw new Error('worker did not terminate at the requested cut point');
+`;
+
+for (const phase of ['journal', 'checkpoint']) {
+  test('Linux process crash after ' + phase + ' commit preserves recovery quarantine',
+    { skip: process.platform !== 'linux' }, async t => {
+      const { path, writer } = createSqliteJournalFixture(t);
+      let journalBefore;
+      try {
+        writer.exec("UPDATE follower_command_journal SET state = 'DISPATCHED' WHERE sequence = 1");
+        journalBefore = {
+          binding: readSqliteBinding(writer),
+          records: writer.prepare('SELECT command_id AS commandId, sequence, state FROM follower_command_journal').all(),
+        };
+      } finally {
+        writer.close();
+      }
+      const store = checkpointFixture(t, journalBefore);
+      const originalCheckpoint = store.read();
+      const worker = spawnSync(process.execPath, [
+        '--input-type=module', '-e', crashWorker, path, phase, store.adapter.directory, store.bindingKey,
+        new URL('./customer-follower-journal-checkpoint-cas.mjs', import.meta.url).href,
+        new URL('./customer-restore-authority-file-fixture.mjs', import.meta.url).href,
+      ], { encoding: 'utf8', timeout: 15_000 });
+      assert.ifError(worker.error);
+      assert.equal(worker.signal, 'SIGKILL', worker.stderr);
+
+      const recovered = new DatabaseSync(path, { readOnly: true });
+      try {
+        const local = readSqliteSnapshot(recovered);
+        assert.equal(local.maxSequence, 2);
+        assert.equal(local.pendingReservedCount, 1);
+        const checkpointAfterRestart = store.read();
+        if (phase === 'journal') {
+          assert.deepEqual(checkpointAfterRestart, originalCheckpoint);
+          const previous = createFollowerCanonicalJournalSnapshot(journalBefore);
+          denied(evaluate({
+            localJournal: local, witnessProof: proof(previous, { checkpointRevision: 0 }),
+            trustedCheckpoint: checkpointAfterRestart,
+          }), 'LOCAL_JOURNAL_AHEAD_OF_WITNESS');
+        } else {
+          assert.equal(checkpointAfterRestart.checkpointRevision, 1);
+          assert.equal(checkpointAfterRestart.journalDigestSha256, local.journalDigestSha256);
+          denied(evaluate({
+            localJournal: local, witnessProof: proof(local, { checkpointRevision: 1 }),
+            trustedCheckpoint: checkpointAfterRestart,
+          }), 'UNRESOLVED_RESERVATIONS');
+          const records = recovered.prepare(
+            'SELECT command_id AS commandId, sequence, state FROM follower_command_journal',
+          ).all();
+          casDenied(await store.advance(journalBefore, { binding, records }, 0),
+            'FOLLOWER_CHECKPOINT_CAS_CONFLICT');
+        }
+      } finally {
+        recovered.close();
+      }
+    });
+}
