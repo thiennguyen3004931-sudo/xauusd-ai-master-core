@@ -45,6 +45,38 @@ try {
     Flag 'BRIDGE_API_KEY_MEETS_LAUNCHER_LENGTH' ($keyValue.Length -ge 16)
     $keyValue = $null; $envText = $null; $key = $null
   }
+  foreach ($settingName in @('AllowDemandStart','DisallowStartIfOnBatteries','StopIfGoingOnBatteries','RunOnlyIfIdle','RunOnlyIfNetworkAvailable','StartWhenAvailable','Enabled')) {
+    try { Flag ('TASK_SETTING_' + $settingName.ToUpperInvariant()) ([bool]$task.Settings.$settingName) }
+    catch { Flag ('TASK_SETTING_' + $settingName.ToUpperInvariant() + '_OBSERVATION_AVAILABLE') $false }
+  }
+  $logonType = [string]$task.Principal.LogonType
+  if ($logonType -notin @('None','Password','S4U','Interactive','Group','ServiceAccount','InteractiveOrPassword','InteractiveToken')) { $logonType = 'UNKNOWN' }
+  Write-Host "WEB_STARTUP_TASK_LOGON_TYPE=$logonType"
+  try {
+    $batteries = @(Get-CimInstance -Namespace 'root\wmi' -ClassName BatteryStatus -ErrorAction Stop)
+    Flag 'BATTERY_POWER_STATUS_AVAILABLE' ($batteries.Count -gt 0)
+    if ($batteries.Count -gt 0) { Flag 'BATTERY_POWER_ONLINE' (@($batteries | Where-Object { -not [bool]$_.PowerOnline }).Count -eq 0) }
+  } catch { Flag 'BATTERY_POWER_STATUS_AVAILABLE' $false }
+  try {
+    $taskEvents = @(Get-WinEvent -FilterHashtable @{ LogName='Microsoft-Windows-TaskScheduler/Operational'; StartTime=$taskInfo.LastRunTime.AddMinutes(-1) } -MaxEvents 100 -ErrorAction SilentlyContinue | Where-Object {
+      $xml = [xml]$_.ToXml()
+      @($xml.Event.EventData.Data | Where-Object { [string]$_.Name -eq 'TaskName' -and [string]$_.InnerText -in @('XAUUSD-Phase7B-Web','\XAUUSD-Phase7B-Web') }).Count -gt 0
+    })
+    Flag 'TASK_SCHEDULER_EVENTS_PRESENT' ($taskEvents.Count -gt 0)
+    Write-Host ('WEB_STARTUP_TASK_SCHEDULER_EVENT_IDS=' + (@($taskEvents | ForEach-Object { [int]$_.Id } | Sort-Object -Unique) -join ','))
+    $eventText = ($taskEvents | ForEach-Object { [string]$_.Message }) -join "`n"
+    foreach ($category in ([ordered]@{
+      REQUEST_REFUSED='0x800710e0|2147946720|operator or administrator has refused'
+      BATTERY='batter|AC power'
+      IDLE='idle'
+      LOGON='not logged|logon failure|logon type|no logged'
+      NETWORK='network'
+      DEMAND_START='on demand|demand start'
+      INSTANCE='already running|existing instance'
+      CREDENTIAL='credential|password|logon failure'
+    }).GetEnumerator()) { Flag ('TASK_SCHEDULER_CATEGORY_' + $category.Key) ([bool]($eventText -match $category.Value)) }
+    $eventText=$null; $taskEvents=$null
+  } catch { Flag 'TASK_SCHEDULER_EVENT_OBSERVATION_AVAILABLE' $false }
   $accountPath = Join-Path $runtime 'phase7c-account-mode.json'
   Flag 'ACCOUNT_STATE_EXISTS' (Test-Path -LiteralPath $accountPath -PathType Leaf)
   try {
