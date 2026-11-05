@@ -97,6 +97,14 @@ test('invalid binding or untrusted caller-supplied digest and count rejected', (
     'FOLLOWER_SNAPSHOT_INPUT_INVALID');
 });
 
+test('sparse allowed-symbol arrays are rejected before computing a journal digest', () => {
+  const trailingHole = ['XAUUSD'];
+  trailingHole.length = 2;
+  for (const allowedSymbols of [new Array(1), trailingHole]) {
+    rejects(() => make(rows, { ...binding, allowedSymbols }), 'FOLLOWER_SNAPSHOT_BINDING_INVALID');
+  }
+});
+
 test('synthetic snapshot cannot be mistaken for independent checkpoint authorization', () => {
   const original = make();
   const rolledBack = make([rows[0]]);

@@ -33,7 +33,7 @@ function validBinding(binding) {
       !canonical(binding.brokerServer) || !Number.isSafeInteger(binding.mt5Login) ||
       binding.mt5Login <= 0 || !Array.isArray(binding.allowedSymbols) ||
       binding.allowedSymbols.length < 1 ||
-      binding.allowedSymbols.some(symbol => !canonical(symbol))) return false;
+      Array.from(binding.allowedSymbols).some(symbol => !canonical(symbol))) return false;
   const uniqueSorted = [...new Set(binding.allowedSymbols)].sort();
   return uniqueSorted.length === binding.allowedSymbols.length &&
     uniqueSorted.every((symbol, index) => symbol === binding.allowedSymbols[index]);

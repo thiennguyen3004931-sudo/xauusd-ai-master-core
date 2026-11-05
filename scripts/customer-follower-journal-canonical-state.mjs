@@ -33,7 +33,7 @@ function normalizeBinding(binding) {
       !positiveSequence(binding.mt5Login) ||
       !Array.isArray(binding.allowedSymbols) ||
       binding.allowedSymbols.length < 1 || binding.allowedSymbols.length > 100 ||
-      binding.allowedSymbols.some(symbol => !canonicalText(symbol))) {
+      Array.from(binding.allowedSymbols).some(symbol => !canonicalText(symbol))) {
     throw new TypeError('FOLLOWER_SNAPSHOT_BINDING_INVALID');
   }
   const symbols = [...binding.allowedSymbols];

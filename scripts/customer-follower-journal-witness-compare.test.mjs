@@ -90,6 +90,31 @@ test('wrong customer/account/broker binding cannot reuse signed head',()=>{
   denied(evaluate({localJournal:{...localJournal,binding:{...binding,mt5Login:770002}}}),
     'FOLLOWER_BINDING_MISMATCH');
 });
+
+test('sparse symbol scopes are rejected for local, signed and checkpoint evidence', async () => {
+  const trailingHole = ['XAUUSD'];
+  trailingHole.length = 2;
+  for (const allowedSymbols of [new Array(1), trailingHole]) {
+    const malformed = { ...localJournal, binding: { ...binding, allowedSymbols } };
+    denied(evaluate({
+      localJournal: malformed, witnessProof: proof(malformed), trustedCheckpoint: checkpoint(malformed),
+    }), 'LOCAL_JOURNAL_INVALID');
+    denied(evaluate({ witnessProof: proof(malformed) }), 'WITNESS_PROOF_REQUIRED');
+    denied(evaluate({ trustedCheckpoint: checkpoint(malformed) }), 'INDEPENDENT_CHECKPOINT_REQUIRED');
+    let transactionAttempted = false;
+    const result = await advanceSyntheticFollowerCheckpoint({
+      adapter: { transact() { transactionAttempted = true; throw new Error('unexpected transaction'); } },
+      bindingKey: 'synthetic-sparse-scope', expectedRevision: 0,
+      journalBefore: { binding: malformed.binding, records: [] },
+      journalAfter: { binding: malformed.binding, records: [{ commandId: 'synthetic-new', sequence: 1, state: 'RESERVED' }] },
+    });
+    assert.equal(result.reasonCode, 'FOLLOWER_CHECKPOINT_JOURNAL_INVALID');
+    assert.equal(result.ok, false);
+    assert.equal(result.brokerExecutionAllowed, false);
+    assert.equal(transactionAttempted, false);
+  }
+});
+
 test('tampered signature, wrong key pin and cross-purpose signature are rejected',()=>{
   const valid=proof();
   const bad={...valid,signatureBase64:valid.signatureBase64.slice(0,-2)+'AA'};
