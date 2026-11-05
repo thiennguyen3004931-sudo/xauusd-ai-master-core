@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'scripts/customer-follower-journal-witness-compare.mjs'
+      - 'scripts/customer-follower-journal-canonical-state.mjs'
+      - 'scripts/customer-follower-journal-canonical-state.test.mjs'
       - 'scripts/customer-follower-journal-witness-compare.test.mjs'
       - 'scripts/customer-follower-journal-witness-README.md'
       - '.github/workflows/customer-follower-journal-witness-proof-ci.yml'
@@ -27,10 +29,12 @@ jobs:
         run: |
           set -euo pipefail
           node --test scripts/customer-follower-journal-witness-compare.test.mjs
+          node --test scripts/customer-follower-journal-canonical-state.test.mjs
       - name: Safety declaration
         shell: bash
         run: |
           echo 'SYNTHETIC_PROOF_ONLY=true'
+          echo 'JOURNAL_SNAPSHOT_SYNTHETIC_ONLY=true'
           echo 'BROKER_EXECUTION_ALLOWED=false'
           echo 'WITNESS_BACKEND_IMPLEMENTED=false'
           echo 'CUSTOMER_RELEASE_AUTHORIZED=false'
