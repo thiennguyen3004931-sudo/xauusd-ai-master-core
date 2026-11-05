@@ -11,9 +11,9 @@
  */
 import { createHash, createPublicKey, verify as verifySignature } from 'node:crypto';
 
-const DOMAIN = 'XAUUSD-FOLLOWER-JOURNAL-WITNESS-V1\n';
+const DOMAIN = 'XAUUSD-FOLLOWER-JOURNAL-WITNESS-V2\n';
 const exact = (obj, fields) => obj !== null && typeof obj === 'object' && !Array.isArray(obj) &&
-  Object.keys(obj).sort().join('|') === [...fields].sort().join('|');
+  Object.keys(obj).length === fields.length && fields.every(field => Object.hasOwn(obj, field));
 const canonical = v => typeof v === 'string' && v.length > 0 && v.trim() === v;
 const safeCounter = v => Number.isSafeInteger(v) && v >= 0;
 const hash = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
@@ -21,10 +21,10 @@ const blocked = reasonCode => Object.freeze({ evidenceMatched: false, brokerExec
 const BINDING_FIELDS = ['licenseId', 'installationId', 'mt5Login', 'brokerServer', 'allowedSymbols'];
 const SNAPSHOT_FIELDS = ['binding', 'maxSequence', 'journalDigestSha256', 'pendingReservedCount'];
 const STATEMENT_FIELDS = [
-  'schemaVersion', 'authorityKeyId', 'keyEpoch', 'requestNonce', 'issuedAt', 'expiresAt',
+  'schemaVersion', 'authorityKeyId', 'keyEpoch', 'checkpointRevision', 'requestNonce', 'issuedAt', 'expiresAt',
   ...SNAPSHOT_FIELDS,
 ];
-const CHECKPOINT_FIELDS = [...SNAPSHOT_FIELDS, 'keyEpoch'];
+const CHECKPOINT_FIELDS = [...SNAPSHOT_FIELDS, 'keyEpoch', 'checkpointRevision'];
 const ROOT_FIELDS = ['keyId', 'keyEpoch', 'publicKeyPem', 'publicKeySha256'];
 
 function validBinding(binding) {
@@ -49,7 +49,7 @@ function sameBinding(a, b) {
 }
 function signedBytes(s) {
   return Buffer.from(DOMAIN + JSON.stringify([
-    s.schemaVersion, s.authorityKeyId, s.keyEpoch, s.requestNonce,
+    s.schemaVersion, s.authorityKeyId, s.keyEpoch, s.checkpointRevision, s.requestNonce,
     s.issuedAt, s.expiresAt, ...BINDING_FIELDS.map(field => s.binding[field]),
     s.maxSequence, s.journalDigestSha256, s.pendingReservedCount,
   ]), 'utf8');
@@ -77,13 +77,15 @@ export function compareFollowerJournalWithWitness({
     return blocked('PINNED_WITNESS_ROOT_REQUIRED');
   }
   if (!validSnapshot(trustedCheckpoint, CHECKPOINT_FIELDS) ||
+      !safeCounter(trustedCheckpoint.checkpointRevision) ||
       !Number.isSafeInteger(trustedCheckpoint.keyEpoch) || trustedCheckpoint.keyEpoch < 1) {
     return blocked('INDEPENDENT_CHECKPOINT_REQUIRED');
   }
   const s = witnessProof.statement;
-  if (s.schemaVersion !== 1 || s.authorityKeyId !== trustedWitnessRoot.keyId ||
+  if (s.schemaVersion !== 2 || s.authorityKeyId !== trustedWitnessRoot.keyId ||
       s.keyEpoch !== trustedWitnessRoot.keyEpoch ||
       s.keyEpoch < trustedCheckpoint.keyEpoch) return blocked('WITNESS_ROOT_OR_EPOCH_MISMATCH');
+  if (!safeCounter(s.checkpointRevision)) return blocked('WITNESS_CHECKPOINT_REVISION_INVALID');
   if (!canonical(expectedNonce) || expectedNonce.length < 16 || expectedNonce.length > 256 ||
       s.requestNonce !== expectedNonce) return blocked('WITNESS_NONCE_MISMATCH');
   if (!safeCounter(nowMs) || !safeCounter(s.issuedAt) || !safeCounter(s.expiresAt) ||
@@ -112,7 +114,9 @@ export function compareFollowerJournalWithWitness({
     return blocked('WITNESS_SIGNATURE_INVALID');
   }
   // A signed statement alone is replayable: it must agree with a separately
-  // authenticated latest checkpoint, including the digest (not only sequence).
+  // authenticated latest checkpoint, including revision and digest.
+  if (s.checkpointRevision < trustedCheckpoint.checkpointRevision) return blocked('WITNESS_CHECKPOINT_REVISION_ROLLBACK');
+  if (s.checkpointRevision > trustedCheckpoint.checkpointRevision) return blocked('CHECKPOINT_REVISION_BEHIND_WITNESS');
   if (s.maxSequence < trustedCheckpoint.maxSequence) return blocked('WITNESS_HIGH_WATER_ROLLBACK');
   if (s.maxSequence > trustedCheckpoint.maxSequence) return blocked('CHECKPOINT_BEHIND_WITNESS');
   if (s.journalDigestSha256 !== trustedCheckpoint.journalDigestSha256 ||

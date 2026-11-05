@@ -6,8 +6,10 @@ on:
       - 'scripts/customer-follower-journal-witness-compare.mjs'
       - 'scripts/customer-follower-journal-canonical-state.mjs'
       - 'scripts/customer-follower-journal-canonical-state.test.mjs'
+      - 'scripts/customer-follower-journal-checkpoint-cas.mjs'
       - 'scripts/customer-follower-journal-witness-compare.test.mjs'
       - 'scripts/customer-follower-journal-witness-README.md'
+      - 'scripts/customer-restore-authority-file-fixture.mjs'
       - '.github/workflows/customer-follower-journal-witness-proof-ci.yml'
   workflow_dispatch:
 
@@ -42,6 +44,7 @@ jobs:
         run: |
           echo 'SYNTHETIC_PROOF_ONLY=true'
           echo 'JOURNAL_SNAPSHOT_SYNTHETIC_ONLY=true'
+          echo 'CHECKPOINT_CAS_FIXTURE_ONLY=true'
           echo 'BROKER_EXECUTION_ALLOWED=false'
           echo 'WITNESS_BACKEND_IMPLEMENTED=false'
           echo 'CUSTOMER_RELEASE_AUTHORIZED=false'
