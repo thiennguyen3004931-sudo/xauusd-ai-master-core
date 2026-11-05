@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign as signEd25519 } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { backup, DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import {
   compareFollowerJournalWithWitness as compare,
@@ -225,4 +227,99 @@ test('real canonical rowset fork rejected by synthetic trusted checkpoint',()=>{
     localJournal:fork,witnessProof:proof(original),
     trustedCheckpoint:{...original,keyEpoch:root.keyEpoch},
   }),'LOCAL_JOURNAL_FORK');
+});
+
+function createSqliteJournalFixture(t) {
+  const directory = mkdtempSync(join(tmpdir(), 'xauusd-follower-witness-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, 'journal.sqlite');
+  const writer = new DatabaseSync(path);
+  // Match the draft journal tables in PR #163. This fixture has no path input
+  // from the environment and never opens an operator or customer database.
+  writer.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = FULL;
+    PRAGMA wal_autocheckpoint = 0;
+    CREATE TABLE follower_binding (id INTEGER PRIMARY KEY CHECK(id = 1), payload TEXT NOT NULL);
+    CREATE TABLE follower_command_journal (
+      command_id TEXT PRIMARY KEY,
+      sequence INTEGER UNIQUE NOT NULL CHECK(sequence > 0),
+      state TEXT NOT NULL CHECK(state IN ('RESERVED', 'DISPATCHED'))
+    );
+  `);
+  writer.prepare('INSERT INTO follower_binding(id, payload) VALUES (1, ?)').run(JSON.stringify(binding));
+  writer.exec("INSERT INTO follower_command_journal VALUES ('synthetic-sqlite-command', 1, 'RESERVED')");
+  return { path, writer, backupPath: join(directory, 'backup.sqlite') };
+}
+
+function readSqliteBinding(db) {
+  return JSON.parse(db.prepare('SELECT payload FROM follower_binding WHERE id = 1').get().payload);
+}
+
+function readSqliteSnapshot(db, journalBinding = readSqliteBinding(db)) {
+  const records = db.prepare('SELECT command_id AS commandId, sequence, state FROM follower_command_journal').all();
+  return createFollowerCanonicalJournalSnapshot({ binding: journalBinding, records });
+}
+
+test('one SQLite read transaction retains a consistent WAL snapshot across a concurrent commit', t => {
+  const { path, writer } = createSqliteJournalFixture(t);
+  try {
+    assert.equal(writer.prepare('PRAGMA journal_mode').get().journal_mode, 'wal');
+    const before = readSqliteSnapshot(writer);
+    const reader = new DatabaseSync(path, { readOnly: true });
+    try {
+      reader.exec('BEGIN');
+      const pinnedBinding = readSqliteBinding(reader);
+      writer.exec(`
+        BEGIN IMMEDIATE;
+        UPDATE follower_command_journal SET state = 'DISPATCHED' WHERE sequence = 1;
+        INSERT INTO follower_command_journal VALUES ('synthetic-sqlite-next', 2, 'RESERVED');
+        COMMIT;
+      `);
+      assert.deepEqual(readSqliteSnapshot(reader, pinnedBinding), before);
+      reader.exec('COMMIT');
+
+      const latest = readSqliteSnapshot(reader);
+      assert.equal(latest.maxSequence, 2);
+      assert.equal(latest.pendingReservedCount, 1);
+      assert.notEqual(latest.journalDigestSha256, before.journalDigestSha256);
+      const trusted = { witnessProof: proof(latest), trustedCheckpoint: { ...latest, keyEpoch: root.keyEpoch } };
+      denied(evaluate({ ...trusted, localJournal: before }), 'LOCAL_JOURNAL_ROLLBACK');
+      denied(evaluate({ ...trusted, localJournal: latest }), 'UNRESOLVED_RESERVATIONS');
+    } finally {
+      reader.close();
+    }
+  } finally {
+    writer.close();
+  }
+});
+
+test('a physical SQLite backup at the same sequence cannot match the newer synthetic checkpoint', async t => {
+  const { writer, backupPath } = createSqliteJournalFixture(t);
+  try {
+    // SQLite's online backup captures a consistent copy, including committed WAL data.
+    await backup(writer, backupPath);
+    writer.exec("UPDATE follower_command_journal SET state = 'DISPATCHED' WHERE sequence = 1");
+    const latest = readSqliteSnapshot(writer);
+    const restored = new DatabaseSync(backupPath, { readOnly: true });
+    try {
+      const previous = readSqliteSnapshot(restored);
+      assert.equal(previous.maxSequence, latest.maxSequence);
+      assert.equal(previous.pendingReservedCount, 1);
+      assert.equal(latest.pendingReservedCount, 0);
+      assert.notEqual(previous.journalDigestSha256, latest.journalDigestSha256);
+      const trustedCheckpoint = { ...latest, keyEpoch: root.keyEpoch };
+      denied(evaluate({ localJournal: previous, witnessProof: proof(latest), trustedCheckpoint }),
+        'LOCAL_JOURNAL_FORK');
+      denied(evaluate({ localJournal: previous, witnessProof: proof(previous), trustedCheckpoint }),
+        'WITNESS_CHECKPOINT_FORK');
+      assert.deepEqual(evaluate({ localJournal: latest, witnessProof: proof(latest), trustedCheckpoint }), {
+        evidenceMatched: true, brokerExecutionAllowed: false, reasonCode: 'SYNTHETIC_FOLLOWER_WITNESS_MATCH_ONLY',
+      });
+    } finally {
+      restored.close();
+    }
+  } finally {
+    writer.close();
+  }
 });

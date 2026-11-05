@@ -1,6 +1,6 @@
 # COPY_FOLLOWER journal witness — P0 review-only contract (#176, #160)
 
-The pure function `compareFollowerJournalWithWitness` and its Node test suite model **negative** security decisions for a future independently witnessed COPY_FOLLOWER command journal. This file is a proposed design/test artifact only. It is not used by `CustomerFollowerExecutionAdapter`, the local demo runner, Master bot, customer Gateway or MT5. It has no database, network or broker I/O. No real customer IDs or signing keys are used.
+The pure function `compareFollowerJournalWithWitness` and its Node test suite model **negative** security decisions for a future independently witnessed COPY_FOLLOWER command journal. Neither is used by `CustomerFollowerExecutionAdapter`, the local demo runner, Master bot, customer Gateway or MT5. The comparator has no database, network or broker I/O. The suite uses temporary SQLite files, synthetic identities and ephemeral signing keys.
 
 A synthetic statement is signed using the distinct `XAUUSD-FOLLOWER-JOURNAL-WITNESS-V1` domain. It binds the specific license, installation, MT5 login, broker server and sorted allowed symbols, a journal high-water sequence, a digest of the *whole canonical journal state*, unresolved reservation count, key epoch, request nonce and validity window. A separately supplied **pinned witness key** and **trusted high-water checkpoint** are compared with the local journal snapshot. Mismatch, stale nonce/time, invalid signature or key pin, old sequence, same-sequence journal fork, newer local state that the witness has not observed, wrong follower binding and unresolved reservations fail closed.
 
@@ -11,6 +11,12 @@ A synthetic statement is signed using the distinct `XAUUSD-FOLLOWER-JOURNAL-WITN
 Its dedicated synthetic tests establish deterministic row-order normalization, same-sequence fork detection, state transition changes and malformed-row denial. The witness-comparison suite also tests an actual **synthetically computed full-rowset digest**, proving that a same-sequence command fork fails against a separately provided checkpoint. The entire helper is **NOT wired to SQLite, the follower dispatcher, the Gateway or MT5**; no runtime code uses it.
 
 **Critical limits:** a valid digest of an old local database is still valid. These in-memory rows are not independently authenticated, the code does not atomically snapshot the real SQLite/WAL database, and no external durable monotonic authority exists. A future implementation requires authenticated on-host journal reads, a defined consistent snapshot boundary and a separately controlled checkpoint CAS before any broker side effect. This specification is not a restore, release, risk or trading authorization.
+
+## Disposable SQLite/WAL regression
+
+The witness suite uses SQLite's native engine with a synthetic fixture matching the [draft follower journal schema](https://github.com/thiennguyen3004931-sudo/xauusd-ai-master-core/blob/3753fb2440a466711262f5b428872395cc19a269/packages/customer-follower-state/src/sqlite-command-journal.ts). Two connections verify that one read transaction observes a consistent snapshot across a WAL writer commit. An online backup taken before `RESERVED` becomes `DISPATCHED` verifies that the older database and its replayed proof fail against the newer synthetic checkpoint even when `maxSequence` is identical. A future authority needs an independent checkpoint revision that advances on each accepted journal state transition, including transitions with unchanged `maxSequence`.
+
+The fixture does not instantiate the draft dispatcher or exercise an operational snapshotter, crash recovery or cross-system CAS. Both checkpoint and proof are constructed by the tests. The hosted synthetic workflow asserts that the checked-out commit matches the PR head.
 
 ## Security limitations — NOT satisfied by this PR
 

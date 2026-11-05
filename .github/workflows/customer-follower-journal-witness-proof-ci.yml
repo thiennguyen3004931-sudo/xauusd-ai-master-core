@@ -21,13 +21,20 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
       - name: Verify witness fail-closed contract (no broker / MT5)
         shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
+          checked_out_head="$(git rev-parse HEAD)"
+          test "$checked_out_head" = "$EXPECTED_HEAD"
+          echo "CHECKED_OUT_HEAD=$checked_out_head"
           node --test scripts/customer-follower-journal-witness-compare.test.mjs
           node --test scripts/customer-follower-journal-canonical-state.test.mjs
       - name: Safety declaration
