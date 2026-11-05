@@ -1,0 +1,78 @@
+name: Phase7C Web Outage Read-Only Incident Evidence
+
+on:
+  push:
+    branches: [ops/web-outage-readonly-20261105]
+    paths:
+      - '.github/workflows/phase7c-web-outage-readonly-20261105.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase7c-web-outage-readonly-20261105
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify canonical GET-only precheck safety
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-phase7c-one-shot-web-evidence-readonly-source.ps1
+
+      - name: Read production task, ports and independent broker state
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $receipt = Join-Path $env:RUNNER_TEMP 'phase7c-web-outage-precheck.json'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ops/check-phase7c-web-recovery-eligibility-readonly.ps1 -ExpectedSource '196a8420ff008548773f5d385cf5785a9f84e297' -ReceiptPath $receipt
+          if ($LASTEXITCODE -ne 0) { throw 'WEB_OUTAGE_READ_ONLY_PRECHECK_FAILED' }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ops/snapshot-phase7c-web-task-readonly.ps1 -ExpectedSource '196a8420ff008548773f5d385cf5785a9f84e297'
+          if ($LASTEXITCODE -ne 0) { throw 'WEB_OUTAGE_TASK_EVIDENCE_FAILED' }
+
+      - name: Read allowlisted mode, task exit code and log error categories
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
+          $modeValue = 'MISSING_OR_INVALID'
+          try {
+            $modeFile = Join-Path $root '.runtime\phase7c-bot-mode.json'
+            $modeState = Get-Content -LiteralPath $modeFile -Raw | ConvertFrom-Json
+            $candidate = ([string]$modeState.mode).Trim().ToUpperInvariant()
+            if ($candidate -in @('PAUSE','SEMI','AUTO')) { $modeValue = $candidate }
+          } catch {}
+          Write-Host "WEB_OUTAGE_PERSISTED_MODE=$modeValue"
+          $taskInfo = Get-ScheduledTaskInfo -TaskName 'XAUUSD-Phase7B-Web' -ErrorAction Stop
+          Write-Host ("WEB_OUTAGE_TASK_EXIT_HEX=0x{0:X8}" -f [uint32]$taskInfo.LastTaskResult)
+          Write-Host ("WEB_OUTAGE_TASK_LAST_RUN_UTC=" + $taskInfo.LastRunTime.ToUniversalTime().ToString('o'))
+          $categories = [ordered]@{
+            MEMORY = 'out of memory|ENOMEM|heap limit'
+            PROCESS_INIT = '-1073741502|0xc0000142'
+            PORT_CONFLICT = 'EADDRINUSE|address already in use|partial port conflict'
+            MISSING_MODULE = 'MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|cannot find module'
+            ACCESS = 'EACCES|EPERM|access is denied'
+            CHILD_EXIT = 'child process exited|API_EXITED=True|WEB_EXITED=True'
+          }
+          foreach ($name in @('api.err.log','web.err.log','api.out.log','web.out.log')) {
+            $path = Join-Path $root ('.runtime\phase7b-web\' + $name)
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              Write-Host "WEB_OUTAGE_LOG=$name|PRESENT=False"
+              continue
+            }
+            $item = Get-Item -LiteralPath $path
+            Write-Host ("WEB_OUTAGE_LOG=" + $name + "|PRESENT=True|UPDATED_UTC=" + $item.LastWriteTimeUtc.ToString('o'))
+            $text = (Get-Content -LiteralPath $path -Tail 160 -ErrorAction Stop) -join [Environment]::NewLine
+            foreach ($category in $categories.GetEnumerator()) {
+              Write-Host ("WEB_OUTAGE_LOG_CATEGORY=" + $name + "|" + $category.Key + "=" + [bool]($text -match $category.Value))
+            }
+          }
+          Write-Host 'WEB_OUTAGE_OBSERVATION_ONLY=True'
+          Write-Host 'WEB_OUTAGE_TASK_MODE_ARM_ORDER_MUTATION=None'
