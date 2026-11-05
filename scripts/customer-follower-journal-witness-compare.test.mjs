@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign as signEd25519 } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   compareFollowerJournalWithWitness as compare,
   FOLLOWER_WITNESS_DOMAIN,
@@ -153,4 +156,45 @@ test('known gap: forged witness root and rolled-back checkpoint can agree but ne
   // Holding the genuine independently pinned root defeats key substitution.
   denied(evaluate({...injected,trustedWitnessRoot:root}),
     'WITNESS_ROOT_OR_EPOCH_MISMATCH');
+});
+
+
+test('synthetic witness comparator must not be imported by operational executors',()=>{
+  // Defense in depth only: source boundary guard, NOT evidence of
+  // independent root custody, durable checkpoint, or safe broker execution.
+  const repoRoot=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+  const required=['packages/customer-agent/src','packages/copy-protocol/src'];
+  const optional=[
+    'packages/customer-follower-state/src',
+    'packages/customer-runtime-session/src',
+    'apps/api/src',
+    'scripts/customer-follower-demo',
+  ];
+  const unsafeImport=/\bcompareFollowerJournalWithWitness\b|customer-follower-journal-witness-compare\.mjs/;
+  const activeSource=/\.(?:[cm]?js|tsx?)$/;
+  const ignoreTest=/(?:^|[.\/\\])(?:__tests__|__fixtures__|tests?|fixtures?)(?:[\/\\]|$)|\.(?:test|spec)\.[cm]?[jt]sx?$/;
+  const offenders=[];
+  let checked=0;
+  const walk=(directory)=>{
+    for(const entry of readdirSync(directory,{withFileTypes:true})){
+      const absolute=join(directory,entry.name);
+      const relative=absolute.slice(repoRoot.length+1).replaceAll('\\','/');
+      if(ignoreTest.test(relative))continue;
+      if(entry.isDirectory()){walk(absolute);continue;}
+      if(!entry.isFile()||!activeSource.test(entry.name))continue;
+      checked++;
+      if(unsafeImport.test(readFileSync(absolute,'utf8')))offenders.push(relative);
+    }
+  };
+  for(const path of required){
+    const root=resolve(repoRoot,path);
+    assert.ok(existsSync(root),'Required runtime source directory missing: '+path);
+    walk(root);
+  }
+  for(const path of optional){
+    const root=resolve(repoRoot,path);
+    if(existsSync(root))walk(root);
+  }
+  assert.ok(checked>0,'No runtime sources were scanned');
+  assert.deepEqual(offenders,[],'Synthetic witness comparator leaked into operational runtime source');
 });
