@@ -15,7 +15,8 @@ function fixture(t, mode = 'SEMI') {
   mkdirSync(dirname(modeFile), { recursive: true });
   copyFileSync(new URL('../../apps/api/src/services/phase7c-bot-mode.service.ts', import.meta.url), servicePath);
   writeFileSync(modeFile, JSON.stringify({ mode, updatedAt: 'synthetic-time', updatedBy: 'synthetic-operator' }));
-  const source = readFileSync(servicePath);
+  const source = readFileSync(servicePath).filter((byte, index, bytes) => byte !== 13 || bytes[index + 1] !== 10);
+  writeFileSync(servicePath, source);
   const expectedServiceBlob = createHash('sha1').update(Buffer.from('blob ' + source.length + '\0')).update(source).digest('hex');
   return {
     root, modeFile, servicePath, expectedServiceBlob,
@@ -25,7 +26,7 @@ function fixture(t, mode = 'SEMI') {
 
 test('approved pause uses the canonical service and records the SEMI to PAUSE audit', async t => {
   const args = fixture(t);
-  assert.deepEqual(await setApprovedRecoveryPause(args), { fromMode: 'SEMI', toMode: 'PAUSE', barrierDrained: true });
+  assert.deepEqual(await setApprovedRecoveryPause(args), { fromMode: 'SEMI', toMode: 'PAUSE', barrierDrained: true, serviceSourceMatch: 'EXACT' });
   const actual = JSON.parse(readFileSync(args.modeFile, 'utf8'));
   assert.equal(actual.mode, 'PAUSE');
   assert.equal(actual.updatedBy, 'operator-approved-web-recovery-20261105');
@@ -60,9 +61,27 @@ test('a mismatched canonical service source is rejected before writing', async t
   assert.equal(digest(readFileSync(args.modeFile)), args.expectedModeDigest);
 });
 
+test('Windows CRLF checkout is accepted only when its LF Git object matches exactly', async t => {
+  const args = fixture(t);
+  writeFileSync(args.servicePath, readFileSync(args.servicePath, 'utf8').replace(/\n/g, '\r\n'));
+  const result = await setApprovedRecoveryPause(args);
+  assert.equal(result.serviceSourceMatch, 'CRLF_CANONICAL');
+  assert.equal(JSON.parse(readFileSync(args.modeFile, 'utf8')).mode, 'PAUSE');
+});
+
+test('CRLF does not hide a content edit or an extra carriage return', async t => {
+  for (const suffix of ['\r', '\n// changed source\n']) {
+    const args = fixture(t);
+    writeFileSync(args.servicePath, readFileSync(args.servicePath, 'utf8').replace(/\n/g, '\r\n') + suffix);
+    await assert.rejects(setApprovedRecoveryPause(args), /SERVICE_SOURCE_MISMATCH/);
+    assert.equal(digest(readFileSync(args.modeFile)), args.expectedModeDigest);
+    assert.equal(existsSync(join(dirname(args.modeFile), 'phase7c-bot-mode-audit.jsonl')), false);
+  }
+});
+
 test('already PAUSE is idempotent and preserves its existing provenance', async t => {
   const args = fixture(t, 'PAUSE');
-  assert.deepEqual(await setApprovedRecoveryPause(args), { fromMode: 'PAUSE', toMode: 'PAUSE', barrierDrained: true });
+  assert.deepEqual(await setApprovedRecoveryPause(args), { fromMode: 'PAUSE', toMode: 'PAUSE', barrierDrained: true, serviceSourceMatch: 'EXACT' });
   assert.equal(digest(readFileSync(args.modeFile)), args.expectedModeDigest);
   assert.equal(existsSync(join(dirname(args.modeFile), 'phase7c-bot-mode-audit.jsonl')), false);
 });

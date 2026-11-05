@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Test mode approval, provenance, idempotence and pause barrier
+      - name: Test mode approval, CRLF provenance, idempotence and pause barrier
         shell: powershell
         run: node --experimental-strip-types --test scripts/ops/set-phase7c-pause-for-web-recovery.test.mjs
       - name: Validate existing recovery and GET-only contracts
