@@ -56,6 +56,14 @@ Assert ([string]$definition.Actions.Item(1).Arguments -ceq $plan.newArguments) '
 $count++
 Assert ([int]$definition.Principal.LogonType -eq 3 -and [int]$definition.Principal.RunLevel -eq 1 -and [string]$definition.Actions.Item(1).Path -ceq $baseline.ExpectedPowerShell) 'windows-schema-preserves-security-context-and-command'
 $count++
+Assert ((Get-Phase7CWebTaskPrincipalReference $plan.plannedXml) -ceq $baseline.CurrentUserSid) 'read-persisted-sid-without-display-name-resolution'
+$count++
+foreach ($invalidXml in @($fixture.Replace('<UserId>OLDPC\missing-user</UserId>',''),$fixture.Replace('<UserId>OLDPC\missing-user</UserId>','<UserId>one</UserId><UserId>two</UserId>'))) {
+  $rejected=$false
+  try { $null=Get-Phase7CWebTaskPrincipalReference $invalidXml } catch { if ($_.Exception.Message -eq 'WEB_REPAIR_XML_PRINCIPAL_NOT_UNIQUE') { $rejected=$true } else { throw } }
+  Assert $rejected 'reject-ambiguous-exported-principal'
+  $count++
+}
 Write-Host ("WEB_TASK_REPAIR_SYNTHETIC_CASES_PASS="+$count)
 Write-Host 'WEB_TASK_REPAIR_SYNTHETIC_PRODUCTION_READS=NONE'
 Write-Host 'WEB_TASK_REPAIR_SYNTHETIC_TASK_REGISTRATION=NONE'

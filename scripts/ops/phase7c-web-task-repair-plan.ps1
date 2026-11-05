@@ -75,3 +75,13 @@ function New-Phase7CWebTaskRepairPlan {
   if (-not (Test-Phase7CWebTaskOnlyApprovedFields $TaskXml $newXml)) { throw 'WEB_REPAIR_PLAN_SCOPE_INVALID' }
   return [pscustomobject]@{ currentUserSid=$CurrentUserSid; newArguments=$newArguments; beforeDigest=(Get-Phase7CWebTaskXmlDigest $TaskXml); plannedXml=$newXml }
 }
+
+# Task Scheduler may return an unmappable display name through CIM/COM;
+# the exported XML is the persisted principal reference.
+function Get-Phase7CWebTaskPrincipalReference([string]$TaskXml) {
+  $document=Read-Phase7CWebTaskXml $TaskXml
+  $namespaces=Get-Phase7CWebTaskNamespaces $document
+  $nodes=$document.SelectNodes('/t:Task/t:Principals/t:Principal/t:UserId',$namespaces)
+  if ($nodes.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$nodes[0].InnerText)) { throw 'WEB_REPAIR_XML_PRINCIPAL_NOT_UNIQUE' }
+  return [string]$nodes[0].InnerText
+}

@@ -14,6 +14,10 @@ function Resolve-WebPrincipalSid([string]$Value) {
   if ($Value -match '^S-\d-(?:\d+-)+\d+$') { return ([Security.Principal.SecurityIdentifier]::new($Value)).Value }
   return ([Security.Principal.NTAccount]::new($Value)).Translate([Security.Principal.SecurityIdentifier]).Value
 }
+
+function Read-WebTaskPrincipalSid([string]$TaskXml) {
+  return Resolve-WebPrincipalSid (Get-Phase7CWebTaskPrincipalReference $TaskXml)
+}
 $receipt=Join-Path ([IO.Path]::GetTempPath()) ('web-task-repair-precheck-'+[guid]::NewGuid().ToString('N')+'.json')
 try {
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'check-phase7c-web-recovery-eligibility-readonly.ps1') -ProductionRoot $root -ExpectedSource $source -ReceiptPath $receipt
@@ -47,7 +51,7 @@ try {
   if ($command -ine $trustedPowerShell) { throw 'WEB_REPAIR_POWERSHELL_NOT_TRUSTED' }
   $oldSid=''
   $principalUnmapped=$false
-  try { $oldSid=Resolve-WebPrincipalSid ([string]$task.Principal.UserId) }
+  try { $oldSid=Read-WebTaskPrincipalSid (Export-ScheduledTask -TaskName $taskName -TaskPath $taskPath) }
   catch {
     $errorObject=$_.Exception
     for ($depth=0;$depth -lt 4 -and $null -ne $errorObject;$depth++) {
@@ -120,8 +124,9 @@ try {
   }
   $afterTask=Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath
   $afterXml=Export-ScheduledTask -TaskName $taskName -TaskPath $taskPath
-  $afterSecurity=[string]$scheduler.GetFolder('\').GetTask($taskName).GetSecurityDescriptor(7)
-  if ((Resolve-WebPrincipalSid ([string]$afterTask.Principal.UserId)) -ne $currentSid -or ([string](@($afterTask.Actions)[0].Arguments)) -cne $plan.newArguments) { throw 'WEB_REPAIR_POST_CONTEXT_MISMATCH' }
+  $afterRegistered=$scheduler.GetFolder('\').GetTask($taskName)
+  $afterSecurity=[string]$afterRegistered.GetSecurityDescriptor(7)
+  if ((Read-WebTaskPrincipalSid $afterXml) -ne $currentSid -or ([string](@($afterTask.Actions)[0].Arguments)) -cne $plan.newArguments) { throw 'WEB_REPAIR_POST_CONTEXT_MISMATCH' }
   if (-not (Test-Phase7CWebTaskOnlyApprovedFields $beforeXml $afterXml)) { throw 'WEB_REPAIR_UNEXPECTED_POST_XML_CHANGE' }
   if ($afterSecurity -cne $beforeSecurity) { throw 'WEB_REPAIR_TASK_ACCESS_DESCRIPTOR_CHANGED' }
   Write-Host 'WEB_TASK_REPAIR_OTHER_XML_FIELDS_UNCHANGED=True'
