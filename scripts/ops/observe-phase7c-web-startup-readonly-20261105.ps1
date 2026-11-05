@@ -4,6 +4,27 @@ Set-StrictMode -Version Latest
 $root = 'F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master'
 $runtime = Join-Path $root '.runtime'
 function Flag([string]$Name, [bool]$Value) { Write-Host ("WEB_STARTUP_" + $Name + '=' + $Value) }
+function DiagnosticError([string]$Prefix, $Record) {
+  $types = @(); $errorObject = $Record.Exception
+  for ($depth=0; $depth -lt 4 -and $null -ne $errorObject; $depth++) {
+    $types += $errorObject.GetType().FullName
+    $errorObject = $errorObject.InnerException
+  }
+  $message = [string]$Record.Exception.Message
+  $reason = 'UNCLASSIFIED'
+  if (($types -join ',') -match 'IdentityNotMappedException') { $reason='IDENTITY_NOT_MAPPED' }
+  elseif ($message -match 'MT5_ALLOW_REAL_ACCOUNT=true') { $reason='LIVE_ALLOW_REAL_REQUIRED' }
+  elseif ($message -match 'ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER=270714') { $reason='LIVE_SIDEWAY_MAGIC_REQUIRED' }
+  elseif ($message -match 'MT5_MAGIC_NUMBER=270715') { $reason='LIVE_MAGIC_REQUIRED' }
+  elseif ($message -match 'MT5_API_KEY must be configured') { $reason='API_KEY_CONFIGURATION_REQUIRED' }
+  elseif ($message -match 'MT5_ALLOWED_LOGINS') { $reason='ALLOWLIST_INVALID' }
+  elseif (($types -join ',') -match 'ArgumentException') { $reason='ARGUMENT_INVALID' }
+  elseif (($types -join ',') -match 'PropertyNotFoundException') { $reason='PROPERTY_UNAVAILABLE' }
+  elseif (($types -join ',') -match 'CommandNotFoundException') { $reason='HELPER_UNAVAILABLE' }
+  elseif (($types -join ',') -match 'MethodException') { $reason='METHOD_UNAVAILABLE' }
+  Write-Host ('WEB_STARTUP_' + $Prefix + '_REASON_CODE=' + $reason)
+  $types=$null; $message=$null; $errorObject=$null
+}
 function ActionValue([string]$Text, [string]$Name) {
   $pattern = '(?i)(?:^|\s)-' + [regex]::Escape($Name) + '\s+(?:"([^"]*)"|''([^'']*)''|([^\s]+))(?=\s|$)'
   $match = [regex]::Match($Text, $pattern)
@@ -54,6 +75,14 @@ try {
   Write-Host "WEB_STARTUP_TASK_LOGON_TYPE=$logonType"
   try {
     $principalId = [string]$task.Principal.UserId
+    Flag 'TASK_PRINCIPAL_USER_ID_PRESENT' (-not [string]::IsNullOrWhiteSpace($principalId))
+    Flag 'TASK_PRINCIPAL_GROUP_ID_PRESENT' (-not [string]::IsNullOrWhiteSpace([string]$task.Principal.GroupId))
+    Flag 'TASK_PRINCIPAL_ID_IS_SID' ($principalId -match '^S-\d-(?:\d+-)+\d+$')
+    $runnerIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    Flag 'RUNNER_IDENTITY_IS_SYSTEM' ($runnerIdentity.User.Value -eq 'S-1-5-18')
+    Flag 'TASK_PRINCIPAL_RAW_MATCHES_RUNNER_NAME' ($principalId -ieq $runnerIdentity.Name)
+    Flag 'RUNNER_PROCESS_INTERACTIVE_SESSION' ([Diagnostics.Process]::GetCurrentProcess().SessionId -gt 0)
+
     $principalSid = if ($principalId -match '^S-\d-(?:\d+-)+\d+$') { ([Security.Principal.SecurityIdentifier]::new($principalId)).Value } else { ([Security.Principal.NTAccount]::new($principalId)).Translate([Security.Principal.SecurityIdentifier]).Value }
     $runnerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     Flag 'TASK_PRINCIPAL_MATCHES_RUNNER_USER' ($principalSid -eq $runnerSid)
@@ -72,7 +101,7 @@ try {
     Flag 'TASK_PRINCIPAL_DESKTOP_SHELL_PRESENT' ($matchingShells -gt 0)
     Flag 'RUNNER_PROCESS_INTERACTIVE_SESSION' ([Diagnostics.Process]::GetCurrentProcess().SessionId -gt 0)
     $principalId=$null; $principalSid=$null; $runnerSid=$null; $accounts=$null; $sessions=$null; $owner=$null
-  } catch { Flag 'TASK_PRINCIPAL_SESSION_OBSERVATION_AVAILABLE' $false }
+  } catch { Flag 'TASK_PRINCIPAL_SESSION_OBSERVATION_AVAILABLE' $false; DiagnosticError 'TASK_PRINCIPAL_SESSION' $_ }
   try {
     $scheduler = New-Object -ComObject 'Schedule.Service'
     [void]$scheduler.Connect()
@@ -83,6 +112,13 @@ try {
   } catch { Flag 'TASK_COM_OR_LOG_METADATA_OBSERVATION_AVAILABLE' $false }
   try {
     . (Join-Path $root 'scripts\lib\phase7c-account-mode.ps1')
+    Flag 'WEB_ENV_ALLOW_REAL_ENABLED' (Test-Phase7CTruthy (Get-Phase7CEnvValue $envArg 'MT5_ALLOW_REAL_ACCOUNT'))
+    Flag 'WEB_ENV_MAGIC_MATCHES_LIVE' ((Get-Phase7CEnvValue $envArg 'MT5_MAGIC_NUMBER').Trim() -eq '270715')
+    Flag 'WEB_ENV_TRADING_FLAG_ENABLED' (Test-Phase7CTruthy (Get-Phase7CEnvValue $envArg 'MT5_TRADING_ENABLED'))
+    $webKey = Get-Phase7CEnvValue $envArg 'MT5_API_KEY'
+    $executorKey = Get-Phase7CEnvValue $executorEnv 'MT5_API_KEY'
+    Flag 'WEB_AND_EXECUTOR_API_KEY_RAW_MATCH' ($webKey -ceq $executorKey)
+    $webKey=$null; $executorKey=$null
     $webInfo = Assert-Phase7CAccountEnv -EnvFile $envArg -AccountMode 'LIVE'
     Flag 'WEB_ENV_VALID_FOR_LIVE_CONTEXT' $true
     $executorInfo = Assert-Phase7CAccountEnv -EnvFile $executorEnv -AccountMode 'LIVE' -RequireTrading
@@ -90,7 +126,7 @@ try {
     Flag 'WEB_AND_EXECUTOR_BROKER_PORT_MATCH' ([int]$webInfo.bridgePort -eq [int]$executorInfo.bridgePort)
     Flag 'WEB_AND_EXECUTOR_API_KEY_MATCH' ([string]$webInfo.apiKey -ceq [string]$executorInfo.apiKey)
     $webInfo=$null; $executorInfo=$null
-  } catch { Flag 'WEB_ENV_LIVE_COMPARISON_AVAILABLE' $false }
+  } catch { Flag 'WEB_ENV_LIVE_COMPARISON_AVAILABLE' $false; DiagnosticError 'WEB_ENV_LIVE' $_ }
 
   try {
     $batteries = @(Get-CimInstance -Namespace 'root\wmi' -ClassName BatteryStatus -ErrorAction Stop)
