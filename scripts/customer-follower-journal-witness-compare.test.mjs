@@ -8,6 +8,7 @@ import {
   compareFollowerJournalWithWitness as compare,
   FOLLOWER_WITNESS_DOMAIN,
 } from './customer-follower-journal-witness-compare.mjs';
+import { createFollowerCanonicalJournalSnapshot } from './customer-follower-journal-canonical-state.mjs';
 
 const NOW = 1_800_000_000_000;
 const NONCE = 'synthetic-follower-restore-nonce-2026';
@@ -197,4 +198,31 @@ test('synthetic witness comparator must not be imported by operational executors
   }
   assert.ok(checked>0,'No runtime sources were scanned');
   assert.deepEqual(offenders,[],'Synthetic witness comparator leaked into operational runtime source');
+});
+
+
+test('real canonical rowset fork rejected by synthetic trusted checkpoint',()=>{
+  // Both local snapshots recompute SHA-256 from the entire synthetic rowset,
+  // rather than accepting a caller-provided digest string.
+  const original=createFollowerCanonicalJournalSnapshot({
+    binding,
+    records:[{commandId:'synthetic-journal-command-a',sequence:8,state:'DISPATCHED'}],
+  });
+  const fork=createFollowerCanonicalJournalSnapshot({
+    binding,
+    records:[{commandId:'synthetic-journal-command-b',sequence:8,state:'DISPATCHED'}],
+  });
+  assert.notEqual(original.journalDigestSha256,fork.journalDigestSha256);
+  assert.equal(original.maxSequence,fork.maxSequence);
+  assert.deepEqual(evaluate({
+    localJournal:original,witnessProof:proof(original),
+    trustedCheckpoint:{...original,keyEpoch:root.keyEpoch},
+  }),{
+    evidenceMatched:true,brokerExecutionAllowed:false,
+    reasonCode:'SYNTHETIC_FOLLOWER_WITNESS_MATCH_ONLY',
+  });
+  denied(evaluate({
+    localJournal:fork,witnessProof:proof(original),
+    trustedCheckpoint:{...original,keyEpoch:root.keyEpoch},
+  }),'LOCAL_JOURNAL_FORK');
 });
