@@ -1,9 +1,7 @@
-name: Phase7C Web Startup Diagnostics 20261105 (Read Only)
+name: Phase7C Web Task Restore 20261105
 
-# The approved start was attempted in run 42004828496. This revision collects
-# evidence only; it never repeats the mode change or the Web task start.
-
-# Authorized by the user's approval of SEMI -> PAUSE, Web/API recovery, stay PAUSE.
+# Repair only the broken Web task definition within the approved Web/API restore.
+# The operator requested SEMI -> PAUSE, restore Web/API, stay PAUSE/DISARMED.
 on:
   push:
     branches: [ops/web-recovery-approved-20261105]
@@ -18,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  observe-startup:
+  restore-web-task:
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 12
     steps:
@@ -29,22 +27,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Test mode approval, CRLF provenance, idempotence and pause barrier
-        shell: powershell
-        run: node --experimental-strip-types --test scripts/ops/set-phase7c-pause-for-web-recovery.test.mjs
-      - name: Validate existing recovery and GET-only contracts
+      - name: Parse repair source before any host changes
         shell: powershell
         run: |
+          foreach ($path in @('scripts/ops/phase7c-web-task-repair-plan.ps1','scripts/ops/repair-phase7c-web-task-approved-restore-20261105.ps1','scripts/test-phase7c-web-task-repair-plan.ps1')) {
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE $path),[ref]$tokens,[ref]$errors)
+            if (@($errors).Count -gt 0) { throw 'WEB_TASK_REPAIR_SOURCE_PARSE_FAILED' }
+          }
+      - name: Synthetic task XML and unregistered Windows definition safety tests
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-phase7c-web-task-repair-plan.ps1
+      - name: Existing mode approval and recovery safety contracts
+        shell: powershell
+        run: |
+          node --experimental-strip-types --test scripts/ops/set-phase7c-pause-for-web-recovery.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'MODE_RECOVERY_CONTRACT_FAILED' }
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-phase7c-manual-web-task-recovery-source.ps1
           if ($LASTEXITCODE -ne 0) { throw 'CANONICAL_RECOVERY_CONTRACT_FAILED' }
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-phase7c-one-shot-web-evidence-readonly-source.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'CANONICAL_READONLY_CONTRACT_FAILED' }
-      - name: Parse read-only startup diagnostics
+      - name: Read-only production plan for the two observed Web task faults
         shell: powershell
-        run: |
-          $tokens = $null; $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE 'scripts/ops/observe-phase7c-web-startup-readonly-20261105.ps1'), [ref]$tokens, [ref]$errors)
-          if (@($errors).Count -gt 0) { throw 'WEB_STARTUP_DIAGNOSTIC_PARSE_FAILED' }
-      - name: Observe unresolved principal and Web LIVE context without another start
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ops/repair-phase7c-web-task-approved-restore-20261105.ps1
+      - name: Restore only Web task identity reference and LIVE profile, then guarded start
         shell: powershell
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ops/observe-phase7c-web-startup-readonly-20261105.ps1
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ops/repair-phase7c-web-task-approved-restore-20261105.ps1 -Apply -OperatorConfirmation 'CONFIRM_WEB_TASK_RESTORE_ONLY_PAUSE_DISARMED'
