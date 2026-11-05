@@ -160,7 +160,7 @@ test('known gap: forged witness root and rolled-back checkpoint can agree but ne
 });
 
 
-test('synthetic witness comparator must not be imported by operational executors',()=>{
+test('synthetic witness and journal-snapshot helpers must not be imported by operational executors',()=>{
   // Defense in depth only: source boundary guard, NOT evidence of
   // independent root custody, durable checkpoint, or safe broker execution.
   const repoRoot=resolve(dirname(fileURLToPath(import.meta.url)),'..');
@@ -171,7 +171,7 @@ test('synthetic witness comparator must not be imported by operational executors
     'apps/api/src',
     'scripts/customer-follower-demo',
   ];
-  const unsafeImport=/\bcompareFollowerJournalWithWitness\b|customer-follower-journal-witness-compare\.mjs/;
+  const unsafeImport=/\b(?:compareFollowerJournalWithWitness|createFollowerCanonicalJournalSnapshot)\b|customer-follower-journal-(?:witness-compare|canonical-state)\.mjs/;
   const activeSource=/\.(?:[cm]?js|tsx?)$/;
   const ignoreTest=/(?:^|[.\/\\])(?:__tests__|__fixtures__|tests?|fixtures?)(?:[\/\\]|$)|\.(?:test|spec)\.[cm]?[jt]sx?$/;
   const offenders=[];
@@ -197,7 +197,7 @@ test('synthetic witness comparator must not be imported by operational executors
     if(existsSync(root))walk(root);
   }
   assert.ok(checked>0,'No runtime sources were scanned');
-  assert.deepEqual(offenders,[],'Synthetic witness comparator leaked into operational runtime source');
+  assert.deepEqual(offenders,[],'Synthetic witness or canonical journal snapshot helper leaked into operational runtime source');
 });
 
 
