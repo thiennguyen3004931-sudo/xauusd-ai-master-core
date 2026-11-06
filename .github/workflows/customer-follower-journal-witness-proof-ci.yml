@@ -48,3 +48,32 @@ jobs:
           echo 'BROKER_EXECUTION_ALLOWED=false'
           echo 'WITNESS_BACKEND_IMPLEMENTED=false'
           echo 'CUSTOMER_RELEASE_AUTHORIZED=false'
+
+  follower-journal-windows-crash:
+    name: Windows WAL and checkpoint reopen after worker termination
+    runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run both synthetic process termination cases
+        shell: powershell
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $head = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:EXPECTED_HEAD -or $env:RUNNER_OS -cne 'Windows') {
+            throw 'WINDOWS_FOLLOWER_CRASH_TEST_CONTEXT_INVALID'
+          }
+          Write-Host "CHECKED_OUT_HEAD=$head"
+          $tap = @(& node --test --test-reporter=tap '--test-name-pattern=^Abrupt worker exit after ' scripts/customer-follower-journal-witness-compare.test.mjs)
+          $testExit = $LASTEXITCODE
+          $tap | Write-Host
+          if ($testExit -ne 0 -or $tap -notcontains '# tests 2' -or $tap -notcontains '# pass 2') {
+            throw 'WINDOWS_FOLLOWER_CRASH_TESTS_NOT_VERIFIED'
+          }

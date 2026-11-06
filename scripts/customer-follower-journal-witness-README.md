@@ -35,11 +35,13 @@ The production adapter must authenticate checkpoint reads and writes, serialize 
 
 ## Abrupt process exit evidence
 
-Two Linux tests create disposable SQLite and checkpoint files, then start a separate Node worker. The worker commits a new WAL reservation and terminates itself with SIGKILL, either before or after the synthetic checkpoint transaction completes. It skips graceful SQLite close and application cleanup.
+Two cases run on Linux and Windows using disposable SQLite and checkpoint files. A Node worker commits a new WAL reservation and reports the requested cut point while its database is still open. The test parent forcefully terminates only that worker, then waits for its handles to close before reopening the files.
 
 After the journal-only cut point, a new reader observes the committed reservation while the checkpoint retains its prior revision. The comparator returns `LOCAL_JOURNAL_AHEAD_OF_WITNESS`. After the checkpoint cut point, reopening both stores observes revision 1 and a matching digest, but the command remains RESERVED and returns `UNRESOLVED_RESERVATIONS`. A retry from revision 0 is rejected as a CAS conflict.
 
-These two completed-commit cut points exercise local process-crash recovery on Linux. Windows recovery, machine power loss, failure during checkpoint file replacement and authenticated broker reconciliation require separate acceptance evidence. The test worker opens only paths created by the disposable fixtures.
+Linux requires an acknowledged checkpoint commit. Windows can observe the replacement file even when directory fsync is unavailable and the fixture reports an uncertain commit. In that case the test still requires the reopened digest and revision to match the replacement and verifies the reservation remains blocked. The dedicated Windows job requires both cases to pass on the checked-out PR head.
+
+The cases cover process termination after the WAL commit and after checkpoint replacement. Power loss, termination during replacement, an independently administered checkpoint store and authenticated broker reconciliation require separate evidence. The worker opens only paths created by the disposable fixtures.
 
 ## Security limitations — NOT satisfied by this PR
 

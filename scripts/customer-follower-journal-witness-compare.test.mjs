@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync, sign as signEd25519 } from 'node:crypto';
+import { once } from 'node:events';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -474,6 +475,7 @@ const crashWorker = `
   });
   const journalBefore = journal();
   db.exec("INSERT INTO follower_command_journal VALUES ('synthetic-crash-reservation', 2, 'RESERVED')");
+  let checkpointOutcome = 'NOT_ATTEMPTED';
   if (phase === 'checkpoint') {
     const { advanceSyntheticFollowerCheckpoint } = await import(coordinatorUrl);
     const { FileAuthorityFixture } = await import(fixtureUrl);
@@ -481,16 +483,21 @@ const crashWorker = `
       adapter: new FileAuthorityFixture(directory), bindingKey, expectedRevision: 0,
       journalBefore, journalAfter: journal(),
     });
-    if (!result.ok || result.brokerExecutionAllowed !== false) throw new Error('checkpoint transition failed');
+    if (result.brokerExecutionAllowed !== false ||
+        (!result.ok && result.reasonCode !== 'FOLLOWER_CHECKPOINT_TRANSACTION_UNCERTAIN')) {
+      throw new Error('unexpected checkpoint transition outcome');
+    }
+    checkpointOutcome = result.reasonCode;
   }
-  // Kill only this disposable worker. No graceful SQLite close or finally runs.
-  process.kill(process.pid, 'SIGKILL');
-  throw new Error('worker did not terminate at the requested cut point');
+  // Hold the SQLite connection open until the parent terminates this worker.
+  process.once('disconnect', () => { process.exitCode = 1; });
+  process.send({ phase, checkpointOutcome });
 `;
 
 for (const phase of ['journal', 'checkpoint']) {
-  test('Linux process crash after ' + phase + ' commit preserves recovery quarantine',
-    { skip: process.platform !== 'linux' }, async t => {
+  const cutPointName = phase === 'journal' ? 'WAL commit' : 'checkpoint replacement';
+  test('Abrupt worker exit after ' + cutPointName + ' preserves recovery quarantine',
+    async t => {
       const { path, writer } = createSqliteJournalFixture(t);
       let journalBefore;
       try {
@@ -504,13 +511,26 @@ for (const phase of ['journal', 'checkpoint']) {
       }
       const store = checkpointFixture(t, journalBefore);
       const originalCheckpoint = store.read();
-      const worker = spawnSync(process.execPath, [
+      const worker = spawn(process.execPath, [
         '--input-type=module', '-e', crashWorker, path, phase, store.adapter.directory, store.bindingKey,
         new URL('./customer-follower-journal-checkpoint-cas.mjs', import.meta.url).href,
         new URL('./customer-restore-authority-file-fixture.mjs', import.meta.url).href,
-      ], { encoding: 'utf8', timeout: 15_000 });
-      assert.ifError(worker.error);
-      assert.equal(worker.signal, 'SIGKILL', worker.stderr);
+      ], {
+        stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+        timeout: 15_000,
+        killSignal: 'SIGKILL',
+        windowsHide: true,
+      });
+      const closed = once(worker, 'close');
+      let cutPoint;
+      worker.once('message', message => {
+        if (message?.phase === phase && worker.kill('SIGKILL')) cutPoint = message;
+      });
+      const [exitCode, signal] = await closed;
+      assert.ok(cutPoint, 'worker was not terminated at the requested cut point');
+      assert.equal(exitCode, null);
+      assert.equal(signal, 'SIGKILL');
+      assert.ok(existsSync(path + '-wal'), 'expected committed frames in the WAL after termination');
 
       const recovered = new DatabaseSync(path, { readOnly: true });
       try {
@@ -519,6 +539,7 @@ for (const phase of ['journal', 'checkpoint']) {
         assert.equal(local.pendingReservedCount, 1);
         const checkpointAfterRestart = store.read();
         if (phase === 'journal') {
+          assert.equal(cutPoint.checkpointOutcome, 'NOT_ATTEMPTED');
           assert.deepEqual(checkpointAfterRestart, originalCheckpoint);
           const previous = createFollowerCanonicalJournalSnapshot(journalBefore);
           denied(evaluate({
@@ -526,6 +547,11 @@ for (const phase of ['journal', 'checkpoint']) {
             trustedCheckpoint: checkpointAfterRestart,
           }), 'LOCAL_JOURNAL_AHEAD_OF_WITNESS');
         } else {
+          // The file fixture fails closed if directory fsync is unavailable.
+          // On Windows an observed replacement can still have uncertain durability.
+          const expectedOutcomes = ['SYNTHETIC_FOLLOWER_CHECKPOINT_COMMITTED'];
+          if (process.platform === 'win32') expectedOutcomes.push('FOLLOWER_CHECKPOINT_TRANSACTION_UNCERTAIN');
+          assert.ok(expectedOutcomes.includes(cutPoint.checkpointOutcome));
           assert.equal(checkpointAfterRestart.checkpointRevision, 1);
           assert.equal(checkpointAfterRestart.journalDigestSha256, local.journalDigestSha256);
           denied(evaluate({
@@ -537,6 +563,7 @@ for (const phase of ['journal', 'checkpoint']) {
           ).all();
           casDenied(await store.advance(journalBefore, { binding, records }, 0),
             'FOLLOWER_CHECKPOINT_CAS_CONFLICT');
+          t.diagnostic('CHECKPOINT_WRITE_OUTCOME=' + cutPoint.checkpointOutcome);
         }
       } finally {
         recovered.close();
