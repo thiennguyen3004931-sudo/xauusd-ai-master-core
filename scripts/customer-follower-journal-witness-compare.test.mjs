@@ -9,6 +9,7 @@ import { dirname, join, resolve } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import {
+  compareAndRetainSyntheticFollowerCheckpoint,
   compareFollowerJournalWithCheckpointProof,
   compareFollowerJournalWithWitness as compare,
   FOLLOWER_CHECKPOINT_DOMAIN,
@@ -87,25 +88,28 @@ function signedCheckpoint(snapshot = localJournal, overrides = {},
     Buffer.from(domain + JSON.stringify(fields)), privateKey).toString('base64') };
 }
 
-const evaluateSigned = (overrides = {}) => compareFollowerJournalWithCheckpointProof({
+const signedInputs = (overrides = {}) => ({
   localJournal, witnessProof: proof(), checkpointProof: signedCheckpoint(),
-  trustedWitnessRoot: root, trustedCheckpointRoot: checkpointRoot, trustedHighWaterFloor: trustedFloor,
+  trustedWitnessRoot: root, trustedCheckpointRoot: checkpointRoot,
   expectedNonce: NONCE, nowMs: NOW + 1_000, ...overrides,
+});
+const evaluateSigned = (overrides = {}) => compareFollowerJournalWithCheckpointProof({
+  trustedHighWaterFloor: trustedFloor, ...signedInputs(overrides),
+});
+const matchedEvidence = Object.freeze({
+  evidenceMatched: true, brokerExecutionAllowed: false,
+  reasonCode: 'SYNTHETIC_FOLLOWER_WITNESS_MATCH_ONLY',
 });
 
 test('separately signed checkpoint matches the retained floor and can advance to a newer revision', () => {
-  const expected = {
-    evidenceMatched: true, brokerExecutionAllowed: false,
-    reasonCode: 'SYNTHETIC_FOLLOWER_WITNESS_MATCH_ONLY',
-  };
-  assert.deepEqual(evaluateSigned(), expected);
+  assert.deepEqual(evaluateSigned(), matchedEvidence);
   const next = { ...localJournal, maxSequence: 9, journalDigestSha256: digest('next-9') };
   const checkpointRevision = REVISION + 1;
   assert.deepEqual(evaluateSigned({
     localJournal: next,
     witnessProof: proof(next, { checkpointRevision }),
     checkpointProof: signedCheckpoint(next, { checkpointRevision }),
-  }), expected);
+  }), matchedEvidence);
 });
 
 test('signed checkpoint requires its own pin, exact envelope and independently retained floor', () => {
@@ -186,6 +190,31 @@ test('retained signing epochs block rollback even when an old trusted signer sti
   denied(evaluateSigned({
     trustedCheckpointRoot: { ...checkpointRoot, keyEpoch: checkpointRoot.keyEpoch + 1 },
   }), 'CHECKPOINT_ROOT_OR_EPOCH_MISMATCH');
+});
+
+test('a witness key rotation requires the signed checkpoint to attest the same epoch', () => {
+  const rotated = generateKeyPairSync('ed25519');
+  const rotatedRoot = {
+    keyId: 'independent-witness-2',
+    keyEpoch: root.keyEpoch + 1,
+    publicKeyPem: rotated.publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+    publicKeySha256: digest(rotated.publicKey.export({ format: 'der', type: 'spki' })),
+  };
+  const checkpointRevision = REVISION + 1;
+  const statement = proof(localJournal, {
+    authorityKeyId: rotatedRoot.keyId, keyEpoch: rotatedRoot.keyEpoch, checkpointRevision,
+  }).statement;
+  const inputs = {
+    trustedWitnessRoot: rotatedRoot,
+    witnessProof: { statement, signatureBase64: signStatement(statement, rotated.privateKey) },
+  };
+  denied(evaluateSigned({
+    ...inputs, checkpointProof: signedCheckpoint(localJournal, { checkpointRevision }),
+  }), 'CHECKPOINT_WITNESS_EPOCH_MISMATCH');
+  assert.deepEqual(evaluateSigned({
+    ...inputs,
+    checkpointProof: signedCheckpoint(localJournal, { checkpointRevision, keyEpoch: rotatedRoot.keyEpoch }),
+  }), matchedEvidence);
 });
 
 test('separate signatures still quarantine an unresolved reservation', () => {
@@ -349,7 +378,7 @@ test('synthetic witness and journal-snapshot helpers must not be imported by ope
     'apps/api/src',
     'scripts/customer-follower-demo',
   ];
-  const unsafeImport=/\b(?:compareFollowerJournalWith(?:Witness|CheckpointProof)|createFollowerCanonicalJournalSnapshot|advanceSyntheticFollowerCheckpoint)\b|customer-follower-journal-(?:witness-compare|canonical-state|checkpoint-cas)\.mjs/;
+  const unsafeImport=/\b(?:compareFollowerJournalWith(?:Witness|CheckpointProof)|compareAndRetainSyntheticFollowerCheckpoint|createFollowerCanonicalJournalSnapshot|advanceSyntheticFollowerCheckpoint)\b|customer-follower-journal-(?:witness-compare|canonical-state|checkpoint-cas)\.mjs/;
   const activeSource=/\.(?:[cm]?js|tsx?)$/;
   const ignoreTest=/(?:^|[.\/\\])(?:__tests__|__fixtures__|tests?|fixtures?)(?:[\/\\]|$)|\.(?:test|spec)\.[cm]?[jt]sx?$/;
   const offenders=[];
@@ -500,23 +529,143 @@ test('a physical SQLite backup at the same sequence cannot match the newer synth
   }
 });
 
-function checkpointFixture(t, journal) {
+function checkpointFileFixture(t, initialState) {
   const directory = mkdtempSync(join(tmpdir(), 'xauusd-follower-checkpoint-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const bindingKey = 'synthetic-follower';
   const file = join(directory, bindingKey + '.json');
-  const adapter = new FileAuthorityFixture(directory);
-  writeFileSync(file, JSON.stringify(checkpoint(createFollowerCanonicalJournalSnapshot(journal), 0)),
-    { flag: 'wx', mode: 0o600 });
+  if (initialState !== undefined) {
+    writeFileSync(file, JSON.stringify(initialState), { flag: 'wx', mode: 0o600 });
+  }
   return {
-    adapter, bindingKey,
+    directory, adapter: new FileAuthorityFixture(directory), bindingKey,
     read: () => JSON.parse(readFileSync(file, 'utf8')),
+  };
+}
+
+function checkpointFixture(t, journal) {
+  const store = checkpointFileFixture(t, checkpoint(createFollowerCanonicalJournalSnapshot(journal), 0));
+  const { adapter, bindingKey } = store;
+  return {
+    ...store,
     advance: (journalBefore, journalAfter, expectedRevision, syntheticConfirmation) =>
       advanceSyntheticFollowerCheckpoint({
         adapter, bindingKey, expectedRevision, journalBefore, journalAfter, syntheticConfirmation,
       }),
   };
 }
+
+function retainFloor(store, overrides) {
+  return compareAndRetainSyntheticFollowerCheckpoint({
+    adapter: store.adapter, bindingKey: store.bindingKey, ...signedInputs(overrides),
+  });
+}
+
+test('the retained floor blocks a freshly signed rollback after reopening the store', async t => {
+  const store = checkpointFileFixture(t, trustedFloor);
+  const snapshot = { ...localJournal, maxSequence: 9, journalDigestSha256: digest('committed-next') };
+  const checkpointRevision = REVISION + 1;
+  assert.deepEqual(await retainFloor(store, {
+    localJournal: snapshot,
+    witnessProof: proof(snapshot, { checkpointRevision }),
+    checkpointProof: signedCheckpoint(snapshot, { checkpointRevision }),
+  }), matchedEvidence);
+  assert.deepEqual(store.read(), { ...checkpoint(snapshot, checkpointRevision), checkpointKeyEpoch: checkpointRoot.keyEpoch });
+
+  const reopened = { ...store, adapter: new FileAuthorityFixture(store.directory) };
+  const requestNonce = 'synthetic-request-after-reopen';
+  const older = {
+    expectedNonce: requestNonce,
+    witnessProof: proof(localJournal, { requestNonce }),
+    checkpointProof: signedCheckpoint(localJournal, { requestNonce }),
+  };
+  assert.deepEqual(evaluateSigned(older), matchedEvidence);
+  denied(await retainFloor(reopened, { ...older, trustedHighWaterFloor: trustedFloor }), 'CHECKPOINT_FLOOR_ROLLBACK');
+});
+
+test('an authenticated reservation advances the floor even while the local journal is quarantined', async t => {
+  const store = checkpointFileFixture(t, trustedFloor);
+  const pending = { ...localJournal, maxSequence: 9, pendingReservedCount: 1, journalDigestSha256: digest('new-reservation') };
+  const checkpointRevision = REVISION + 1;
+  const inputs = {
+    witnessProof: proof(pending, { checkpointRevision }),
+    checkpointProof: signedCheckpoint(pending, { checkpointRevision }),
+  };
+  denied(await retainFloor(store, inputs), 'LOCAL_JOURNAL_ROLLBACK');
+  assert.deepEqual(store.read(), { ...checkpoint(pending, checkpointRevision), checkpointKeyEpoch: checkpointRoot.keyEpoch });
+  denied(await retainFloor(store), 'CHECKPOINT_FLOOR_ROLLBACK');
+  denied(await retainFloor(store, { ...inputs, localJournal: pending }), 'UNRESOLVED_RESERVATIONS');
+});
+
+test('a missing floor cannot bootstrap itself and disagreeing signed proofs cannot advance it', async t => {
+  const unseeded = checkpointFileFixture(t);
+  denied(await retainFloor(unseeded, { trustedHighWaterFloor: trustedFloor }), 'CHECKPOINT_FLOOR_TRANSACTION_UNCERTAIN');
+  assert.throws(unseeded.read, { code: 'ENOENT' });
+
+  const store = checkpointFileFixture(t, trustedFloor);
+  denied(await retainFloor(store, {
+    checkpointProof: signedCheckpoint(localJournal, { checkpointRevision: REVISION + 1 }),
+  }), 'WITNESS_CHECKPOINT_REVISION_ROLLBACK');
+  assert.deepEqual(store.read(), trustedFloor);
+});
+
+test('concurrent floor updates cannot both accept a fork at the same revision', async t => {
+  const store = checkpointFileFixture(t, trustedFloor);
+  const checkpointRevision = REVISION + 1;
+  const candidates = ['a', 'b'].map(branch => {
+    const snapshot = { ...localJournal, maxSequence: 9, journalDigestSha256: digest('candidate-' + branch) };
+    return {
+      localJournal: snapshot,
+      witnessProof: proof(snapshot, { checkpointRevision }),
+      checkpointProof: signedCheckpoint(snapshot, { checkpointRevision }),
+    };
+  });
+  const verdicts = await Promise.all(candidates.map(candidate => retainFloor(store, candidate)));
+  assert.equal(verdicts.filter(verdict => verdict.evidenceMatched).length, 1);
+  assert.ok(verdicts.every(verdict => verdict.brokerExecutionAllowed === false));
+  const acceptedIndex = verdicts.findIndex(verdict => verdict.evidenceMatched);
+  assert.equal(store.read().journalDigestSha256, candidates[acceptedIndex].localJournal.journalDigestSha256);
+  denied(await retainFloor(store, candidates[1 - acceptedIndex]), 'CHECKPOINT_FLOOR_FORK');
+});
+
+test('a lost floor commit acknowledgement blocks the observation and cannot revive the old floor', async t => {
+  const store = checkpointFileFixture(t, trustedFloor);
+  const adapter = {
+    async transact(key, callback) {
+      await store.adapter.transact(key, callback);
+      throw new Error('simulated lost floor commit acknowledgement');
+    },
+  };
+  const next = { ...localJournal, maxSequence: 9, journalDigestSha256: digest('commit-ack-lost') };
+  const checkpointRevision = REVISION + 1;
+  denied(await retainFloor({ ...store, adapter }, {
+    localJournal: next,
+    witnessProof: proof(next, { checkpointRevision }),
+    checkpointProof: signedCheckpoint(next, { checkpointRevision }),
+  }), 'CHECKPOINT_FLOOR_TRANSACTION_UNCERTAIN');
+  assert.equal(store.read().checkpointRevision, checkpointRevision);
+  denied(await retainFloor(store), 'CHECKPOINT_FLOOR_ROLLBACK');
+});
+
+test('the retained floor is detached from proof fields during the asynchronous commit', async t => {
+  const store = checkpointFileFixture(t, trustedFloor);
+  const snapshot = { ...localJournal, binding: structuredClone(binding), maxSequence: 9, journalDigestSha256: digest('detached') };
+  const checkpointRevision = REVISION + 1;
+  const checkpointProof = signedCheckpoint(snapshot, { checkpointRevision });
+  const adapter = {
+    transact(key, callback) {
+      return store.adapter.transact(key, floor => {
+        const proposal = callback(floor);
+        checkpointProof.statement.binding.allowedSymbols.push('UNSIGNED');
+        return proposal;
+      });
+    },
+  };
+  assert.deepEqual(await retainFloor({ ...store, adapter }, {
+    localJournal: snapshot, witnessProof: proof(snapshot, { checkpointRevision }), checkpointProof,
+  }), matchedEvidence);
+  assert.deepEqual(store.read().binding, binding);
+});
 
 const emptyJournal = { binding, records: [] };
 const reserveRow = { commandId: 'synthetic-cas-reservation', sequence: 1, state: 'RESERVED' };

@@ -1,5 +1,5 @@
 /**
- * P0 #176 / #160: SOURCE-ONLY, PURE synthetic anti-rollback contract.
+ * P0 #176 / #160: SOURCE-ONLY synthetic anti-rollback contract.
  * This helper has no disk/network/broker/MT5 access and must never be wired
  * into a customer or production execution path. A signed proof and an old
  * checkpoint can both be replayed if the checkpoint itself is restorable.
@@ -106,50 +106,47 @@ function signatureFailure(root, message, signatureBase64) {
   }
 }
 
-/**
- * Verifies a request-bound, purpose-separated Ed25519 synthetic witness.
- * Passing means only that supplied *evidence is internally consistent*.
- * The trusted root/checkpoint MUST be independently authenticated and stored
- * outside the customer and operator backup/restore domain; caller assertions
- * are not evidence of independence. This function never authorizes trading.
- */
-export function compareFollowerJournalWithWitness({
+function authenticateWitness({
   localJournal, witnessProof, trustedWitnessRoot, trustedCheckpoint,
   expectedNonce, nowMs,
 } = {}) {
-  if (!validSnapshot(localJournal, SNAPSHOT_FIELDS)) return blocked('LOCAL_JOURNAL_INVALID');
+  if (!validSnapshot(localJournal, SNAPSHOT_FIELDS)) return 'LOCAL_JOURNAL_INVALID';
   if (!witnessProof || !validSnapshot(witnessProof.statement, STATEMENT_FIELDS) ||
-      typeof witnessProof.signatureBase64 !== 'string') return blocked('WITNESS_PROOF_REQUIRED');
-  if (!validPinnedRoot(trustedWitnessRoot)) return blocked('PINNED_WITNESS_ROOT_REQUIRED');
-  if (!validCheckpoint(trustedCheckpoint)) return blocked('INDEPENDENT_CHECKPOINT_REQUIRED');
+      typeof witnessProof.signatureBase64 !== 'string') return 'WITNESS_PROOF_REQUIRED';
+  if (!validPinnedRoot(trustedWitnessRoot)) return 'PINNED_WITNESS_ROOT_REQUIRED';
+  if (!validCheckpoint(trustedCheckpoint)) return 'INDEPENDENT_CHECKPOINT_REQUIRED';
   const s = witnessProof.statement;
   if (s.schemaVersion !== 2 || s.authorityKeyId !== trustedWitnessRoot.keyId ||
       s.keyEpoch !== trustedWitnessRoot.keyEpoch ||
-      s.keyEpoch < trustedCheckpoint.keyEpoch) return blocked('WITNESS_ROOT_OR_EPOCH_MISMATCH');
-  if (!safeCounter(s.checkpointRevision)) return blocked('WITNESS_CHECKPOINT_REVISION_INVALID');
-  if (!validNonce(expectedNonce) || s.requestNonce !== expectedNonce) return blocked('WITNESS_NONCE_MISMATCH');
-  if (!freshWindow(nowMs, s.issuedAt, s.expiresAt)) return blocked('WITNESS_EXPIRED_OR_INVALID');
+      s.keyEpoch < trustedCheckpoint.keyEpoch) return 'WITNESS_ROOT_OR_EPOCH_MISMATCH';
+  if (!safeCounter(s.checkpointRevision)) return 'WITNESS_CHECKPOINT_REVISION_INVALID';
+  if (!validNonce(expectedNonce) || s.requestNonce !== expectedNonce) return 'WITNESS_NONCE_MISMATCH';
+  if (!freshWindow(nowMs, s.issuedAt, s.expiresAt)) return 'WITNESS_EXPIRED_OR_INVALID';
   if (!sameBinding(localJournal.binding, s.binding) ||
-      !sameBinding(trustedCheckpoint.binding, s.binding)) return blocked('FOLLOWER_BINDING_MISMATCH');
+      !sameBinding(trustedCheckpoint.binding, s.binding)) return 'FOLLOWER_BINDING_MISMATCH';
   const witnessFailure = signatureFailure(trustedWitnessRoot, signedBytes(s), witnessProof.signatureBase64);
-  if (witnessFailure) return blocked('WITNESS_' + witnessFailure);
+  if (witnessFailure) return 'WITNESS_' + witnessFailure;
   // A signed statement alone is replayable: it must agree with a separately
   // authenticated latest checkpoint, including revision and digest.
-  if (s.checkpointRevision < trustedCheckpoint.checkpointRevision) return blocked('WITNESS_CHECKPOINT_REVISION_ROLLBACK');
-  if (s.checkpointRevision > trustedCheckpoint.checkpointRevision) return blocked('CHECKPOINT_REVISION_BEHIND_WITNESS');
-  if (s.maxSequence < trustedCheckpoint.maxSequence) return blocked('WITNESS_HIGH_WATER_ROLLBACK');
-  if (s.maxSequence > trustedCheckpoint.maxSequence) return blocked('CHECKPOINT_BEHIND_WITNESS');
+  if (s.checkpointRevision < trustedCheckpoint.checkpointRevision) return 'WITNESS_CHECKPOINT_REVISION_ROLLBACK';
+  if (s.checkpointRevision > trustedCheckpoint.checkpointRevision) return 'CHECKPOINT_REVISION_BEHIND_WITNESS';
+  if (s.maxSequence < trustedCheckpoint.maxSequence) return 'WITNESS_HIGH_WATER_ROLLBACK';
+  if (s.maxSequence > trustedCheckpoint.maxSequence) return 'CHECKPOINT_BEHIND_WITNESS';
   if (s.journalDigestSha256 !== trustedCheckpoint.journalDigestSha256 ||
       s.pendingReservedCount !== trustedCheckpoint.pendingReservedCount) {
-    return blocked('WITNESS_CHECKPOINT_FORK');
+    return 'WITNESS_CHECKPOINT_FORK';
   }
-  if (localJournal.maxSequence < s.maxSequence) return blocked('LOCAL_JOURNAL_ROLLBACK');
-  if (localJournal.maxSequence > s.maxSequence) return blocked('LOCAL_JOURNAL_AHEAD_OF_WITNESS');
-  if (localJournal.journalDigestSha256 !== s.journalDigestSha256 ||
-      localJournal.pendingReservedCount !== s.pendingReservedCount) {
+  return null;
+}
+
+function compareLocalJournal(localJournal, snapshot) {
+  if (localJournal.maxSequence < snapshot.maxSequence) return blocked('LOCAL_JOURNAL_ROLLBACK');
+  if (localJournal.maxSequence > snapshot.maxSequence) return blocked('LOCAL_JOURNAL_AHEAD_OF_WITNESS');
+  if (localJournal.journalDigestSha256 !== snapshot.journalDigestSha256 ||
+      localJournal.pendingReservedCount !== snapshot.pendingReservedCount) {
     return blocked('LOCAL_JOURNAL_FORK');
   }
-  if (s.pendingReservedCount !== 0) return blocked('UNRESOLVED_RESERVATIONS');
+  if (snapshot.pendingReservedCount !== 0) return blocked('UNRESOLVED_RESERVATIONS');
   return Object.freeze({
     evidenceMatched: true,
     brokerExecutionAllowed: false,
@@ -158,61 +155,110 @@ export function compareFollowerJournalWithWitness({
 }
 
 /**
- * Review-only verification of a checkpoint signed by a key distinct from the
- * witness key. Pins and the retained floor come from trusted state outside
- * the restore domain. The caller supplies a fresh nonce for each request.
- * Verification never changes the floor or authorizes broker execution.
+ * Verifies a request-bound synthetic witness against an independently supplied
+ * checkpoint. A match establishes evidence consistency only.
  */
-export function compareFollowerJournalWithCheckpointProof({
+export function compareFollowerJournalWithWitness(input = {}) {
+  const failure = authenticateWitness(input);
+  return failure ? blocked(failure) : compareLocalJournal(input.localJournal, input.witnessProof.statement);
+}
+
+function authenticateCheckpointProof({
   localJournal, witnessProof, checkpointProof, trustedWitnessRoot,
   trustedCheckpointRoot, trustedHighWaterFloor, expectedNonce, nowMs,
 } = {}) {
-  if (!validPinnedRoot(trustedCheckpointRoot)) return blocked('PINNED_CHECKPOINT_ROOT_REQUIRED');
-  if (!validPinnedRoot(trustedWitnessRoot)) return blocked('PINNED_WITNESS_ROOT_REQUIRED');
+  if (!validPinnedRoot(trustedCheckpointRoot)) return 'PINNED_CHECKPOINT_ROOT_REQUIRED';
+  if (!validPinnedRoot(trustedWitnessRoot)) return 'PINNED_WITNESS_ROOT_REQUIRED';
   if (trustedWitnessRoot.publicKeySha256 === trustedCheckpointRoot.publicKeySha256) {
-    return blocked('CHECKPOINT_AND_WITNESS_KEYS_MUST_DIFFER');
+    return 'CHECKPOINT_AND_WITNESS_KEYS_MUST_DIFFER';
   }
   if (!validCheckpoint(trustedHighWaterFloor, FLOOR_FIELDS) ||
       !Number.isSafeInteger(trustedHighWaterFloor.checkpointKeyEpoch) ||
       trustedHighWaterFloor.checkpointKeyEpoch < 1) {
-    return blocked('TRUSTED_CHECKPOINT_FLOOR_REQUIRED');
+    return 'TRUSTED_CHECKPOINT_FLOOR_REQUIRED';
   }
   if (!exact(checkpointProof, ['statement', 'signatureBase64']) ||
       !validCheckpoint(checkpointProof.statement, CHECKPOINT_PROOF_FIELDS) ||
-      typeof checkpointProof.signatureBase64 !== 'string') return blocked('CHECKPOINT_PROOF_REQUIRED');
+      typeof checkpointProof.signatureBase64 !== 'string') return 'CHECKPOINT_PROOF_REQUIRED';
   const s = checkpointProof.statement;
   if (s.schemaVersion !== 1 || s.checkpointKeyId !== trustedCheckpointRoot.keyId ||
       s.checkpointKeyEpoch !== trustedCheckpointRoot.keyEpoch) {
-    return blocked('CHECKPOINT_ROOT_OR_EPOCH_MISMATCH');
+    return 'CHECKPOINT_ROOT_OR_EPOCH_MISMATCH';
   }
-  if (!validNonce(expectedNonce) || s.requestNonce !== expectedNonce) return blocked('CHECKPOINT_NONCE_MISMATCH');
-  if (!freshWindow(nowMs, s.issuedAt, s.expiresAt)) return blocked('CHECKPOINT_EXPIRED_OR_INVALID');
-  if (!sameBinding(trustedHighWaterFloor.binding, s.binding)) return blocked('CHECKPOINT_FLOOR_BINDING_MISMATCH');
+  if (!validNonce(expectedNonce) || s.requestNonce !== expectedNonce) return 'CHECKPOINT_NONCE_MISMATCH';
+  if (!freshWindow(nowMs, s.issuedAt, s.expiresAt)) return 'CHECKPOINT_EXPIRED_OR_INVALID';
+  if (!sameBinding(trustedHighWaterFloor.binding, s.binding)) return 'CHECKPOINT_FLOOR_BINDING_MISMATCH';
   const failure = signatureFailure(trustedCheckpointRoot, checkpointSignedBytes(s), checkpointProof.signatureBase64);
-  if (failure) return blocked('CHECKPOINT_' + failure);
+  if (failure) return 'CHECKPOINT_' + failure;
 
   const floor = trustedHighWaterFloor;
   if (s.checkpointRevision < floor.checkpointRevision || s.maxSequence < floor.maxSequence ||
       s.keyEpoch < floor.keyEpoch || s.checkpointKeyEpoch < floor.checkpointKeyEpoch) {
-    return blocked('CHECKPOINT_FLOOR_ROLLBACK');
+    return 'CHECKPOINT_FLOOR_ROLLBACK';
   }
   if (s.checkpointRevision === floor.checkpointRevision &&
       (s.maxSequence !== floor.maxSequence || s.keyEpoch !== floor.keyEpoch ||
        s.journalDigestSha256 !== floor.journalDigestSha256 ||
        s.pendingReservedCount !== floor.pendingReservedCount)) {
-    return blocked('CHECKPOINT_FLOOR_FORK');
+    return 'CHECKPOINT_FLOOR_FORK';
   }
   const trustedCheckpoint = {
-    binding: s.binding,
+    binding: { ...s.binding, allowedSymbols: [...s.binding.allowedSymbols] },
     maxSequence: s.maxSequence,
     journalDigestSha256: s.journalDigestSha256,
     pendingReservedCount: s.pendingReservedCount,
     keyEpoch: s.keyEpoch,
     checkpointRevision: s.checkpointRevision,
   };
-  return compareFollowerJournalWithWitness({
+  const witnessFailure = authenticateWitness({
     localJournal, witnessProof, trustedWitnessRoot, trustedCheckpoint, expectedNonce, nowMs,
   });
+  if (witnessFailure) return witnessFailure;
+  if (trustedWitnessRoot.keyEpoch !== s.keyEpoch) return 'CHECKPOINT_WITNESS_EPOCH_MISMATCH';
+  return { ...trustedCheckpoint, checkpointKeyEpoch: s.checkpointKeyEpoch };
+}
+
+/**
+ * Review-only verification with separately pinned signers and a retained
+ * floor. Verification never changes the floor or authorizes broker execution.
+ */
+export function compareFollowerJournalWithCheckpointProof(input = {}) {
+  const verified = authenticateCheckpointProof(input);
+  return typeof verified === 'string' ? blocked(verified) : compareLocalJournal(input.localJournal, verified);
+}
+
+/**
+ * Review-only model for verifying and retaining the floor in one transaction.
+ * The fixture adapter serializes each binding and returns the callback's
+ * decision only after the requested commit is acknowledged.
+ */
+export async function compareAndRetainSyntheticFollowerCheckpoint({ adapter, bindingKey, ...input } = {}) {
+  if (!adapter || typeof adapter.transact !== 'function' ||
+      typeof bindingKey !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(bindingKey)) {
+    return blocked('CHECKPOINT_FLOOR_TRANSACTION_REQUIRED');
+  }
+  try {
+    let proposal;
+    const result = await adapter.transact(bindingKey, floor => {
+      const verified = authenticateCheckpointProof({ ...input, trustedHighWaterFloor: floor });
+      if (typeof verified === 'string') {
+        proposal = { commit: false, decision: { ok: false, comparison: blocked(verified) } };
+        return proposal;
+      }
+      // Keep independently verified evidence even if the local journal needs reconciliation.
+      const decision = { ok: true, comparison: compareLocalJournal(input.localJournal, verified) };
+      const advanced = verified.checkpointRevision > floor.checkpointRevision ||
+        verified.checkpointKeyEpoch > floor.checkpointKeyEpoch;
+      proposal = advanced ? { commit: true, next: verified, decision } : { commit: false, decision };
+      return proposal;
+    });
+    if (proposal && result?.committed === proposal.commit && result.decision === proposal.decision) {
+      return proposal.decision.comparison;
+    }
+  } catch {
+    // A lost acknowledgement leaves the observation blocked until a fresh read.
+  }
+  return blocked('CHECKPOINT_FLOOR_TRANSACTION_UNCERTAIN');
 }
 
 export const FOLLOWER_WITNESS_DOMAIN = DOMAIN;

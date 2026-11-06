@@ -12,7 +12,15 @@ The verifier requires three inputs from trusted state outside the restore domain
 
 The tests use ephemeral signers and a retained floor provided separately from the response. They cover a new valid pair over rolled-back data, an altered same-revision checkpoint, key substitution, expired and replayed responses and a valid newer checkpoint. The output is a synthetic evidence decision with `brokerExecutionAllowed=false`.
 
-Production acceptance still depends on independently administered pins and durable floor storage outside every restore scope, authenticated retrieval, signer rotation and atomic floor updates. A coordinated rollback of the trusted floor and the authority stores remains outside the protection of this pure verifier.
+## Retaining the verified floor
+
+`compareAndRetainSyntheticFollowerCheckpoint` reads the pre-enrolled floor and verifies both signatures in one serialized fixture transaction. A newer authenticated revision or checkpoint signing epoch is retained before returning a comparison result. The two proofs must agree on the witness signing epoch. If the local journal is behind or contains a reservation, the new floor is still retained and the local journal stays blocked for reconciliation.
+
+The tests use a disposable floor file and two ephemeral signers. They reopen the floor store and reject a freshly signed older revision, including when the caller supplies an old floor. They also cover a missing floor, mismatched proofs, concurrent forks, loss of a commit acknowledgement, and mutation of the proof object while the fixture writes. A missing floor requires separately authenticated enrollment. An uncertain transaction requires a fresh read.
+
+To qualify an operational authority, use a floor store and signing keys administered outside the customer and operator restore scopes. Record the enrolled key fingerprints and initial floor through a separate authenticated channel. Advance the floor, restore older customer and authority snapshots, and verify that a fresh challenge for the older revision is rejected after reopening the retained store. Exercise conflicting writers, signer rotation and an unavailable authority with the follower held in quarantine.
+
+For the separately approved read-only MT5 DEMO pilot, use a separate Windows instance and verify `ACCOUNT_TRADE_MODE_DEMO`, the expected server and account binding, and the reported positions and pending orders. Record the account in masked form. [Pilot plan](../docs/pilots/customer-demo-pilot-v1.md) · [MT5 account properties](https://www.mql5.com/en/docs/constants/environment_state/accountinformation)
 
 ## Synthetic canonical journal digest (review specification only)
 
