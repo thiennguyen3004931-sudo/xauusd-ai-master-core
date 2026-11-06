@@ -12,6 +12,7 @@
 import { createHash, createPublicKey, verify as verifySignature } from 'node:crypto';
 
 const DOMAIN = 'XAUUSD-FOLLOWER-JOURNAL-WITNESS-V2\n';
+const CHECKPOINT_DOMAIN = 'XAUUSD-FOLLOWER-JOURNAL-CHECKPOINT-V1\n';
 const exact = (obj, fields) => obj !== null && typeof obj === 'object' && !Array.isArray(obj) &&
   Object.keys(obj).length === fields.length && fields.every(field => Object.hasOwn(obj, field));
 const canonical = v => typeof v === 'string' && v.length > 0 && v.trim() === v;
@@ -26,6 +27,11 @@ const STATEMENT_FIELDS = [
 ];
 const CHECKPOINT_FIELDS = [...SNAPSHOT_FIELDS, 'keyEpoch', 'checkpointRevision'];
 const ROOT_FIELDS = ['keyId', 'keyEpoch', 'publicKeyPem', 'publicKeySha256'];
+const CHECKPOINT_PROOF_FIELDS = [
+  'schemaVersion', 'checkpointKeyId', 'checkpointKeyEpoch', 'requestNonce', 'issuedAt', 'expiresAt',
+  ...CHECKPOINT_FIELDS,
+];
+const FLOOR_FIELDS = [...CHECKPOINT_FIELDS, 'checkpointKeyEpoch'];
 
 function validBinding(binding) {
   if (!exact(binding, BINDING_FIELDS)) return false;
@@ -43,16 +49,61 @@ function validSnapshot(x, fields) {
     safeCounter(x.maxSequence) && safeCounter(x.pendingReservedCount) &&
     hash(x.journalDigestSha256);
 }
+function validCheckpoint(x, fields = CHECKPOINT_FIELDS) {
+  return validSnapshot(x, fields) && safeCounter(x.checkpointRevision) &&
+    Number.isSafeInteger(x.keyEpoch) && x.keyEpoch >= 1;
+}
+function validPinnedRoot(root) {
+  return exact(root, ROOT_FIELDS) && canonical(root.keyId) &&
+    Number.isSafeInteger(root.keyEpoch) && root.keyEpoch >= 1 &&
+    typeof root.publicKeyPem === 'string' && root.publicKeyPem.includes('BEGIN PUBLIC KEY') &&
+    hash(root.publicKeySha256);
+}
+function validNonce(nonce) {
+  return canonical(nonce) && nonce.length >= 16 && nonce.length <= 256;
+}
+function freshWindow(nowMs, issuedAt, expiresAt) {
+  return safeCounter(nowMs) && safeCounter(issuedAt) && safeCounter(expiresAt) &&
+    issuedAt <= nowMs && expiresAt > nowMs && expiresAt - issuedAt <= 30_000;
+}
 function sameBinding(a, b) {
   return BINDING_FIELDS.every(field => field === 'allowedSymbols'
     ? JSON.stringify(a[field]) === JSON.stringify(b[field]) : a[field] === b[field]);
 }
+function snapshotTuple(s) {
+  return [...BINDING_FIELDS.map(field => s.binding[field]), s.maxSequence, s.journalDigestSha256,
+    s.pendingReservedCount];
+}
 function signedBytes(s) {
   return Buffer.from(DOMAIN + JSON.stringify([
     s.schemaVersion, s.authorityKeyId, s.keyEpoch, s.checkpointRevision, s.requestNonce,
-    s.issuedAt, s.expiresAt, ...BINDING_FIELDS.map(field => s.binding[field]),
-    s.maxSequence, s.journalDigestSha256, s.pendingReservedCount,
+    s.issuedAt, s.expiresAt, ...snapshotTuple(s),
   ]), 'utf8');
+}
+function checkpointSignedBytes(s) {
+  return Buffer.from(CHECKPOINT_DOMAIN + JSON.stringify([
+    s.schemaVersion, s.checkpointKeyId, s.checkpointKeyEpoch, s.requestNonce, s.issuedAt,
+    s.expiresAt, s.keyEpoch, s.checkpointRevision, ...snapshotTuple(s),
+  ]), 'utf8');
+}
+function signatureFailure(root, message, signatureBase64) {
+  try {
+    const key = createPublicKey(root.publicKeyPem);
+    if (key.asymmetricKeyType !== 'ed25519') return 'KEY_INVALID';
+    const keyDer = key.export({ format: 'der', type: 'spki' });
+    if (createHash('sha256').update(keyDer).digest('hex') !== root.publicKeySha256) {
+      return 'KEY_PIN_MISMATCH';
+    }
+    if (signatureBase64.length !== 88 || !/^[a-zA-Z0-9+/]+={0,2}$/.test(signatureBase64)) {
+      return 'SIGNATURE_INVALID';
+    }
+    const signature = Buffer.from(signatureBase64, 'base64');
+    if (signature.length !== 64 || signature.toString('base64') !== signatureBase64 ||
+        !verifySignature(null, message, key, signature)) return 'SIGNATURE_INVALID';
+    return null;
+  } catch {
+    return 'SIGNATURE_INVALID';
+  }
 }
 
 /**
@@ -69,50 +120,19 @@ export function compareFollowerJournalWithWitness({
   if (!validSnapshot(localJournal, SNAPSHOT_FIELDS)) return blocked('LOCAL_JOURNAL_INVALID');
   if (!witnessProof || !validSnapshot(witnessProof.statement, STATEMENT_FIELDS) ||
       typeof witnessProof.signatureBase64 !== 'string') return blocked('WITNESS_PROOF_REQUIRED');
-  if (!exact(trustedWitnessRoot, ROOT_FIELDS) || !canonical(trustedWitnessRoot.keyId) ||
-      !Number.isSafeInteger(trustedWitnessRoot.keyEpoch) || trustedWitnessRoot.keyEpoch < 1 ||
-      typeof trustedWitnessRoot.publicKeyPem !== 'string' ||
-      !trustedWitnessRoot.publicKeyPem.includes('BEGIN PUBLIC KEY') ||
-      !hash(trustedWitnessRoot.publicKeySha256)) {
-    return blocked('PINNED_WITNESS_ROOT_REQUIRED');
-  }
-  if (!validSnapshot(trustedCheckpoint, CHECKPOINT_FIELDS) ||
-      !safeCounter(trustedCheckpoint.checkpointRevision) ||
-      !Number.isSafeInteger(trustedCheckpoint.keyEpoch) || trustedCheckpoint.keyEpoch < 1) {
-    return blocked('INDEPENDENT_CHECKPOINT_REQUIRED');
-  }
+  if (!validPinnedRoot(trustedWitnessRoot)) return blocked('PINNED_WITNESS_ROOT_REQUIRED');
+  if (!validCheckpoint(trustedCheckpoint)) return blocked('INDEPENDENT_CHECKPOINT_REQUIRED');
   const s = witnessProof.statement;
   if (s.schemaVersion !== 2 || s.authorityKeyId !== trustedWitnessRoot.keyId ||
       s.keyEpoch !== trustedWitnessRoot.keyEpoch ||
       s.keyEpoch < trustedCheckpoint.keyEpoch) return blocked('WITNESS_ROOT_OR_EPOCH_MISMATCH');
   if (!safeCounter(s.checkpointRevision)) return blocked('WITNESS_CHECKPOINT_REVISION_INVALID');
-  if (!canonical(expectedNonce) || expectedNonce.length < 16 || expectedNonce.length > 256 ||
-      s.requestNonce !== expectedNonce) return blocked('WITNESS_NONCE_MISMATCH');
-  if (!safeCounter(nowMs) || !safeCounter(s.issuedAt) || !safeCounter(s.expiresAt) ||
-      s.issuedAt > nowMs || s.expiresAt <= nowMs ||
-      s.expiresAt - s.issuedAt > 30_000 || s.expiresAt <= s.issuedAt) {
-    return blocked('WITNESS_EXPIRED_OR_INVALID');
-  }
+  if (!validNonce(expectedNonce) || s.requestNonce !== expectedNonce) return blocked('WITNESS_NONCE_MISMATCH');
+  if (!freshWindow(nowMs, s.issuedAt, s.expiresAt)) return blocked('WITNESS_EXPIRED_OR_INVALID');
   if (!sameBinding(localJournal.binding, s.binding) ||
       !sameBinding(trustedCheckpoint.binding, s.binding)) return blocked('FOLLOWER_BINDING_MISMATCH');
-  try {
-    const key = createPublicKey(trustedWitnessRoot.publicKeyPem);
-    if (key.asymmetricKeyType !== 'ed25519') return blocked('WITNESS_KEY_INVALID');
-    const keyDer = key.export({ format: 'der', type: 'spki' });
-    if (createHash('sha256').update(keyDer).digest('hex') !== trustedWitnessRoot.publicKeySha256) {
-      return blocked('WITNESS_KEY_PIN_MISMATCH');
-    }
-    if (!/^[a-zA-Z0-9+/]+={0,2}$/.test(witnessProof.signatureBase64)) {
-      return blocked('WITNESS_SIGNATURE_INVALID');
-    }
-    const sig = Buffer.from(witnessProof.signatureBase64, 'base64');
-    if (sig.length !== 64 || sig.toString('base64') !== witnessProof.signatureBase64 ||
-        !verifySignature(null, signedBytes(s), key, sig)) {
-      return blocked('WITNESS_SIGNATURE_INVALID');
-    }
-  } catch {
-    return blocked('WITNESS_SIGNATURE_INVALID');
-  }
+  const witnessFailure = signatureFailure(trustedWitnessRoot, signedBytes(s), witnessProof.signatureBase64);
+  if (witnessFailure) return blocked('WITNESS_' + witnessFailure);
   // A signed statement alone is replayable: it must agree with a separately
   // authenticated latest checkpoint, including revision and digest.
   if (s.checkpointRevision < trustedCheckpoint.checkpointRevision) return blocked('WITNESS_CHECKPOINT_REVISION_ROLLBACK');
@@ -137,4 +157,63 @@ export function compareFollowerJournalWithWitness({
   });
 }
 
+/**
+ * Review-only verification of a checkpoint signed by a key distinct from the
+ * witness key. Pins and the retained floor come from trusted state outside
+ * the restore domain. The caller supplies a fresh nonce for each request.
+ * Verification never changes the floor or authorizes broker execution.
+ */
+export function compareFollowerJournalWithCheckpointProof({
+  localJournal, witnessProof, checkpointProof, trustedWitnessRoot,
+  trustedCheckpointRoot, trustedHighWaterFloor, expectedNonce, nowMs,
+} = {}) {
+  if (!validPinnedRoot(trustedCheckpointRoot)) return blocked('PINNED_CHECKPOINT_ROOT_REQUIRED');
+  if (!validPinnedRoot(trustedWitnessRoot)) return blocked('PINNED_WITNESS_ROOT_REQUIRED');
+  if (trustedWitnessRoot.publicKeySha256 === trustedCheckpointRoot.publicKeySha256) {
+    return blocked('CHECKPOINT_AND_WITNESS_KEYS_MUST_DIFFER');
+  }
+  if (!validCheckpoint(trustedHighWaterFloor, FLOOR_FIELDS) ||
+      !Number.isSafeInteger(trustedHighWaterFloor.checkpointKeyEpoch) ||
+      trustedHighWaterFloor.checkpointKeyEpoch < 1) {
+    return blocked('TRUSTED_CHECKPOINT_FLOOR_REQUIRED');
+  }
+  if (!exact(checkpointProof, ['statement', 'signatureBase64']) ||
+      !validCheckpoint(checkpointProof.statement, CHECKPOINT_PROOF_FIELDS) ||
+      typeof checkpointProof.signatureBase64 !== 'string') return blocked('CHECKPOINT_PROOF_REQUIRED');
+  const s = checkpointProof.statement;
+  if (s.schemaVersion !== 1 || s.checkpointKeyId !== trustedCheckpointRoot.keyId ||
+      s.checkpointKeyEpoch !== trustedCheckpointRoot.keyEpoch) {
+    return blocked('CHECKPOINT_ROOT_OR_EPOCH_MISMATCH');
+  }
+  if (!validNonce(expectedNonce) || s.requestNonce !== expectedNonce) return blocked('CHECKPOINT_NONCE_MISMATCH');
+  if (!freshWindow(nowMs, s.issuedAt, s.expiresAt)) return blocked('CHECKPOINT_EXPIRED_OR_INVALID');
+  if (!sameBinding(trustedHighWaterFloor.binding, s.binding)) return blocked('CHECKPOINT_FLOOR_BINDING_MISMATCH');
+  const failure = signatureFailure(trustedCheckpointRoot, checkpointSignedBytes(s), checkpointProof.signatureBase64);
+  if (failure) return blocked('CHECKPOINT_' + failure);
+
+  const floor = trustedHighWaterFloor;
+  if (s.checkpointRevision < floor.checkpointRevision || s.maxSequence < floor.maxSequence ||
+      s.keyEpoch < floor.keyEpoch || s.checkpointKeyEpoch < floor.checkpointKeyEpoch) {
+    return blocked('CHECKPOINT_FLOOR_ROLLBACK');
+  }
+  if (s.checkpointRevision === floor.checkpointRevision &&
+      (s.maxSequence !== floor.maxSequence || s.keyEpoch !== floor.keyEpoch ||
+       s.journalDigestSha256 !== floor.journalDigestSha256 ||
+       s.pendingReservedCount !== floor.pendingReservedCount)) {
+    return blocked('CHECKPOINT_FLOOR_FORK');
+  }
+  const trustedCheckpoint = {
+    binding: s.binding,
+    maxSequence: s.maxSequence,
+    journalDigestSha256: s.journalDigestSha256,
+    pendingReservedCount: s.pendingReservedCount,
+    keyEpoch: s.keyEpoch,
+    checkpointRevision: s.checkpointRevision,
+  };
+  return compareFollowerJournalWithWitness({
+    localJournal, witnessProof, trustedWitnessRoot, trustedCheckpoint, expectedNonce, nowMs,
+  });
+}
+
 export const FOLLOWER_WITNESS_DOMAIN = DOMAIN;
+export const FOLLOWER_CHECKPOINT_DOMAIN = CHECKPOINT_DOMAIN;

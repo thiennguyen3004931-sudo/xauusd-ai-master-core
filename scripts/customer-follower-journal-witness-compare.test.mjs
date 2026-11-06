@@ -9,7 +9,9 @@ import { dirname, join, resolve } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import {
+  compareFollowerJournalWithCheckpointProof,
   compareFollowerJournalWithWitness as compare,
+  FOLLOWER_CHECKPOINT_DOMAIN,
   FOLLOWER_WITNESS_DOMAIN,
 } from './customer-follower-journal-witness-compare.mjs';
 import { createFollowerCanonicalJournalSnapshot } from './customer-follower-journal-canonical-state.mjs';
@@ -56,6 +58,145 @@ const evaluate=(options={})=>compare({ localJournal, witnessProof:proof(),
   trustedWitnessRoot: root, trustedCheckpoint, expectedNonce: NONCE, nowMs:NOW+1_000,
   ...options });
 const denied=(result,reason)=>assert.deepEqual(result,{evidenceMatched:false,brokerExecutionAllowed:false,reasonCode:reason});
+
+const checkpointPair = generateKeyPairSync('ed25519');
+const checkpointRoot = Object.freeze({
+  keyId: 'independent-checkpoint-1',
+  keyEpoch: 3,
+  publicKeyPem: checkpointPair.publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+  publicKeySha256: createHash('sha256')
+    .update(checkpointPair.publicKey.export({ format: 'der', type: 'spki' })).digest('hex'),
+});
+const trustedFloor = Object.freeze({ ...trustedCheckpoint, checkpointKeyEpoch: checkpointRoot.keyEpoch });
+
+function signedCheckpoint(snapshot = localJournal, overrides = {},
+  privateKey = checkpointPair.privateKey, domain = FOLLOWER_CHECKPOINT_DOMAIN) {
+  const statement = {
+    schemaVersion: 1, checkpointKeyId: checkpointRoot.keyId, checkpointKeyEpoch: checkpointRoot.keyEpoch,
+    requestNonce: NONCE, issuedAt: NOW, expiresAt: NOW + 10_000,
+    ...checkpoint(snapshot), ...overrides,
+  };
+  const s = statement;
+  const fields = [
+    s.schemaVersion, s.checkpointKeyId, s.checkpointKeyEpoch, s.requestNonce, s.issuedAt,
+    s.expiresAt, s.keyEpoch, s.checkpointRevision, s.binding.licenseId, s.binding.installationId,
+    s.binding.mt5Login, s.binding.brokerServer, s.binding.allowedSymbols,
+    s.maxSequence, s.journalDigestSha256, s.pendingReservedCount,
+  ];
+  return { statement, signatureBase64: signEd25519(null,
+    Buffer.from(domain + JSON.stringify(fields)), privateKey).toString('base64') };
+}
+
+const evaluateSigned = (overrides = {}) => compareFollowerJournalWithCheckpointProof({
+  localJournal, witnessProof: proof(), checkpointProof: signedCheckpoint(),
+  trustedWitnessRoot: root, trustedCheckpointRoot: checkpointRoot, trustedHighWaterFloor: trustedFloor,
+  expectedNonce: NONCE, nowMs: NOW + 1_000, ...overrides,
+});
+
+test('separately signed checkpoint matches the retained floor and can advance to a newer revision', () => {
+  const expected = {
+    evidenceMatched: true, brokerExecutionAllowed: false,
+    reasonCode: 'SYNTHETIC_FOLLOWER_WITNESS_MATCH_ONLY',
+  };
+  assert.deepEqual(evaluateSigned(), expected);
+  const next = { ...localJournal, maxSequence: 9, journalDigestSha256: digest('next-9') };
+  const checkpointRevision = REVISION + 1;
+  assert.deepEqual(evaluateSigned({
+    localJournal: next,
+    witnessProof: proof(next, { checkpointRevision }),
+    checkpointProof: signedCheckpoint(next, { checkpointRevision }),
+  }), expected);
+});
+
+test('signed checkpoint requires its own pin, exact envelope and independently retained floor', () => {
+  denied(evaluateSigned({ trustedCheckpointRoot: undefined }), 'PINNED_CHECKPOINT_ROOT_REQUIRED');
+  denied(evaluateSigned({ trustedHighWaterFloor: undefined }), 'TRUSTED_CHECKPOINT_FLOOR_REQUIRED');
+  denied(evaluateSigned({ checkpointProof: trustedCheckpoint }), 'CHECKPOINT_PROOF_REQUIRED');
+  denied(evaluateSigned({ checkpointProof: { ...signedCheckpoint(), trustedCheckpointRoot: checkpointRoot } }),
+    'CHECKPOINT_PROOF_REQUIRED');
+});
+
+test('checkpoint proof replay fails on a new challenge and at expiry', () => {
+  const nextNonce = 'synthetic-next-checkpoint-request';
+  denied(evaluateSigned({
+    expectedNonce: nextNonce,
+    witnessProof: proof(localJournal, { requestNonce: nextNonce }),
+  }), 'CHECKPOINT_NONCE_MISMATCH');
+  denied(evaluateSigned({ nowMs: NOW + 10_000 }), 'CHECKPOINT_EXPIRED_OR_INVALID');
+  denied(evaluateSigned({
+    checkpointProof: signedCheckpoint(localJournal, { expiresAt: NOW + 30_001 }),
+  }), 'CHECKPOINT_EXPIRED_OR_INVALID');
+});
+
+test('checkpoint signature rejects substituted signer, changed payload and witness-purpose signature', () => {
+  denied(evaluateSigned({ checkpointProof: signedCheckpoint(localJournal, {}, pair.privateKey) }),
+    'CHECKPOINT_SIGNATURE_INVALID');
+  const signed = signedCheckpoint();
+  denied(evaluateSigned({ checkpointProof: {
+    ...signed, statement: { ...signed.statement, checkpointRevision: REVISION + 1 },
+  } }), 'CHECKPOINT_SIGNATURE_INVALID');
+  denied(evaluateSigned({
+    checkpointProof: signedCheckpoint(localJournal, {}, checkpointPair.privateKey, FOLLOWER_WITNESS_DOMAIN),
+  }), 'CHECKPOINT_SIGNATURE_INVALID');
+  denied(evaluateSigned({
+    trustedCheckpointRoot: { ...checkpointRoot, publicKeySha256: digest('wrong-checkpoint-key-pin') },
+  }), 'CHECKPOINT_KEY_PIN_MISMATCH');
+});
+
+test('aliasing the witness key as the checkpoint signer does not establish independent evidence', () => {
+  const alias = { ...root, keyId: checkpointRoot.keyId, keyEpoch: checkpointRoot.keyEpoch };
+  denied(evaluateSigned({
+    trustedCheckpointRoot: alias,
+    checkpointProof: signedCheckpoint(localJournal, {}, pair.privateKey),
+  }), 'CHECKPOINT_AND_WITNESS_KEYS_MUST_DIFFER');
+});
+
+test('new valid signatures over older journal and checkpoint cannot cross the retained floor', () => {
+  const old = { ...localJournal, maxSequence: 7, journalDigestSha256: digest('previous-7') };
+  const checkpointRevision = REVISION - 1;
+  denied(evaluateSigned({
+    localJournal: old,
+    witnessProof: proof(old, { checkpointRevision }),
+    checkpointProof: signedCheckpoint(old, { checkpointRevision }),
+  }), 'CHECKPOINT_FLOOR_ROLLBACK');
+  denied(evaluateSigned({ checkpointProof: signedCheckpoint(old, { checkpointRevision: REVISION + 1 }) }),
+    'CHECKPOINT_FLOOR_ROLLBACK');
+});
+
+test('a signed checkpoint cannot reuse a retained revision for different journal contents', () => {
+  const fork = { ...localJournal, journalDigestSha256: digest('fork-at-retained-revision') };
+  denied(evaluateSigned({
+    localJournal: fork,
+    witnessProof: proof(fork),
+    checkpointProof: signedCheckpoint(fork),
+  }), 'CHECKPOINT_FLOOR_FORK');
+  const otherBinding = { ...localJournal, binding: { ...binding, installationId: 'synthetic-other-installation' } };
+  denied(evaluateSigned({ checkpointProof: signedCheckpoint(otherBinding) }), 'CHECKPOINT_FLOOR_BINDING_MISMATCH');
+});
+
+test('retained signing epochs block rollback even when an old trusted signer still verifies', () => {
+  denied(evaluateSigned({
+    trustedHighWaterFloor: { ...trustedFloor, checkpointKeyEpoch: checkpointRoot.keyEpoch + 1 },
+  }), 'CHECKPOINT_FLOOR_ROLLBACK');
+  denied(evaluateSigned({
+    checkpointProof: signedCheckpoint(localJournal, {
+      checkpointRevision: REVISION + 1, keyEpoch: root.keyEpoch - 1,
+    }),
+  }), 'CHECKPOINT_FLOOR_ROLLBACK');
+  denied(evaluateSigned({
+    trustedCheckpointRoot: { ...checkpointRoot, keyEpoch: checkpointRoot.keyEpoch + 1 },
+  }), 'CHECKPOINT_ROOT_OR_EPOCH_MISMATCH');
+});
+
+test('separate signatures still quarantine an unresolved reservation', () => {
+  const pending = { ...localJournal, pendingReservedCount: 1, journalDigestSha256: digest('reserved-8') };
+  const checkpointRevision = REVISION + 1;
+  denied(evaluateSigned({
+    localJournal: pending,
+    witnessProof: proof(pending, { checkpointRevision }),
+    checkpointProof: signedCheckpoint(pending, { checkpointRevision }),
+  }), 'UNRESOLVED_RESERVATIONS');
+});
 
 test('matching synthetic independent checkpoint evidence is NOT trading permission',()=>{
   assert.deepEqual(evaluate(),{
@@ -208,7 +349,7 @@ test('synthetic witness and journal-snapshot helpers must not be imported by ope
     'apps/api/src',
     'scripts/customer-follower-demo',
   ];
-  const unsafeImport=/\b(?:compareFollowerJournalWithWitness|createFollowerCanonicalJournalSnapshot|advanceSyntheticFollowerCheckpoint)\b|customer-follower-journal-(?:witness-compare|canonical-state|checkpoint-cas)\.mjs/;
+  const unsafeImport=/\b(?:compareFollowerJournalWith(?:Witness|CheckpointProof)|createFollowerCanonicalJournalSnapshot|advanceSyntheticFollowerCheckpoint)\b|customer-follower-journal-(?:witness-compare|canonical-state|checkpoint-cas)\.mjs/;
   const activeSource=/\.(?:[cm]?js|tsx?)$/;
   const ignoreTest=/(?:^|[.\/\\])(?:__tests__|__fixtures__|tests?|fixtures?)(?:[\/\\]|$)|\.(?:test|spec)\.[cm]?[jt]sx?$/;
   const offenders=[];

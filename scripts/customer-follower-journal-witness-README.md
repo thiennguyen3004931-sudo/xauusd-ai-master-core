@@ -4,6 +4,16 @@ The pure function `compareFollowerJournalWithWitness` and its Node test suite mo
 
 A synthetic statement is signed using the distinct `XAUUSD-FOLLOWER-JOURNAL-WITNESS-V2` domain. It binds the specific license, installation, MT5 login, broker server and sorted allowed symbols, a journal high-water sequence, a digest of the *whole canonical journal state*, unresolved reservation count, key epoch, checkpoint revision, request nonce and validity window. A separately supplied **pinned witness key** and **trusted high-water checkpoint** are compared with the local journal snapshot. A signed revision must equal the authenticated checkpoint revision. Mismatch, stale nonce/time, invalid signature or key pin, old sequence, same-sequence journal fork, newer local state that the witness has not observed, wrong follower binding and unresolved reservations fail closed.
 
+## Separately signed checkpoint evidence
+
+`compareFollowerJournalWithCheckpointProof` validates a checkpoint envelope before using the existing witness comparison. The checkpoint signer has its own pinned Ed25519 public key, key epoch and signature domain `XAUUSD-FOLLOWER-JOURNAL-CHECKPOINT-V1`. A key reused under another name cannot serve both purposes.
+
+The verifier requires three inputs from trusted state outside the restore domain: the witness pin, the checkpoint signer pin and the last retained checkpoint floor. The floor records the journal binding, revision, sequence, digest, unresolved count and both signing epochs. Both proofs must match the same fresh request nonce. The checkpoint proof is accepted for comparison only if its binding matches the floor, its revision, sequence and epochs do not regress and its journal fields agree at the same revision. The verifier then compares the witness, the authenticated checkpoint and the reopened journal. An unresolved reservation keeps recovery blocked.
+
+The tests use ephemeral signers and a retained floor provided separately from the response. They cover a new valid pair over rolled-back data, an altered same-revision checkpoint, key substitution, expired and replayed responses and a valid newer checkpoint. The output is a synthetic evidence decision with `brokerExecutionAllowed=false`.
+
+Production acceptance still depends on independently administered pins and durable floor storage outside every restore scope, authenticated retrieval, signer rotation and atomic floor updates. A coordinated rollback of the trusted floor and the authority stores remains outside the protection of this pure verifier.
+
 ## Synthetic canonical journal digest (review specification only)
 
 `createFollowerCanonicalJournalSnapshot` in `scripts/customer-follower-journal-canonical-state.mjs` is a pure, deterministic **in-memory** candidate for the complete follower journal digest. It accepts an exact binding and an array of exact `{commandId, sequence, state}` rows (`RESERVED` or `DISPATCHED`), rejects duplicate IDs/sequences and invalid bindings, sorts by sequence and derives the max sequence and unresolved count rather than trusting caller-supplied counters. SHA-256 is domain-separated with `XAUUSD-FOLLOWER-JOURNAL-SNAPSHOT-V1` and includes schema version, full customer/installation/MT5/server/symbol scope, every row, state, max sequence and unresolved count.
