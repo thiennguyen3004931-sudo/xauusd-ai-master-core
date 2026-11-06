@@ -15,6 +15,7 @@ class RecoveringHealthFakeMt5:
 
     def __init__(self):
         self.connected = True
+        self.broker_connected = True
         self.initialize_calls = 0
 
     def initialize(self, **_):
@@ -32,7 +33,9 @@ class RecoveringHealthFakeMt5:
         return (500, 5735, "test")
 
     def terminal_info(self):
-        return SimpleNamespace(trade_allowed=True) if self.connected else None
+        if not self.connected:
+            return None
+        return SimpleNamespace(trade_allowed=True, connected=self.broker_connected)
 
     def account_info(self):
         if not self.connected:
@@ -77,6 +80,24 @@ def settings(path: Path):
 
 
 class HealthObservationTests(unittest.TestCase):
+    def test_broker_connectivity_is_distinct_from_terminal_ipc(self):
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        ledger_path = Path(directory) / "ledger.sqlite3"
+        fake = RecoveringHealthFakeMt5()
+        ledger = IdempotencyLedger(ledger_path)
+        self.addCleanup(ledger.close)
+        gateway = GuardedMt5Gateway(settings(ledger_path), ledger, fake)
+        self.assertTrue(gateway.start())
+
+        for broker_connected in (True, False, None):
+            with self.subTest(broker_connected=broker_connected):
+                fake.broker_connected = broker_connected
+                health = gateway.health(reconnect=False)
+                self.assertIs(health["connected"], True)
+                self.assertIs(health["brokerConnected"], broker_connected)
+
+        self.assertEqual(fake.initialize_calls, 1)
+
     def test_health_observation_can_disable_reconnect(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger_path = Path(directory) / "ledger.sqlite3"
