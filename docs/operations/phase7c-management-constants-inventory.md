@@ -19,26 +19,26 @@ Phân loại: **RUNTIME** = quyết định lệnh thật; **RUNTIME_DISPLAY_ONL
 
 | ID | File:dòng | Giá trị | Phạm vi | Ý nghĩa |
 |---|---|---|---|---|
-| TR-MIN-SL | `scripts/run-phase7b-demo-controller.ts:284` | 6 | RUNTIME | SL ban đầu tối thiểu (giá) |
-| TR-MAX-SL | `scripts/run-phase7b-demo-controller.ts:285` | 10 | RUNTIME | SL tối đa; >10 thì chờ hồi (TOO_WIDE_WAIT) |
-| TR-PULLBACK-WAIT | `scripts/run-phase7b-demo-controller.ts:288` | 15 phút | RUNTIME | Thời gian chờ hồi khi SL >10 |
-| TR-FM-ACT | `scripts/run-phase7b-demo-controller.ts:286` | +10 | RUNTIME | FastMove kích hoạt |
-| TR-FM-GIVEBACK | `scripts/run-phase7b-demo-controller.ts:287` | 10 | RUNTIME | FastMove trả lại từ đỉnh |
-| TR-BE-TRIGGER | `scripts/run-phase7b-demo-controller.ts:1923` | +6 mặc định (snapshot lúc vào lệnh) | RUNTIME | BE trigger, đọc từ `managed.breakEven` (T2) |
-| TR-BE-OFFSET | `scripts/run-phase7b-demo-controller.ts:1929` | 0 mặc định (snapshot) | RUNTIME | BE = entry ± offset, chỉ siết SL, tôn trọng stop/freeze level (T2) |
-| TR-PARTIAL | `scripts/run-phase7b-demo-controller.ts:2108` | +10 (literal) | RUNTIME | Chốt 1/3 |
-| TR-FIXED-TP-ON | `scripts/run-phase7b-demo-controller.ts:267` | false | RUNTIME | TP cố định mặc định tắt (env) |
-| TR-FIXED-TP-DIST | `scripts/run-phase7b-demo-controller.ts:268` | 0 | RUNTIME | Khoảng TP cố định (env) |
+| TR-MIN-SL | `scripts/run-phase7b-demo-controller.ts:285` | 6 | RUNTIME | SL ban đầu tối thiểu (giá) |
+| TR-MAX-SL | `scripts/run-phase7b-demo-controller.ts:286` | 10 | RUNTIME | SL tối đa; >10 thì chờ hồi (TOO_WIDE_WAIT) |
+| TR-PULLBACK-WAIT | `scripts/run-phase7b-demo-controller.ts:289` | 15 phút | RUNTIME | Thời gian chờ hồi khi SL >10 |
+| TR-FM-ACT | `scripts/run-phase7b-demo-controller.ts:287` | +10 | RUNTIME | FastMove kích hoạt |
+| TR-FM-GIVEBACK | `scripts/run-phase7b-demo-controller.ts:288` | 10 | RUNTIME | FastMove trả lại từ đỉnh |
+| TR-BE-TRIGGER | `scripts/run-phase7b-demo-controller.ts:1951` | +6 mặc định (snapshot lúc vào lệnh) | RUNTIME | BE trigger, đọc từ `managed.breakEven` (T2) |
+| TR-BE-OFFSET | `scripts/run-phase7b-demo-controller.ts:1957` | 0 mặc định (snapshot) | RUNTIME | BE = entry ± offset, chỉ siết SL, tôn trọng stop/freeze level (T2) |
+| TR-PARTIAL | `scripts/run-phase7b-demo-controller.ts:2136` | +10 (literal) | RUNTIME | Chốt 1/3 |
+| TR-FIXED-TP-ON | `scripts/run-phase7b-demo-controller.ts:268` | false | RUNTIME | TP cố định mặc định tắt (env) |
+| TR-FIXED-TP-DIST | `scripts/run-phase7b-demo-controller.ts:269` | 0 | RUNTIME | Khoảng TP cố định (env) |
 | SHARED-STRUCT-BUFFER | `scripts/phase7c-stop-monotonicity.mjs:3` | 1 | RUNTIME | Đệm cấu trúc dùng chung TREND/SIDEWAY/M15 swing trail |
 | SW-MIN-SL | `scripts/phase7c-sideway-logic.mjs:3` | 6 | RUNTIME | SL tối thiểu |
 | SW-MAX-SL | `scripts/phase7c-sideway-logic.mjs:4` | 10 | RUNTIME | SL tối đa; >10 bỏ lệnh (WAIT_PULLBACK_STOP_GT_10) |
 | SW-RANGE-BUFFER | `scripts/phase7c-sideway-logic.mjs:159` | max(0,25·ATR, stops level, 20 point) | RUNTIME | Đệm biên range trước khi cộng đệm cấu trúc +1 |
 | SW-TP1-LEGACY | `scripts/phase7c-sideway-logic.mjs:196` | entry ±10 | RUNTIME_DISPLAY_ONLY | tp1 cũ; partial +10 bị tắt (brokerTpSlTrailOnly), chỉ hiển thị |
 | SW-MIN-RR | `scripts/phase7c-sideway-logic.mjs:199` | 1,2 | RUNTIME | RR tối thiểu tới biên đối diện |
-| SW-FM-ACT | `scripts/run-phase7c-sideway-controller.mjs:105` | +10 | RUNTIME | FastMove kích hoạt |
-| SW-FM-GIVEBACK | `scripts/run-phase7c-sideway-controller.mjs:106` | 10 | RUNTIME | FastMove trả lại |
-| SW-BE-TRIGGER | `scripts/run-phase7c-sideway-controller.mjs:1317` | +6 mặc định (snapshot) | RUNTIME | BE trigger, đọc từ `managed.breakEven` (T2) |
-| SW-BE-OFFSET | `scripts/run-phase7c-sideway-controller.mjs:1323` | 0 mặc định (snapshot) | RUNTIME | BE = entry ± offset (T2) |
+| SW-FM-ACT | `scripts/run-phase7c-sideway-controller.mjs:106` | +10 | RUNTIME | FastMove kích hoạt |
+| SW-FM-GIVEBACK | `scripts/run-phase7c-sideway-controller.mjs:107` | 10 | RUNTIME | FastMove trả lại |
+| SW-BE-TRIGGER | `scripts/run-phase7c-sideway-controller.mjs:1328` | +6 mặc định (snapshot) | RUNTIME | BE trigger, đọc từ `managed.breakEven` (T2) |
+| SW-BE-OFFSET | `scripts/run-phase7c-sideway-controller.mjs:1334` | 0 mặc định (snapshot) | RUNTIME | BE = entry ± offset (T2) |
 | BE-DEFAULT-TRIGGER | `scripts/phase7c-break-even-config.mjs:19` | 6 | RUNTIME | Nguồn chung TREND/SIDEWAY/SEMI; env `ZIQ_PHASE7C_BREAK_EVEN_TRIGGER_PRICE` (4–15), sai thì không khởi động |
 | BE-DEFAULT-OFFSET | `scripts/phase7c-break-even-config.mjs:20` | 0 | RUNTIME | env `ZIQ_PHASE7C_BREAK_EVEN_OFFSET_PRICE` (0–3, < trigger) |
 | SEMI-INIT-SL | `scripts/phase7c-semi-trend-adoption-runtime.mjs:19` | 6 | RUNTIME | SL mục tiêu khi nhận lệnh tay; sau đó kế thừa managePosition của TREND |

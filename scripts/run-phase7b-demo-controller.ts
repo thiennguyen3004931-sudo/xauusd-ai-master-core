@@ -25,6 +25,7 @@ import {
   tightestKnownStop,
 } from "./phase7c-stop-monotonicity.mjs";
 import { fastMoveProfitLockCandidate } from "./phase7c-fast-move-profit-lock.mjs";
+import { checkDailyPnlStopViaControlApi } from "./phase7c-daily-pnl-stop.mjs";
 import {
   breakEvenSnapshot,
   entryBreakEvenSnapshot,
@@ -917,6 +918,16 @@ async function submitTrendEntry(
     return entryState === "PULLBACK_ENTRY" ? "BROKER_GAP_WAIT" : "REJECTED";
   }
 
+  // Daily loss limit / profit target (operator-set, default OFF): once hit,
+  // no new position until the next broker day. Open positions are untouched.
+  const dailyPnlStop = await checkDailyPnlStopViaControlApi({
+    fetchStatus: () => readPhase7CDailyPnlStopStatus(),
+  });
+  if (dailyPnlStop.blocked) {
+    journal("ENTRY_DAILY_PNL_STOP_BLOCK", { signalId: signal.id, side: signal.side, entryState, dailyPnlStop });
+    return "REJECTED";
+  }
+
   const dailyRecovery = await resolveDailyRecoveryPlan(quote, spec);
   const takeProfit = dailyRecovery.mode === "RECOVERY_TP"
     ? roundPrice(
@@ -1309,6 +1320,23 @@ async function resolveDailyRecoveryPlan(
       rawTpDistance <= DAILY_RECOVERY_MAX_TP_DISTANCE + 1e-9,
     dealCount: dealCount,
   });
+}
+
+async function readPhase7CDailyPnlStopStatus(): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await fetch(`${phase7cControlApiBase}/api/v1/phase7c/daily-pnl-stop`, {
+      method: "GET",
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Daily P/L stop status HTTP ${response.status}.`);
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function readPhase7CReversalEntryContext(): Promise<ReversalEntryContext | null> {

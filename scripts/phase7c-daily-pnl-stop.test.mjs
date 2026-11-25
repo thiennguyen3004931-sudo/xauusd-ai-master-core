@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import {
   DAILY_PNL_STOP_FILE_ENV,
   checkDailyPnlStopBeforeEntry,
+  checkDailyPnlStopViaControlApi,
   createDefaultDailyPnlStopState,
   evaluateDailyPnlStop,
   readDailyPnlStopConfig,
@@ -61,8 +62,10 @@ test("missing config file reads as the virtual OFF default", () => {
   assert.equal(read.state.enabled, false);
 });
 
-test("file path comes from env, else <cwd>/.runtime/phase7c-daily-pnl-stop.json", () => {
-  assert.equal(resolveDailyPnlStopFile({ [DAILY_PNL_STOP_FILE_ENV]: "/x/y.json" }, "/repo"), path.resolve("/x/y.json"));
+test("file path: explicit env > PHASE7C_RUNTIME_ROOT > PHASE7B_DEMO_WORK_DIR/.. > <cwd>/.runtime", () => {
+  assert.equal(resolveDailyPnlStopFile({ [DAILY_PNL_STOP_FILE_ENV]: "/x/y.json", PHASE7C_RUNTIME_ROOT: "/rt" }, "/repo"), path.resolve("/x/y.json"));
+  assert.equal(resolveDailyPnlStopFile({ PHASE7C_RUNTIME_ROOT: "/rt" }, "/repo"), path.resolve("/rt", "phase7c-daily-pnl-stop.json"));
+  assert.equal(resolveDailyPnlStopFile({ PHASE7B_DEMO_WORK_DIR: "/rt/phase7b-demo" }, "/repo"), path.resolve("/rt", "phase7c-daily-pnl-stop.json"));
   assert.equal(resolveDailyPnlStopFile({}, "/repo"), path.resolve("/repo", ".runtime", "phase7c-daily-pnl-stop.json"));
 });
 
@@ -241,44 +244,102 @@ test("pre-entry check: corrupt file blocks new entries", async () => {
   assert.equal(result.reason, "CONFIG_INVALID");
 });
 
+// ---- Controller-side gate (control API is the authority) ----
+
+const apiStatus = (status) => async () => ({ status });
+
+test("controller gate: API OFF and local OFF -> allow (baseline)", async () => {
+  const result = await checkDailyPnlStopViaControlApi({ filePath: tempFile(), fetchStatus: apiStatus({ blocked: false, reason: "DISABLED" }) });
+  assert.equal(result.blocked, false);
+  assert.equal(result.reason, "DISABLED");
+});
+
+test("controller gate: API unreachable and local OFF -> allow (an API outage never changes old behaviour)", async () => {
+  const result = await checkDailyPnlStopViaControlApi({ filePath: tempFile(), fetchStatus: async () => { throw new Error("ECONNREFUSED"); } });
+  assert.equal(result.blocked, false);
+  assert.equal(result.reason, "DISABLED");
+});
+
+test("controller gate: API unreachable and local ON -> block", async () => {
+  const result = await checkDailyPnlStopViaControlApi({ filePath: tempFile(config()), fetchStatus: async () => { throw new Error("timeout"); } });
+  assert.equal(result.blocked, true);
+  assert.equal(result.reason, "DATA_UNAVAILABLE");
+});
+
+test("controller gate: API answers without a status -> local fallback", async () => {
+  const off = await checkDailyPnlStopViaControlApi({ filePath: tempFile(), fetchStatus: async () => ({ status: null, statusError: "boom" }) });
+  assert.equal(off.blocked, false);
+  const on = await checkDailyPnlStopViaControlApi({ filePath: tempFile(config()), fetchStatus: async () => ({ status: null, statusError: "boom" }) });
+  assert.equal(on.blocked, true);
+});
+
+test("controller gate: API hit/invalid/unavailable statuses block, WITHIN_LIMITS allows", async () => {
+  for (const reason of ["DAILY_LOSS_LIMIT_HIT", "DAILY_PROFIT_TARGET_HIT", "CONFIG_INVALID", "DATA_UNAVAILABLE"]) {
+    const result = await checkDailyPnlStopViaControlApi({ filePath: tempFile(config()), fetchStatus: apiStatus({ blocked: true, reason }) });
+    assert.equal(result.blocked, true, reason);
+    assert.equal(result.reason, reason);
+  }
+  // A malformed "not blocked" with a hit reason still blocks.
+  const inconsistent = await checkDailyPnlStopViaControlApi({ filePath: tempFile(config()), fetchStatus: apiStatus({ blocked: false, reason: "DAILY_LOSS_LIMIT_HIT" }) });
+  assert.equal(inconsistent.blocked, true);
+  const ok = await checkDailyPnlStopViaControlApi({ filePath: tempFile(config()), fetchStatus: apiStatus({ blocked: false, reason: "WITHIN_LIMITS", dayPnl: -20 }) });
+  assert.equal(ok.blocked, false);
+  // The API owns the config file the UI writes: it enforces even if this process has no local copy.
+  const apiOnly = await checkDailyPnlStopViaControlApi({ filePath: tempFile(), fetchStatus: apiStatus({ blocked: true, reason: "DAILY_LOSS_LIMIT_HIT" }) });
+  assert.equal(apiOnly.blocked, true);
+});
+
+test("controller gate: local ON while API says OFF -> block (different files)", async () => {
+  const result = await checkDailyPnlStopViaControlApi({ filePath: tempFile(config()), fetchStatus: apiStatus({ blocked: false, reason: "DISABLED" }) });
+  assert.equal(result.blocked, true);
+  assert.equal(result.reason, "DATA_UNAVAILABLE");
+});
+
+test("controller gate: corrupt local file blocks", async () => {
+  const result = await checkDailyPnlStopViaControlApi({ filePath: tempFile("{broken"), fetchStatus: async () => { throw new Error("down"); } });
+  assert.equal(result.blocked, true);
+  assert.equal(result.reason, "CONFIG_INVALID");
+});
+
 // ---- Runtime wiring (source contract) ----
 
 function sliceBetween(source, start, end) {
   const from = source.indexOf(start);
   assert.ok(from >= 0, `missing ${start}`);
-  const to = source.indexOf(end, from);
+  const to = source.indexOf(end, from + start.length);
   assert.ok(to > from, `missing ${end} after ${start}`);
   return source.slice(from, to);
 }
 
-test("TREND controller checks the daily stop before submitting and never closes positions for it", () => {
+test("TREND controller asks the control API before submitting and never closes positions for it", () => {
   const source = read("scripts/run-phase7b-demo-controller.ts");
   assert.match(source, /from "\.\/phase7c-daily-pnl-stop\.mjs"/);
   const submit = sliceBetween(source, "async function submitTrendEntry(", "\nasync function ");
-  const gate = submit.indexOf("checkDailyPnlStopBeforeEntry(");
-  const order = submit.indexOf('"/v1/orders"');
-  assert.ok(gate >= 0, "TREND submit must call checkDailyPnlStopBeforeEntry");
-  assert.ok(order < 0 || gate < order, "gate must run before the order request");
+  const gate = submit.indexOf("checkDailyPnlStopViaControlApi(");
+  assert.ok(gate >= 0, "TREND submit must call checkDailyPnlStopViaControlApi");
   assert.ok(gate < submit.indexOf("resolveDailyRecoveryPlan("), "gate must run before daily recovery planning");
   assert.match(submit, /journal\("ENTRY_DAILY_PNL_STOP_BLOCK"/);
+  assert.match(source, /\/api\/v1\/phase7c\/daily-pnl-stop/);
   assert.doesNotMatch(source, /DAILY_PNL_STOP[\s\S]{0,200}closeAll\(/);
 });
 
-test("SIDEWAY controller checks the daily stop before submitting and never closes positions for it", () => {
+test("SIDEWAY controller asks the control API before submitting and never closes positions for it", () => {
   const source = read("scripts/run-phase7c-sideway-controller.mjs");
   assert.match(source, /from "\.\/phase7c-daily-pnl-stop\.mjs"/);
-  const gate = source.indexOf("checkDailyPnlStopBeforeEntry(");
-  assert.ok(gate >= 0, "SIDEWAY must call checkDailyPnlStopBeforeEntry");
+  const gate = source.indexOf("checkDailyPnlStopViaControlApi(");
+  assert.ok(gate >= 0, "SIDEWAY must call checkDailyPnlStopViaControlApi");
   assert.ok(gate < source.indexOf("const dailyRecovery = await resolveDailyRecoveryPlan("), "gate before daily recovery");
   assert.ok(gate < source.indexOf('bridgeRequest("POST", "/v1/orders"'), "gate before order request");
+  assert.match(source, /controlGet\("\/api\/v1\/phase7c\/daily-pnl-stop"\)/);
   assert.match(source, /journal\("ENTRY_DAILY_PNL_STOP_BLOCK"/);
   assert.doesNotMatch(source, /DAILY_PNL_STOP[\s\S]{0,200}closeAll\(/);
 });
 
-test("API exposes read/save/status routes backed by the shared module", () => {
+test("API status reads the canonical deal ledger, not raw bridge deal history", () => {
   const service = read("apps/api/src/services/phase7c-daily-pnl-stop.service.ts");
   assert.match(service, /phase7c-daily-pnl-stop\.mjs/);
-  assert.match(service, /checkDailyPnlStopBeforeEntry|evaluateDailyPnlStop/);
+  assert.match(service, /getPhase7CCanonicalDeals/);
+  assert.doesNotMatch(service, /getMt5DealHistory|\/v1\/history\/deals/);
   const route = read("apps/api/src/routes/phase7c.route.ts");
   assert.match(route, /router\.get\("\/daily-pnl-stop"/);
   assert.match(route, /router\.post\("\/daily-pnl-stop"/);
