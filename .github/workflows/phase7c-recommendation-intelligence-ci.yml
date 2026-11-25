@@ -12,6 +12,7 @@ on:
       - "apps/web/src/phase7c-recommendation-intelligence-api.ts"
       - "apps/web/src/ui/Phase7CRecommendationIntelligenceCard.tsx"
       - "apps/web/src/pages/Phase7CControlCenterShellPage.tsx"
+      - "apps/web/src/ui/Phase7CIntelligenceSection.tsx"
       - "scripts/test-phase7c-recommendation-intelligence-source.mjs"
       - "scripts/test-phase7c-recommendation-api-source.mjs"
       - "scripts/phase7c-recommendation-evaluator.test.ts"

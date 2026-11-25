@@ -84,11 +84,13 @@ for (const forbidden of [
   assert.equal(card.includes(forbidden), false, `forbidden P5 UI mutation surface: ${forbidden}`);
 }
 
-const shell = read("apps/web/src/pages/Phase7CControlCenterShellPage.tsx");
-assert.ok(shell.includes("Phase7CRecommendationIntelligenceCard"), "P5 card is not mounted in Control Center shell");
+// Lean UI: the Intelligence cards live in Phase7CIntelligenceSection on "Hiệu quả".
+const shell = read("apps/web/src/ui/Phase7CIntelligenceSection.tsx");
+const controlShell = read("apps/web/src/pages/Phase7CControlCenterShellPage.tsx");
+assert.ok(shell.includes("Phase7CRecommendationIntelligenceCard"), "P5 card is not mounted in the Intelligence section");
 const p4Index = shell.indexOf("<Phase7CCounterfactualIntelligenceCard />");
 const p5Index = shell.indexOf("<Phase7CRecommendationIntelligenceCard />");
-const p1Index = shell.indexOf("<Phase7CRuntimeSourceAttestationCard />");
-assert.ok(p4Index >= 0 && p5Index > p4Index && p1Index > p5Index, "P5 card must render after P4 and before runtime-source attestation");
+assert.ok(p4Index >= 0 && p5Index > p4Index, "P5 card must render after P4");
+assert.ok(controlShell.includes("<Phase7CRuntimeSourceAttestationCard />"), "runtime-source attestation must remain on the Control Center");
 
 console.log("PHASE7C_RECOMMENDATION_INTELLIGENCE_SOURCE_CONTRACT=PASS");

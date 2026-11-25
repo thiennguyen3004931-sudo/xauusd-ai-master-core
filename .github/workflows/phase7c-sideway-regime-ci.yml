@@ -12,6 +12,7 @@ on:
       - "apps/web/src/phase7c-types.ts"
       - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
       - "apps/web/src/ui/DashboardLayout.tsx"
+      - "apps/web/src/pages/Phase7CTechnicalPage.tsx"
       - "packages/mt5-broker/**"
       - "scripts/run-phase7b-demo-controller.ts"
       - "scripts/run-phase7c-*.mjs"

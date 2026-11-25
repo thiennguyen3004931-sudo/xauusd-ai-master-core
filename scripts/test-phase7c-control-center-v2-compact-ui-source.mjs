@@ -10,6 +10,7 @@ const execution = read("apps/web/src/ui/Phase7CExecutionAuthorizationCard.tsx");
 const compact = read("apps/web/src/ui/Phase7CControlCenterCompactSection.tsx");
 const status = read("apps/web/src/ui/Phase7COperatorStatusBar.tsx");
 const intelligence = read("apps/web/src/ui/Phase7CIntelligenceSummaryCard.tsx");
+const intelligenceSection = read("apps/web/src/ui/Phase7CIntelligenceSection.tsx");
 
 function requireText(source, needle, label) {
   if (!source.includes(needle)) throw new Error(`${label}: missing ${needle}`);
@@ -27,17 +28,19 @@ forbidText(shell, "Phase7CAccountSwitchCard", "duplicate account switch removed 
 requireText(accountRisk, "Phase7CAccountSwitchCard", "account switch remains in Account & Risk");
 requireText(accountRisk, "<Phase7CAccountSwitchCard />", "account switch remains rendered in Account & Risk");
 requireText(shell, "<Phase7CControlCenterCompactSection", "compact decision/control surface render");
-requireText(shell, "<Phase7CIntelligenceSummaryCard />", "intelligence compact summary render");
+// Lean UI: Intelligence moved off the main screen onto "Hiệu quả" (Phase7CIntelligenceSection).
+forbidText(shell, "Phase7CIntelligenceSummaryCard", "intelligence moved off main screen");
+requireText(intelligenceSection, "<Phase7CIntelligenceSummaryCard />", "intelligence compact summary render");
 requireText(shell, "const [showOperationalDetails, setShowOperationalDetails] = useState(false);", "operational details collapsed by default");
 requireText(shell, "showOperationalDetails ? <Phase7CControlCenterPage /> : null", "legacy operational control visibility gate");
-requireText(shell, "const [showIntelligenceDetails, setShowIntelligenceDetails] = useState(false);", "intelligence collapsed by default");
-requireText(shell, "showIntelligenceDetails ? (", "intelligence detail visibility gate");
-requireText(shell, "<Phase7CPerformanceIntelligenceCard />", "performance intelligence detail preserved");
-requireText(shell, "<Phase7CPerformanceEffectivenessCard />", "performance effectiveness detail preserved");
-requireText(shell, "<Phase7CCounterfactualIntelligenceCard />", "counterfactual detail preserved");
-requireText(shell, "<Phase7CRecommendationIntelligenceCard />", "recommendation detail preserved");
-requireText(shell, "Mở Intelligence chi tiết", "intelligence expand action");
-requireText(shell, "Ẩn Intelligence chi tiết", "intelligence collapse action");
+requireText(intelligenceSection, "const [showIntelligenceDetails, setShowIntelligenceDetails] = useState(false);", "intelligence collapsed by default");
+requireText(intelligenceSection, "showIntelligenceDetails ? (", "intelligence detail visibility gate");
+requireText(intelligenceSection, "<Phase7CPerformanceIntelligenceCard />", "performance intelligence detail preserved");
+requireText(intelligenceSection, "<Phase7CPerformanceEffectivenessCard />", "performance effectiveness detail preserved");
+requireText(intelligenceSection, "<Phase7CCounterfactualIntelligenceCard />", "counterfactual detail preserved");
+requireText(intelligenceSection, "<Phase7CRecommendationIntelligenceCard />", "recommendation detail preserved");
+requireText(intelligenceSection, "Mở Intelligence chi tiết", "intelligence expand action");
+requireText(intelligenceSection, "Ẩn Intelligence chi tiết", "intelligence collapse action");
 
 // Operator bar: one glance status for account/runtime/trading/source.
 requireText(status, 'label={`ACCOUNT ${accountMode}`}', "account status");

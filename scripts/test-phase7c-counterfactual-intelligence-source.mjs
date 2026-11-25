@@ -13,7 +13,9 @@ const route = read("apps/api/src/routes/phase7c-counterfactual-intelligence.rout
 const types = read("apps/web/src/phase7c-counterfactual-intelligence-types.ts");
 const api = read("apps/web/src/phase7c-counterfactual-intelligence-api.ts");
 const card = read("apps/web/src/ui/Phase7CCounterfactualIntelligenceCard.tsx");
-const shell = read("apps/web/src/pages/Phase7CControlCenterShellPage.tsx");
+// Lean UI: the Intelligence cards live in Phase7CIntelligenceSection on "Hiệu quả".
+const shell = read("apps/web/src/ui/Phase7CIntelligenceSection.tsx");
+const controlShell = read("apps/web/src/pages/Phase7CControlCenterShellPage.tsx");
 
 assert.match(schema, /phase7c-counterfactual-intelligence-v1/);
 assert.match(schema, /"EXACT" \| "BOUNDED" \| "UNAVAILABLE"/);
@@ -69,10 +71,9 @@ assert.doesNotMatch(card, /Lưu cấu hình|Áp dụng thay đổi|Apply recomme
 assert.match(shell, /Phase7CCounterfactualIntelligenceCard/);
 const p3Index = shell.indexOf("<Phase7CPerformanceEffectivenessCard");
 const p4Index = shell.indexOf("<Phase7CCounterfactualIntelligenceCard");
-const attestationIndex = shell.indexOf("<Phase7CRuntimeSourceAttestationCard");
 assert.ok(p3Index >= 0, "P3 card mount missing");
 assert.ok(p4Index > p3Index, "P4 card must render after P3");
-assert.ok(attestationIndex > p4Index, "runtime source attestation must remain after P4");
+assert.ok(controlShell.includes("<Phase7CRuntimeSourceAttestationCard"), "runtime source attestation must remain on the Control Center");
 
 console.log("P4_COUNTERFACTUAL_SOURCE_TEST=PASS");
 console.log("P4_UI_DEFAULT_VIEW=COLLAPSED");

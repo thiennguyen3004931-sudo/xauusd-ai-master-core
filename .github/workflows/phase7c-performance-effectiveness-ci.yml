@@ -21,6 +21,7 @@ on:
       - "apps/web/src/phase7c-performance-effectiveness-types.ts"
       - "apps/web/src/ui/Phase7CPerformanceEffectivenessCard.tsx"
       - "apps/web/src/pages/Phase7CControlCenterShellPage.tsx"
+      - "apps/web/src/ui/Phase7CIntelligenceSection.tsx"
       - "scripts/phase7c-performance-effectiveness-schema.test.ts"
       - "scripts/phase7c-performance-management-evidence.test.ts"
       - "scripts/phase7c-performance-excursion.test.ts"

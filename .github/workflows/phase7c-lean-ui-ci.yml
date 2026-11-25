@@ -1,0 +1,36 @@
+name: Phase7C Lean Control Center UI (No MT5)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/web/src/**'
+      - 'scripts/test-phase7c-lean-ui-source.mjs'
+      - 'scripts/test-phase7c-control-center-v2-compact-ui-source.mjs'
+      - 'scripts/test-phase7c-counterfactual-intelligence-source.mjs'
+      - 'scripts/test-phase7c-recommendation-intelligence-source.mjs'
+      - 'scripts/test-phase7c-mobile-readonly-m1.mjs'
+      - '.github/workflows/phase7c-lean-ui-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contract:
+    name: Lean UI source contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/test-phase7c-lean-ui-source.mjs
+      - run: node scripts/test-phase7c-control-center-v2-compact-ui-source.mjs
+      - run: node scripts/test-phase7c-counterfactual-intelligence-source.mjs
+      - run: node scripts/test-phase7c-recommendation-intelligence-source.mjs
+      - run: node scripts/test-phase7c-mobile-readonly-m1.mjs

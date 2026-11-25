@@ -20,6 +20,7 @@ on:
       - "apps/web/src/phase7c-counterfactual-intelligence-api.ts"
       - "apps/web/src/ui/Phase7CCounterfactualIntelligenceCard.tsx"
       - "apps/web/src/pages/Phase7CControlCenterShellPage.tsx"
+      - "apps/web/src/ui/Phase7CIntelligenceSection.tsx"
       - "scripts/phase7c-counterfactual-evaluator.test.ts"
       - "scripts/phase7c-counterfactual-intelligence.test.ts"
       - "scripts/phase7c-ordered-exit-side-evidence.test.ts"

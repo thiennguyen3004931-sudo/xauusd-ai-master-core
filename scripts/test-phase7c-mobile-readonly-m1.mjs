@@ -49,7 +49,8 @@ forbidText(page, "127.0.0.1:3711", "Mobile page must not expose direct localhost
 
 requireText(router, "Phase7CMobileReadOnlyPage", "Router must lazy-load the mobile page.");
 requireText(router, 'path: "phase7c-mobile"', "Router must expose /phase7c-mobile.");
-requireText(layout, '["/phase7c-mobile", "Điện thoại"', "Navigation must expose the dedicated mobile page.");
+// Lean UI: the mobile page left the main menu and is linked from "Kỹ thuật".
+requireText(readFileSync("apps/web/src/pages/Phase7CTechnicalPage.tsx", "utf8"), '["/phase7c-mobile", "Điện thoại"', "Technical page must expose the dedicated mobile page.");
 requireText(layout, 'location.pathname.startsWith("/phase7c-mobile")', "Mobile route must have its own operator header.");
 
 console.log("PHASE7C_MOBILE_READ_DATA_M1_COMPAT_CONTRACT=PASS");

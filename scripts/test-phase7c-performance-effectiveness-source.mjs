@@ -13,7 +13,7 @@ const appPath = "apps/api/src/app.ts";
 const typesPath = "apps/web/src/phase7c-performance-effectiveness-types.ts";
 const apiPath = "apps/web/src/phase7c-performance-effectiveness-api.ts";
 const cardPath = "apps/web/src/ui/Phase7CPerformanceEffectivenessCard.tsx";
-const shellPath = "apps/web/src/pages/Phase7CControlCenterShellPage.tsx";
+const shellPath = "apps/web/src/ui/Phase7CIntelligenceSection.tsx"; // lean UI: Intelligence on "Hiệu quả"
 const workflowPath = ".github/workflows/phase7c-performance-effectiveness-ci.yml";
 
 const route = read(routePath);
