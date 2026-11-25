@@ -46,7 +46,7 @@ Phân loại: **RUNTIME** = quyết định lệnh thật; **RUNTIME_DISPLAY_ONL
 | API-7C-MAX | `apps/api/src/services/phase7c.service.ts:114` | 10 | API_REPLAY | như trên |
 | API-7C-BE | `apps/api/src/services/phase7c.service.ts:115` | 6 | API_REPLAY | như trên |
 | API-7C-PARTIAL | `apps/api/src/services/phase7c.service.ts:116` | 10 | API_REPLAY | như trên |
-| API-MONITOR-BE | `apps/api/src/services/phase7c-decision-monitor.service.ts:405` | 6 | API_DISPLAY | Giá trị hiển thị trên UI, không điều khiển lệnh |
+| API-MONITOR-BE | `apps/api/src/services/phase7c-decision-monitor.service.ts:429` | 6 | API_DISPLAY | Giá trị hiển thị trên UI, không điều khiển lệnh |
 | AUDIT-BE | `scripts/phase7c-decision-audit.mjs:175` | 6 | RUNTIME_DISPLAY_ONLY | Ghi vào audit quyết định, không điều khiển lệnh |
 | API-SEMI-PLAN-BE-R | `apps/api/src/services/phase7c-semi-trend-management-plan.service.ts:6` | 1R | API_UNWIRED | Plan SEMI kiểu execution-engine; trend-management-runtime.service không được import ở đâu |
 | API-SEMI-PLAN-PARTIAL | `apps/api/src/services/phase7c-semi-trend-management-plan.service.ts:14` | 10 | API_UNWIRED | như trên |
