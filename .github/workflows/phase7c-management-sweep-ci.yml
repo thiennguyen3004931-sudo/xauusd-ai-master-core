@@ -1,0 +1,32 @@
+name: Phase7C Management Sweep Simulator (No MT5)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/backtest/**'
+      - 'scripts/phase7c-sideway-logic.mjs'
+      - 'scripts/phase7c-stop-monotonicity.mjs'
+      - '.github/workflows/phase7c-management-sweep-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  simulator:
+    name: Replay simulator execution model, sweep grid and acceptance thresholds
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      MT5_ORDER_PERMISSION: NONE
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Simulator + sweep tests (synthetic bars only)
+        run: node --test scripts/backtest/*.test.mjs
