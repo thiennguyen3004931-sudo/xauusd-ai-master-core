@@ -146,7 +146,7 @@ test('accepted BE floor and M5 trailing cannot loosen BUY/SELL stop', () => {
 
 test('TREND +6 BE, +10 one-third partial and post-partial trailing remain source-visible', () => {
   const trend = src('run-phase7b-demo-controller.ts');
-  assert.match(trend, /if \(!managed\.breakEvenApplied && favorable >= 6\)/);
+  assert.match(trend, /if \(!managed\.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice\(managed\)\)/);
   assert.match(trend, /if \(!managed\.partialApplied && favorable >= 10\)/);
   assert.match(trend, /PLUS10_PARTIAL_ONE_THIRD/);
   assert.match(trend, /if \(managed\.partialApplied\) \{/);
@@ -157,7 +157,7 @@ test('TREND +6 BE, +10 one-third partial and post-partial trailing remain source
 test('SIDEWAY after-fill broker-only TP/SL, BE +6; no software partial/expiry/regime closure', () => {
   const sideway = src('run-phase7c-sideway-controller.mjs');
   assert.match(sideway, /const brokerTpSlTrailOnly = true;/);
-  assert.match(sideway, /if \(!managed\.breakEvenApplied && favorable >= 6\)/);
+  assert.match(sideway, /if \(!managed\.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice\(managed\)\)/);
   assert.match(sideway, /PLUS6_SL_TO_ENTRY/);
   assert.match(sideway, /if \(!brokerTpSlTrailOnly && managed\.breakEvenApplied && !managed\.partialApplied/);
   assert.match(sideway, /SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY/);

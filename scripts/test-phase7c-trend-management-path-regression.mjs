@@ -24,7 +24,7 @@ const transformed = transformPhase7CTrendM5PreStructureProfitLockSource(
 );
 
 for (const literal of [
-  "if (!managed.breakEvenApplied && favorable >= 6)",
+  "if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed))",
   "if (!managed.partialApplied && favorable >= 10)",
   "const fastMoveEligible = stopIsAtLeastAsTight(",
   'journal("FAST_MOVE_PROFIT_LOCK_TIGHTEN"',
@@ -42,7 +42,7 @@ for (const literal of [
 const sampleIndex = transformed.indexOf(
   "recordManagementExitSideSample({ managed, quote, exitSidePrice: exitPrice });",
 );
-const beIndex = transformed.indexOf("if (!managed.breakEvenApplied && favorable >= 6)");
+const beIndex = transformed.indexOf("if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed))");
 const fastMoveIndex = transformed.indexOf("fastMoveProfitLockCandidate({");
 const partialIndex = transformed.indexOf("if (!managed.partialApplied && favorable >= 10)");
 const m5Index = transformed.indexOf("evaluateM5StructuralTrail({");

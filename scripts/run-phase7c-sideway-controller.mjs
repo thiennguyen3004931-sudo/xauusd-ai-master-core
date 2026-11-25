@@ -35,6 +35,14 @@ import {
 } from "./phase7c-stop-monotonicity.mjs";
 import { fastMoveProfitLockCandidate } from "./phase7c-fast-move-profit-lock.mjs";
 import {
+  breakEvenSnapshot,
+  entryBreakEvenSnapshot,
+  evaluateBreakEvenStop,
+  managedBreakEven,
+  managedBreakEvenTriggerPrice,
+  resolvePhase7CBreakEvenConfig,
+} from "./phase7c-break-even-config.mjs";
+import {
   compareStrategyEntryConfigVersion,
   createVirtualStrategyEntryConditionState,
   evaluateStrategyEntryConditions,
@@ -96,6 +104,8 @@ const DAILY_RECOVERY_MAX_TP_DISTANCE = 10;
 const DAILY_RECOVERY_TARGET_NET_USD = 1;
 const FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE = 10;
 const FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE = 10;
+// Fail closed: an invalid ZIQ_PHASE7C_BREAK_EVEN_* value stops the controller at start.
+const breakEvenConfig = resolvePhase7CBreakEvenConfig();
 const deviationPoints = clampInteger(process.env.MT5_DEVIATION_POINTS, 50, 1, 10000);
 const allowReal = truthy(process.env.MT5_ALLOW_REAL_ACCOUNT);
 const allowedLogins = new Set(
@@ -137,6 +147,7 @@ console.log(`PHASE7C_SIDEWAY_MAX_M15_AGE_MS=${maxM15AgeMs}`);
 console.log(`PHASE7C_SIDEWAY_AUTO_LOT_MAX_AGE_MS=${autoLotMaxAgeMs}`);
 console.log("PHASE7C_SIDEWAY_ENTRY=M15_RANGING_PLUS_SUPPLY_DEMAND_EDGE_PLUS_M5_CONFIRMATION");
 console.log("PHASE7C_SIDEWAY_PLUS6=SL_TO_ENTRY");
+console.log(`PHASE7C_SIDEWAY_BREAK_EVEN=TRIGGER_${breakEvenConfig.breakEvenTriggerPrice}|OFFSET_${breakEvenConfig.breakEvenOffsetPrice}|SOURCE=${breakEvenConfig.source}|APPLY=${breakEvenConfig.applyPolicy}`);
 console.log("PHASE7C_SIDEWAY_PLUS10=PARTIAL_DISABLED_WHILE_BROKER_TP_SL_TRAIL_ONLY");
 console.log(`PHASE7C_SIDEWAY_FAST_MOVE_PROFIT_LOCK=ON|ACTIVATION=+${FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE}|GIVEBACK=${FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE}|SOURCE=LIVE_BID_ASK`);
 console.log("PHASE7C_SIDEWAY_TP2=OPPOSITE_RANGE_BOUNDARY");
@@ -714,6 +725,7 @@ async function cycle() {
     recoveryTakeProfit,
     recoveryDayStartTime: dailyRecovery.dayStartTime,
     lastRegimeCloseChecked: Number(freshRegime?.lastCandleCloseTime ?? 0),
+    breakEven: breakEvenSnapshot(breakEvenConfig),
     createdAt: Date.now(),
   };
   saveState();
@@ -990,6 +1002,7 @@ function buildManagedState(opened, pending, brokerClockOffsetMs = 0) {
     fastMoveStop: Number(pending.stopLoss),
     fastMoveAttempt: 0,
     exitAttempt: 0,
+    breakEven: entryBreakEvenSnapshot(pending.breakEven, breakEvenConfig),
   };
 }
 
@@ -1301,9 +1314,22 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
     : managed.entry - marketPrice;
   recordManagementExitSideSample({ managed, quote, exitSidePrice: marketPrice });
 
-  if (!managed.breakEvenApplied && favorable >= 6) {
-    const beStop = roundPrice(managed.entry, Number(spec.digits ?? 2));
-    if (stopIsAtLeastAsTight(managed.side, Number(position.stopLoss), beStop)) {
+  if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed)) {
+    const breakEvenRule = managedBreakEven(managed);
+    const breakEvenDecision = evaluateBreakEvenStop({
+      side: managed.side,
+      entry: managed.entry,
+      currentStop: Number(position.stopLoss),
+      offsetPrice: breakEvenRule.breakEvenOffsetPrice,
+      bid: Number(quote.bid),
+      ask: Number(quote.ask),
+      point: Number(spec.point),
+      stopsLevelTicks: Number(spec.stopsLevelTicks ?? 0),
+      freezeLevelTicks: Number(spec.freezeLevelTicks ?? 0),
+      digits: Number(spec.digits ?? 2),
+    });
+    const beStop = breakEvenDecision.stopLoss;
+    if (breakEvenDecision.action === "ALREADY_AT_OR_TIGHTER") {
       managed.breakEvenApplied = true;
       saveState();
       journal("PLUS6_SL_ALREADY_AT_OR_TIGHTER", {
@@ -1313,10 +1339,7 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
         stopLoss: Number(position.stopLoss),
       });
     } else {
-      const minimumGap = Math.max(Number(spec.stopsLevelTicks ?? 0), Number(spec.freezeLevelTicks ?? 0)) * Number(spec.point);
-      const valid = managed.side === "BUY"
-        ? beStop < Number(quote.bid) - minimumGap
-        : beStop > Number(quote.ask) + minimumGap;
+      const valid = breakEvenDecision.action === "MODIFY";
       if (valid) {
         managed.breakEvenAttempt += 1;
         saveState();

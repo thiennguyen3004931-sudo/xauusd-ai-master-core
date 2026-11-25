@@ -70,7 +70,7 @@ test("Trend Fixed TP lock contention fails closed and terminal outcomes are expl
 
 test("Trend management preserves +6, +10 and Daily Recovery precedence around Fixed TP", () => {
   const manage = block("async function managePosition(", "async function closeAll(");
-  const beIndex = manage.indexOf("if (!managed.breakEvenApplied && favorable >= 6)");
+  const beIndex = manage.indexOf("if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed))");
   const recoveryIndex = manage.indexOf("if (managed.dailyMode === \"RECOVERY_TP\")");
   const partialIndex = manage.indexOf("if (!managed.partialApplied && favorable >= 10)");
   const fixedCalls = [...manage.matchAll(/await closeFixedTpIfTriggered\(position,\s*quote\)/g)].map((match) => match.index);
