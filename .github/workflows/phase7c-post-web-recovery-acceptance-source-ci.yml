@@ -14,6 +14,8 @@ permissions:
 
 jobs:
   static-and-synthetic:
+    # Public repo: never run fork PR code on the self-hosted bot machine.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 10
     steps:
