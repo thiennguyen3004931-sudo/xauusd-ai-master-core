@@ -38,13 +38,22 @@ check("COVERS_BOT_TASKS", () => {
   for (const task of [
     "XAUUSD-Phase7B-Bridge",
     "XAUUSD-Phase7B-Web",
-    "XAUUSD-Phase7C-Executors",
     "XAUUSD-Phase7C-Bridge",
     "XAUUSD-Phase7C-Forward-Dashboard",
     "XAUUSD-Phase7B-Bot",
     "XAUUSD-Phase7B-Core",
     "XAUUSD-Phase7B-Telegram",
   ]) assert.ok(src.includes(`"${task}"`), `${task} not covered`);
+});
+
+check("LIFECYCLE_BROKER_KEEPS_BOOT_TRIGGER", () => {
+  // XAUUSD-Phase7C-Executors is the SYSTEM lifecycle broker. BAT BOT needs it READY, the desktop
+  // launcher cannot start it, and every ownership/readiness check requires exactly one boot trigger.
+  // It never trades by itself, so it must keep its AtStartup trigger.
+  const listBlock = src.slice(src.indexOf("[string[]]$TaskNames"), src.indexOf(")\n", src.indexOf("[string[]]$TaskNames")) + 1);
+  assert.ok(!listBlock.includes("XAUUSD-Phase7C-Executors"), "Executors must not be in the default task list");
+  assert.match(code, /\$KeepBootTriggerTasks = @\("XAUUSD-Phase7C-Executors"\)/);
+  assert.match(code, /PHASE7C_MANUAL_START_TASK=\$name\|KEEP_BOOT_TRIGGER_REQUIRED/);
 });
 
 check("ONLY_BOOT_AND_LOGON_TRIGGERS_REMOVED", () => {
@@ -82,6 +91,35 @@ check("LAUNCHER_STARTS_ON_CLICK_BOT_ON_BUTTON", () => {
   assert.match(launcher, /Start-TaskIfNeeded \$BridgeTask/);
   assert.match(launcher, /Start-TaskIfNeeded \$WebTask/);
   assert.match(launcher, /PHASE7C_DESKTOP_BOT_AUTOSTART=FALSE/);
+});
+
+const INSTALLER = "scripts/install-phase7c-new-machine-local.ps1";
+const BRIDGE_TASK = "scripts/register-phase7c-account-bridge-task-local.ps1";
+const strip = (text) => text.split(/\r?\n/).filter((line) => !line.trim().startsWith("#")).join("\n");
+
+check("INSTALLER_MANUAL_START_ONLY_OPTION", () => {
+  const installer = strip(read(INSTALLER));
+  assert.match(installer, /\[switch\]\$ManualStartOnly/);
+  // Web task registered without a logon trigger when ManualStartOnly is set.
+  assert.match(installer, /if \(\$ManualStartOnlyValue\)/);
+  assert.match(installer, /Register-WebTask[^\n]*-ManualStartOnlyValue:\$ManualStartOnly/);
+  // Bridge task script receives the same choice.
+  assert.match(installer, /\$bridgeTaskArgs \+= "-ManualStartOnly"/);
+  // Lifecycle broker registration is unchanged (still AtStartup via the canonical helper).
+  assert.ok(!/register-phase7c-executor-task-local\.ps1[\s\S]{0,400}-ManualStartOnly/.test(installer), "executor task must not get ManualStartOnly");
+  assert.match(installer, /PHASE7C_NEW_MACHINE_START_MODE=/);
+});
+
+check("BRIDGE_TASK_MANUAL_START_ONLY_OPTION", () => {
+  const bridge = strip(read(BRIDGE_TASK));
+  assert.match(bridge, /\[switch\]\$ManualStartOnly/);
+  assert.match(bridge, /if \(\$ManualStartOnly\)/);
+  assert.match(bridge, /PHASE7C_ACCOUNT_BRIDGE_TASK_TRIGGER=/);
+});
+
+check("EXECUTOR_TASK_STILL_BOOT", () => {
+  const exec = read("scripts/register-phase7c-executor-task-local.ps1");
+  assert.match(exec, /New-ScheduledTaskTrigger -AtStartup/);
 });
 
 console.log(results.join("\n"));

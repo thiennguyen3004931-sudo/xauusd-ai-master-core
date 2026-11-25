@@ -5,7 +5,6 @@ param(
   [string[]]$TaskNames = @(
     "XAUUSD-Phase7B-Bridge",
     "XAUUSD-Phase7B-Web",
-    "XAUUSD-Phase7C-Executors",
     "XAUUSD-Phase7C-Bridge",
     "XAUUSD-Phase7C-Forward-Dashboard",
     "XAUUSD-Phase7B-Bot",
@@ -38,6 +37,10 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 if ($Apply -and $Restore) { throw "Use either -Apply or -Restore, not both." }
 
 $AutoStartTriggerClasses = @("MSFT_TaskBootTrigger", "MSFT_TaskLogonTrigger")
+# The SYSTEM lifecycle broker must keep its single AtStartup trigger: BAT BOT needs it READY, the
+# desktop launcher cannot start a SYSTEM task, and every ownership/readiness check treats a missing
+# boot trigger as TRIGGER drift. The broker never trades by itself; the bot still starts only on BAT BOT.
+$KeepBootTriggerTasks = @("XAUUSD-Phase7C-Executors")
 
 if ($Restore) {
   if (-not $BackupDir -or -not (Test-Path -LiteralPath $BackupDir -PathType Container)) {
@@ -67,6 +70,10 @@ $planned = 0
 $changed = 0
 $blocked = 0
 foreach ($name in $TaskNames) {
+  if ($KeepBootTriggerTasks -contains $name) {
+    Write-Host "PHASE7C_MANUAL_START_TASK=$name|KEEP_BOOT_TRIGGER_REQUIRED"
+    continue
+  }
   $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
   if ($null -eq $task) {
     Write-Host "PHASE7C_MANUAL_START_TASK=$name|NOT_INSTALLED"

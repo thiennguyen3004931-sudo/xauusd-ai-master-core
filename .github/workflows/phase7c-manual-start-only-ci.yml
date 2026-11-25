@@ -7,6 +7,9 @@ on:
       - 'scripts/set-phase7c-manual-start-only-local.ps1'
       - 'scripts/test-phase7c-manual-start-only-source.mjs'
       - 'scripts/open-phase7c-control-center-local.ps1'
+      - 'scripts/install-phase7c-new-machine-local.ps1'
+      - 'scripts/register-phase7c-account-bridge-task-local.ps1'
+      - 'scripts/register-phase7c-executor-task-local.ps1'
       - 'docs/operations/phase7c-one-click-start.md'
       - '.github/workflows/phase7c-manual-start-only-ci.yml'
   workflow_dispatch:
@@ -40,7 +43,14 @@ jobs:
       - name: Parse only
         shell: pwsh
         run: |
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile("scripts/set-phase7c-manual-start-only-local.ps1", [ref]$null, [ref]$errors) | Out-Null
-          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
-          "PARSE=PASS"
+          $failed = 0
+          foreach ($file in @(
+            "scripts/set-phase7c-manual-start-only-local.ps1",
+            "scripts/install-phase7c-new-machine-local.ps1",
+            "scripts/register-phase7c-account-bridge-task-local.ps1"
+          )) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error "$file : $($_.Message)" }; $failed += 1 } else { "PARSE=PASS|$file" }
+          }
+          if ($failed -gt 0) { exit 1 }
