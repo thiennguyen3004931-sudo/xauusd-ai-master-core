@@ -10,14 +10,17 @@ Mục tiêu: khi Windows khởi động hoặc khi bạn đăng nhập, **không
   - chờ Control Center sẵn sàng rồi mở trình duyệt.
 - Bot **không** tự chạy (`PHASE7C_DESKTOP_BOT_AUTOSTART=FALSE`). Bot chỉ chạy khi bạn bấm nút BẬT BOT trên Control Center, qua đầy đủ các cổng an toàn hiện có.
 
-Điểm còn thiếu: các task Bridge, Web, Executors, Account Bridge và Forward Dashboard vẫn có trigger **AtLogOn** hoặc **AtStartup**, nên vẫn tự chạy khi mở máy.
+Điểm còn thiếu: các task Bridge, Web, Account Bridge và Forward Dashboard vẫn có trigger **AtLogOn** hoặc **AtStartup**, nên vẫn tự chạy khi mở máy.
+
+**Ngoại lệ bắt buộc: `XAUUSD-Phase7C-Executors` (lifecycle broker SYSTEM) giữ nguyên trigger AtStartup.** Đây là dịch vụ an toàn chạy ngầm và tự nó không vào lệnh. Nút BẬT BOT cần broker này ở trạng thái READY. Biểu tượng Desktop không khởi động được task SYSTEM, và mọi kiểm tra ownership/readiness đều coi việc thiếu trigger khởi động là lỗi `TRIGGER`. Nếu gỡ trigger này thì sau khi khởi động lại máy, BẬT BOT sẽ bị từ chối và bot giữ PAUSE.
 
 ## Mới: `scripts/set-phase7c-manual-start-only-local.ps1`
 
 Script này gỡ trigger AtStartup và AtLogOn khỏi các task XAUUSD của bot:
 
 - `XAUUSD-Phase7B-Bridge`, `XAUUSD-Phase7B-Web`
-- `XAUUSD-Phase7C-Executors`, `XAUUSD-Phase7C-Bridge`, `XAUUSD-Phase7C-Forward-Dashboard`
+- `XAUUSD-Phase7C-Bridge`, `XAUUSD-Phase7C-Forward-Dashboard`
+- không gồm `XAUUSD-Phase7C-Executors`: script in `KEEP_BOOT_TRIGGER_REQUIRED` và bỏ qua task này
 - các task cũ `XAUUSD-Phase7B-Bot`, `XAUUSD-Phase7B-Core`, `XAUUSD-Phase7B-Telegram`, nếu máy còn
 
 Các task này **vẫn được giữ và vẫn bật**, chỉ không còn tự chạy. Biểu tượng trên Desktop vẫn khởi động được chúng khi bạn bấm.
@@ -51,6 +54,20 @@ Script an toàn ở các điểm sau:
    ```
 6. Khởi động lại máy để kiểm tra. Sau khi đăng nhập, **không có** cửa sổ hay task XAUUSD nào tự chạy. Bấm biểu tượng **XAUUSD AI MASTER**: Control Center mở ra, và bot vẫn đứng yên cho tới khi bạn bấm BẬT BOT.
 
+## Nếu đã chạy `-Apply` bằng bản script cũ
+
+Bản đầu tiên của script (PR #225) có gỡ cả trigger AtStartup của `XAUUSD-Phase7C-Executors`. Nếu bạn đã chạy `-Apply` bằng bản đó, hãy trả lại trigger cho riêng task này. Chạy PowerShell Administrator khi bot đang tắt và ở PAUSE:
+
+```powershell
+.\scripts\set-phase7c-manual-start-only-local.ps1 -Restore -BackupDir <thư mục backup tạm chỉ chứa XAUUSD-Phase7C-Executors.xml>
+```
+
+Cách làm: tạo một thư mục mới, rồi chép riêng file `XAUUSD-Phase7C-Executors.xml` từ `.runtime\task-trigger-backups\<thời điểm>\` vào thư mục đó. Sau đó chạy lệnh trên với thư mục mới, để các task khác vẫn giữ chế độ chạy tay. Kiểm tra lại bằng `.\scripts\verify-phase7c-executor-startup-task-local.ps1`.
+
+## Cài máy mới: tùy chọn `-ManualStartOnly`
+
+`install-phase7c-new-machine-local.ps1 ... -ManualStartOnly` đăng ký task Web (`XAUUSD-Phase7B-Web`) và Account Bridge (`XAUUSD-Phase7C-Bridge`) **không có trigger AtLogOn**. Installer vẫn khởi động hai task này một lần trong lúc cài để chạy kiểm tra chấp nhận. Sau khi khởi động lại máy, chúng chỉ chạy khi bạn bấm biểu tượng Desktop. Lifecycle broker vẫn giữ AtStartup như trên. Cuối cùng installer in ra `PHASE7C_NEW_MACHINE_START_MODE=MANUAL_ONLY_DESKTOP_SHORTCUT`. Khi không có `-ManualStartOnly`, installer giữ đúng hành vi cũ (`AT_LOGON`).
+
 ## Khôi phục như cũ
 
 ```powershell
@@ -59,6 +76,6 @@ Script an toàn ở các điểm sau:
 
 ## Giới hạn
 
-- Script chỉ đổi các task đã được cài trên máy. Nếu cài máy mới bằng `install-phase7c-new-machine-local.ps1` hay các installer khác, các installer này vẫn đăng ký trigger AtLogOn hoặc AtStartup như trước. Sau khi cài, chạy lại script này với `-Apply`.
+- Script chỉ đổi các task đã được cài trên máy. Khi cài máy mới bằng `install-phase7c-new-machine-local.ps1`, hãy dùng `-ManualStartOnly`. Các installer cũ khác vẫn đăng ký trigger như trước, nên sau khi cài bằng chúng, chạy lại script này với `-Apply`.
 - Bản thân MT5 terminal có tự mở khi đăng nhập hay không là do cài đặt của Windows và MT5, không thuộc repo.
 - Nếu task dùng kiểu đăng nhập có mật khẩu, Windows có thể đòi mật khẩu khi khôi phục bằng `-Restore`.

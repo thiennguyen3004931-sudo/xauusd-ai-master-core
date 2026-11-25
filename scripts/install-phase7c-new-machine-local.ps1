@@ -25,7 +25,12 @@ param(
   [Parameter(Mandatory = $true)]
   [switch]$ConfirmOldMachineStopped,
 
-  [switch]$SkipPanelInstall
+  [switch]$SkipPanelInstall,
+
+  # Register the Web and account Bridge tasks without AtLogOn triggers, so nothing of the bot UI
+  # starts at Windows logon; open it from the "XAUUSD AI MASTER" desktop shortcut instead.
+  # The SYSTEM lifecycle broker (XAUUSD-Phase7C-Executors) always keeps its AtStartup trigger.
+  [switch]$ManualStartOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -101,7 +106,8 @@ function Register-WebTask(
   [string]$WorkDir,
   [string]$BridgeEnv,
   [int]$ApiPortValue,
-  [int]$WebPortValue
+  [int]$WebPortValue,
+  [bool]$ManualStartOnlyValue = $false
 ) {
   $taskName = "XAUUSD-Phase7B-Web"
   $runner = Join-Path $Root "scripts\run-phase7b-web-autostart.ps1"
@@ -115,7 +121,6 @@ function Register-WebTask(
 
   $currentUser = if ($env:USERDOMAIN) { "$env:USERDOMAIN\$env:USERNAME" } else { $env:USERNAME }
   $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Highest
-  $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
   $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
@@ -125,21 +130,28 @@ function Register-WebTask(
     -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit ([TimeSpan]::Zero)
 
-  Register-ScheduledTask `
-    -TaskName $taskName `
-    -Action $action `
-    -Trigger $trigger `
-    -Settings $settings `
-    -Principal $principal `
-    -Description "XAUUSD Phase7C local Control API/Web UI. Trading order permission remains in the executor/bridge gates." `
-    -Force `
-    -ErrorAction Stop | Out-Null
+  $registerArgs = @{
+    TaskName = $taskName
+    Action = $action
+    Settings = $settings
+    Principal = $principal
+    Description = "XAUUSD Phase7C local Control API/Web UI. Trading order permission remains in the executor/bridge gates."
+    Force = $true
+    ErrorAction = "Stop"
+  }
+  if ($ManualStartOnlyValue) {
+    $triggerMode = "MANUAL_ONLY"
+  } else {
+    $registerArgs.Trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+    $triggerMode = "AT_LOGON"
+  }
+  Register-ScheduledTask @registerArgs | Out-Null
 
   $registered = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
   if (@($registered.Actions).Count -ne 1) {
     throw "Web task registration did not persist exactly one action."
   }
-  Write-Step "WEB_TASK" "PASS|NAME=$taskName|USER=$currentUser"
+  Write-Step "WEB_TASK" "PASS|NAME=$taskName|USER=$currentUser|TRIGGER=$triggerMode"
 }
 
 function Wait-Bridge(
@@ -469,7 +481,9 @@ Invoke-Checked $venvPython @("-m", "pip", "install", "-r", (Join-Path $bridgeDir
 Write-Step "BRIDGE_DEPENDENCIES" "PASS"
 
 $bridgeTaskInstaller = Join-Path $ProjectRoot "scripts\register-phase7c-account-bridge-task-local.ps1"
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bridgeTaskInstaller
+$bridgeTaskArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $bridgeTaskInstaller)
+if ($ManualStartOnly) { $bridgeTaskArgs += "-ManualStartOnly" }
+& powershell.exe @bridgeTaskArgs
 if ($LASTEXITCODE -ne 0) { throw "Phase7C account bridge task registration failed." }
 Start-ScheduledTask -TaskName "XAUUSD-Phase7C-Bridge" -ErrorAction Stop
 
@@ -484,7 +498,7 @@ $bridgeHealth = Wait-Bridge `
 Assert-FlatBroker -BaseUrl $bridgeBase -Headers $bridgeHeaders -Stage "BRIDGE_PREFLIGHT"
 Write-Step "BRIDGE" "PASS|SESSION=$($bridgeHealth.bridgeSessionId)|LIVE_ARM=DISARMED"
 
-Register-WebTask -Root $ProjectRoot -WorkDir $workDir -BridgeEnv $liveEnvDestination -ApiPortValue $ApiPort -WebPortValue $WebPort
+Register-WebTask -Root $ProjectRoot -WorkDir $workDir -BridgeEnv $liveEnvDestination -ApiPortValue $ApiPort -WebPortValue $WebPort -ManualStartOnlyValue:$ManualStartOnly
 Start-ScheduledTask -TaskName "XAUUSD-Phase7B-Web" -ErrorAction Stop
 $apiBase = "http://127.0.0.1:$ApiPort"
 Wait-Api -ApiBase $apiBase -Timeout $TimeoutSeconds
@@ -569,6 +583,7 @@ Write-Host "PHASE7C_NEW_MACHINE_SOURCE_COMMIT=$ExpectedCommit"
 Write-Host "PHASE7C_NEW_MACHINE_SOURCE_ATTESTATION=EXACT_MATCH"
 Write-Host "PHASE7C_NEW_MACHINE_ACCOUNT_MODE=LIVE"
 Write-Host "PHASE7C_NEW_MACHINE_BOT_MODE=PAUSE"
+Write-Host "PHASE7C_NEW_MACHINE_START_MODE=$(if ($ManualStartOnly) { 'MANUAL_ONLY_DESKTOP_SHORTCUT' } else { 'AT_LOGON' })"
 Write-Host "PHASE7C_NEW_MACHINE_ARM=DISARMED"
 Write-Host "PHASE7C_NEW_MACHINE_POSITIONS=0"
 Write-Host "PHASE7C_NEW_MACHINE_PENDING_ORDERS=0"
