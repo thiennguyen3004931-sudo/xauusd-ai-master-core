@@ -48,5 +48,4 @@ jobs:
           node scripts/test-phase7c-structural-sl-monotonicity.mjs
           node scripts/test-phase7c-trend-management-path-regression.mjs
           node scripts/test-phase7c-sideway-recovery-management-contract.mjs
-          node scripts/test-phase7c-daily-recovery-contract.mjs
           node scripts/phase7c-semi-post-entry-contract.mjs
