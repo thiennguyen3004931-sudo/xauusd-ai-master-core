@@ -366,3 +366,52 @@ test("Daily Recovery follows the canonical Phase7C account mode instead of requi
   assert.match(source, /MT5_LIVE_READ_ONLY/);
   assert.match(source, /MT5_DEMO_READ_ONLY/);
 });
+
+function managedPositionInput(managedOverrides = {}) {
+  const input = fixture();
+  input.telemetry.quote = { bid: 2503, ask: 2503.2, spread: 0.2, timestamp: input.now };
+  input.telemetry.positions = [{
+    ticket: "9101", symbol: "XAUUSD", brokerSymbol: "XAUUSD", side: "LONG", volume: 0.03,
+    entry: 2500, stopLoss: 2494, takeProfit: 0, profit: 9, swap: 0, commission: 0, openedAt: input.now - 60_000,
+  }];
+  input.managedStates = {
+    TREND: { ticket: "9101", side: "BUY", pattern: "ENGULFING", entry: 2500, initialVolume: 0.03, ...managedOverrides },
+    SIDEWAY: null,
+  };
+  return input;
+}
+
+test("open position shows the BE trigger/offset frozen in its own snapshot", () => {
+  const snapshot = buildPhase7CDecisionMonitor(managedPositionInput({
+    breakEven: { breakEvenTriggerPrice: 8, breakEvenOffsetPrice: 1, source: "ENV", applyPolicy: "NEW_POSITIONS_ONLY" },
+  }));
+  assert.equal(snapshot.position.breakEvenTriggerPrice, 8);
+  assert.equal(snapshot.position.breakEvenOffsetPrice, 1);
+  assert.equal(snapshot.position.breakEvenSource, "SNAPSHOT");
+});
+
+test("legacy open position without a BE snapshot shows the legacy +6 / 0 rule", () => {
+  const snapshot = buildPhase7CDecisionMonitor(managedPositionInput());
+  assert.equal(snapshot.position.breakEvenTriggerPrice, 6);
+  assert.equal(snapshot.position.breakEvenOffsetPrice, 0);
+  assert.equal(snapshot.position.breakEvenSource, "LEGACY_DEFAULT");
+});
+
+test("invalid BE snapshot is shown as unknown, never guessed", () => {
+  const snapshot = buildPhase7CDecisionMonitor(managedPositionInput({
+    breakEven: { breakEvenTriggerPrice: 30, breakEvenOffsetPrice: 0 },
+  }));
+  assert.equal(snapshot.position.breakEvenTriggerPrice, null);
+  assert.equal(snapshot.position.breakEvenOffsetPrice, null);
+  assert.equal(snapshot.position.breakEvenSource, "INVALID_SNAPSHOT");
+});
+
+test("flat and unmanaged positions carry no BE rule", () => {
+  const flat = buildPhase7CDecisionMonitor(fixture());
+  assert.equal(flat.position.breakEvenTriggerPrice, null);
+  const input = managedPositionInput();
+  input.managedStates = { TREND: null, SIDEWAY: null };
+  const unmanaged = buildPhase7CDecisionMonitor(input);
+  assert.equal(unmanaged.position.state, "UNMANAGED");
+  assert.equal(unmanaged.position.breakEvenTriggerPrice, null);
+});

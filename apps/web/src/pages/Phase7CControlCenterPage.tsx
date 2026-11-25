@@ -239,6 +239,13 @@ export function Phase7CControlCenterPage() {
   const displayedStop = hasOpenPosition ? position?.stopLoss : preTrade?.stopLoss;
   const displayedTp1 = managing ? position?.tp1 : unmanaged ? null : preTrade?.tp1;
   const displayedTp2 = managing ? position?.tp2 : unmanaged ? null : preTrade?.tp2;
+  // BE shown per open position from its snapshot (applies to new positions only); before entry the
+  // monitor reports the runtime default.
+  const breakEvenLabel = managing
+    ? position?.breakEvenTriggerPrice != null
+      ? `BE +${position.breakEvenTriggerPrice} → SL entry${position.breakEvenOffsetPrice ? `+${position.breakEvenOffsetPrice}` : ""}`
+      : position?.breakEvenSource === "INVALID_SNAPSHOT" ? "BE: snapshot không hợp lệ" : "BE theo cấu hình runtime"
+    : `BE +${preTrade?.breakEvenTriggerDistance ?? 6} (mặc định)`;
   const displayedLot = hasOpenPosition ? position?.volume : preTrade?.finalLot;
   const displayedPnl = hasOpenPosition ? position?.floatingPnlUsd : null;
   const displayedRisk = hasOpenPosition ? null : preTrade?.estimatedRiskUsd;
@@ -472,7 +479,7 @@ export function Phase7CControlCenterPage() {
                   <MetricCard label="Stop Loss" value={price(displayedStop)} detail={`${hasOpenPosition ? position?.favorableDistance : (preTrade?.stopDistance ?? "—")} giá`} tone="error.main" />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard label="TP1 / TP2" value={`${price(displayedTp1)} / ${price(displayedTp2)}`} detail={unmanaged ? "UNMANAGED · không suy diễn TP quản lý" : "BE +6 · chốt 1/3 tại +10"} tone={unmanaged ? "error.main" : "success.main"} />
+                  <MetricCard label="TP1 / TP2" value={`${price(displayedTp1)} / ${price(displayedTp2)}`} detail={unmanaged ? "UNMANAGED · không suy diễn TP quản lý" : `${breakEvenLabel} · chốt 1/3 tại +10`} tone={unmanaged ? "error.main" : "success.main"} />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
                   <MetricCard label="Lot" value={Number.isFinite(displayedLot) ? `${Number(displayedLot).toFixed(2)} lot` : "—"} detail={unmanaged ? `Broker diagnostic · ${position?.count ?? "—"} vị thế · ticket tham chiếu ${position?.ticket ?? "—"}` : managing ? `Ticket ${position?.ticket ?? "—"}` : `Raw ${preTrade?.rawLot == null ? "—" : preTrade.rawLot.toFixed(4)} · cap ${preTrade?.lotCap == null ? "—" : preTrade.lotCap.toFixed(2)}`} />

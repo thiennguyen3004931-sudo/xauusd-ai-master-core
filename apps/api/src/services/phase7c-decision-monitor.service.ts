@@ -139,6 +139,30 @@ interface ManagedRuntimePosition {
   breakEvenApplied?: boolean;
   partialApplied?: boolean;
   openedAt?: number | null;
+  // Frozen at entry by the runtime (scripts/phase7c-break-even-config.mjs); absent on legacy positions.
+  breakEven?: { breakEvenTriggerPrice?: unknown; breakEvenOffsetPrice?: unknown } | null;
+}
+
+type BreakEvenDisplaySource = "SNAPSHOT" | "LEGACY_DEFAULT" | "INVALID_SNAPSHOT" | "NONE";
+
+// Display-only mirror of validateBreakEvenConfig: trigger 4..15, offset 0..3, offset < trigger.
+// Legacy positions (no snapshot) keep the legacy rule +6 / 0, exactly as the runtime manages them.
+function positionBreakEvenRule(managed: ManagedRuntimePosition | null): {
+  breakEvenTriggerPrice: number | null;
+  breakEvenOffsetPrice: number | null;
+  breakEvenSource: BreakEvenDisplaySource;
+} {
+  if (!managed) return { breakEvenTriggerPrice: null, breakEvenOffsetPrice: null, breakEvenSource: "NONE" };
+  const snapshot = managed.breakEven;
+  if (snapshot === undefined || snapshot === null) {
+    return { breakEvenTriggerPrice: 6, breakEvenOffsetPrice: 0, breakEvenSource: "LEGACY_DEFAULT" };
+  }
+  const trigger = finite(snapshot.breakEvenTriggerPrice);
+  const offset = finite(snapshot.breakEvenOffsetPrice);
+  if (trigger === null || offset === null || trigger < 4 || trigger > 15 || offset < 0 || offset > 3 || offset >= trigger) {
+    return { breakEvenTriggerPrice: null, breakEvenOffsetPrice: null, breakEvenSource: "INVALID_SNAPSHOT" };
+  }
+  return { breakEvenTriggerPrice: trigger, breakEvenOffsetPrice: offset, breakEvenSource: "SNAPSHOT" };
 }
 
 interface ManagedRuntimeStates {
@@ -618,6 +642,7 @@ function positionMonitor(input: {
       favorableDistance: null,
       breakEvenApplied: false,
       partialApplied: false,
+      ...positionBreakEvenRule(null),
       openedAt: null,
       entryReason: "Chưa có vị thế XAUUSD đang mở.",
       holdReasonCode: null,
@@ -692,6 +717,7 @@ function positionMonitor(input: {
     favorableDistance: round(favorableDistance, 5),
     breakEvenApplied: Boolean(managed?.breakEvenApplied),
     partialApplied: Boolean(managed?.partialApplied),
+    ...positionBreakEvenRule(managed ?? null),
     openedAt: finite(position.openedAt) ?? finite(managed?.openedAt),
     entryReason: semiManaged
       ? "SEMI manual entry đã được xác minh ownership; bot chỉ tiếp quản Trend management và không tạo entry mới."
