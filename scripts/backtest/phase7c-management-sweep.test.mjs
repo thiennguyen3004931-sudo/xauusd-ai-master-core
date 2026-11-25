@@ -40,3 +40,21 @@ test("acceptance needs every work-order threshold", () => {
   assert.equal(acceptance(report({ ...good, profitFactor: 1.2 }, [1, 1, 1, 1, 1, 1])).pass, false);
   assert.equal(acceptance({ candidate: null, walkForward: [] }).pass, false);
 });
+
+test("strategy variants: baseline first, walk-forward picks on train only", async () => {
+  const { VARIANTS, walkForwardVariants } = await import("./phase7c-strategy-variants.mjs");
+  assert.equal(VARIANTS[0].id, "V0_BASELINE");
+  assert.deepEqual(VARIANTS[0].config, {});
+  const mk = (pnls) => pnls.map(([entryTime, pnlUsd]) => ({ entryTime, pnlUsd, r: pnlUsd / 30 }));
+  // A wins in train blocks, B wins only in test blocks: WF must pick A (train) and report A's test loss.
+  const span = 700;
+  const a = [], b = [];
+  for (let t = 0; t < span; t += 2) {
+    const inFirstBlock = t < 100;
+    a.push([t, inFirstBlock ? 30 : -10], [t + 1, inFirstBlock ? -10 : -10]);
+    b.push([t, inFirstBlock ? -10 : 30], [t + 1, -10]);
+  }
+  const wf = walkForwardVariants(new Map([["A", mk(a)], ["B", mk(b)]]), 0, span, { minTrainTrades: 10 });
+  assert.equal(wf.rows[0].picked, "A");
+  assert.ok(wf.rows[0].test_.netUsd < 0);
+});

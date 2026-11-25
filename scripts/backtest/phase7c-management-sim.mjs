@@ -34,6 +34,13 @@ export const BASELINE_CONFIG = Object.freeze({
   commissionPerLotRoundTurn: 7,
   slippagePrice: 0.1,
   strategies: ["TREND", "SIDEWAY"],
+  // Research filters (defaults = production behaviour): TREND entries only in these regimes;
+  // optional max entry spread in price units (null = no extra gate).
+  trendRegimes: ["TRENDING", "BREAKOUT"],
+  maxEntrySpreadPrice: null,
+  // TREND entry-condition toggles (production: both ON, see createVirtualStrategyEntryConditionState)
+  requireSupertrendM15: true,
+  requireSupertrendM5: true,
 });
 
 const sideSign = (side) => (side === "BUY" ? 1 : -1);
@@ -229,7 +236,7 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
       const brokenStructure = p.side === "BUY" ? bidLow <= p.structuralStop + EPS : askHigh >= p.structuralStop - EPS;
       const stM15 = pre.m15St[k];
       const stM5 = pre.m5St[j];
-      if (brokenStructure || stM15 !== p.side || stM5 !== p.side || bar.closeTime > p.expiresAt) {
+      if (brokenStructure || (cfg.requireSupertrendM15 && stM15 !== p.side) || (cfg.requireSupertrendM5 && stM5 !== p.side) || bar.closeTime > p.expiresAt) {
         pending = null;
       } else {
         // fill when the market reaches the price at which the stop distance equals the cap
@@ -247,9 +254,11 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
     }
 
     // ---------- TREND signal at an M15 close ----------
-    if (cfg.strategies.includes("TREND") && k >= 0 && m15[k].closeTime === bar.closeTime && regime?.recommendedMode === "TREND") {
+    if (cfg.strategies.includes("TREND") && k >= 0 && m15[k].closeTime === bar.closeTime && regime?.recommendedMode === "TREND" &&
+      cfg.trendRegimes.includes(regime.regime) &&
+      (cfg.maxEntrySpreadPrice === null || nextSpread <= cfg.maxEntrySpreadPrice + EPS)) {
       const sig = pre.trendSignals[k];
-      if (sig && pre.m15St[k] === sig.side && pre.m5St[j] === sig.side) {
+      if (sig && (!cfg.requireSupertrendM15 || pre.m15St[k] === sig.side) && (!cfg.requireSupertrendM5 || pre.m5St[j] === sig.side)) {
         const structuralStop = sig.patternExtreme - sideSign(sig.side) * cfg.structuralBufferPrice;
         const entry = (sig.side === "BUY" ? next.open + nextSpread : next.open) + sideSign(sig.side) * cfg.slippagePrice;
         const dist = sideSign(sig.side) * (entry - structuralStop);
@@ -271,7 +280,8 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
 
     // ---------- SIDEWAY at every M5 close ----------
     if (cfg.strategies.includes("SIDEWAY") && regime && regime.regime === "RANGING" && regime.recommendedMode === "SIDEWAY" &&
-      Number(regime.confidence) >= cfg.sidewayMinConfidence && regime.range) {
+      Number(regime.confidence) >= cfg.sidewayMinConfidence && regime.range &&
+      (cfg.maxEntrySpreadPrice === null || nextSpread <= cfg.maxEntrySpreadPrice + EPS)) {
       const bid = bar.close;
       const ask = bar.close + spread;
       const side = chooseRangeSide(regime.range, bid, ask);

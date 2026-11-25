@@ -42,6 +42,8 @@ test("defaults are the frozen Phase 7C baseline", () => {
   assert.equal(BASELINE_CONFIG.maxInitialStopPrice, 10);
   assert.equal(BASELINE_CONFIG.fixedTpPrice, null);
   assert.equal(BASELINE_CONFIG.volume, 0.03);
+  assert.deepEqual(BASELINE_CONFIG.trendRegimes, ["TRENDING", "BREAKOUT"]);
+  assert.equal(BASELINE_CONFIG.maxEntrySpreadPrice, null);
 });
 
 test("STOP_FIRST: a bar that touches both the stop and +10 is a full stop-loss", () => {
@@ -111,4 +113,23 @@ test("MT5 export parser and TREND pattern port", () => {
   assert.equal(bars[0].closeTime - bars[0].openTime, M5);
   const engulf = [{ open: 10, close: 8, high: 10.5, low: 7.5 }, { open: 8, close: 10.5, high: 11, low: 7.8 }];
   assert.deepEqual(detectEntryPattern(engulf, 1), { side: "BUY", pattern: "ENGULFING", patternExtreme: 7.8 });
+});
+
+test("research filters: TREND regime filter and entry spread cap block entries", () => {
+  const path = [...lead, [2000, 2000, 1980, 1985], flat(1985)];
+  assert.equal(simulate({ ...world(path), config: noCost }).length, 1);
+  assert.equal(simulate({ ...world(path), config: { ...noCost, trendRegimes: ["BREAKOUT"] } }).length, 0);
+  assert.equal(simulate({ ...world(path, { spreadPoints: 50 }), config: { ...noCost, maxEntrySpreadPrice: 0.4 } }).length, 0);
+});
+
+test("SuperTrend toggles: entry blocked when a required timeframe disagrees, allowed when that one is off", () => {
+  const path = [...lead, [2000, 2000, 1980, 1985], flat(1985)];
+  const w = world(path);
+  w.pre.m15St = w.pre.m15St.map(() => "SELL");
+  assert.equal(simulate({ ...w, config: noCost }).length, 0);
+  assert.equal(simulate({ ...w, config: { ...noCost, requireSupertrendM15: false } }).length, 1);
+  const v = world(path);
+  v.pre.m5St = v.pre.m5St.map(() => "SELL");
+  assert.equal(simulate({ ...v, config: noCost }).length, 0);
+  assert.equal(simulate({ ...v, config: { ...noCost, requireSupertrendM5: false } }).length, 1);
 });
