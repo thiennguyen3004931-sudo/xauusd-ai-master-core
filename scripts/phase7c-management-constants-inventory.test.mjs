@@ -20,8 +20,8 @@ export const INVENTORY = [
   ["TR-PULLBACK-WAIT", "scripts/run-phase7b-demo-controller.ts", "const pullbackWaitMinutes = 15;", "RUNTIME"],
   ["TR-FM-ACT", "scripts/run-phase7b-demo-controller.ts", "const FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE = 10;", "RUNTIME"],
   ["TR-FM-GIVEBACK", "scripts/run-phase7b-demo-controller.ts", "const FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE = 10;", "RUNTIME"],
-  ["TR-BE-TRIGGER", "scripts/run-phase7b-demo-controller.ts", "if (!managed.breakEvenApplied && favorable >= 6) {", "RUNTIME"],
-  ["TR-BE-OFFSET", "scripts/run-phase7b-demo-controller.ts", "const beStop = roundPrice(position.entry, spec.digits);", "RUNTIME"],
+  ["TR-BE-TRIGGER", "scripts/run-phase7b-demo-controller.ts", "if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed)) {", "RUNTIME"],
+  ["TR-BE-OFFSET", "scripts/run-phase7b-demo-controller.ts", "offsetPrice: breakEvenRule.breakEvenOffsetPrice,", "RUNTIME"],
   ["TR-PARTIAL", "scripts/run-phase7b-demo-controller.ts", "if (!managed.partialApplied && favorable >= 10) {", "RUNTIME"],
   ["TR-FIXED-TP-ON", "scripts/run-phase7b-demo-controller.ts", 'process.env.ZIQ_PHASE7C_TREND_FIXED_TP_ENABLED ?? "false"', "RUNTIME"],
   ["TR-FIXED-TP-DIST", "scripts/run-phase7b-demo-controller.ts", 'process.env.ZIQ_PHASE7C_TREND_FIXED_TP_DISTANCE ?? "0"', "RUNTIME"],
@@ -34,8 +34,11 @@ export const INVENTORY = [
   ["SW-MIN-RR", "scripts/phase7c-sideway-logic.mjs", "if (rewardRisk < 1.2) {", "RUNTIME"],
   ["SW-FM-ACT", "scripts/run-phase7c-sideway-controller.mjs", "const FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE = 10;", "RUNTIME"],
   ["SW-FM-GIVEBACK", "scripts/run-phase7c-sideway-controller.mjs", "const FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE = 10;", "RUNTIME"],
-  ["SW-BE-TRIGGER", "scripts/run-phase7c-sideway-controller.mjs", "if (!managed.breakEvenApplied && favorable >= 6) {", "RUNTIME"],
-  ["SW-BE-OFFSET", "scripts/run-phase7c-sideway-controller.mjs", "const beStop = roundPrice(managed.entry, Number(spec.digits ?? 2));", "RUNTIME"],
+  ["SW-BE-TRIGGER", "scripts/run-phase7c-sideway-controller.mjs", "if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed)) {", "RUNTIME"],
+  ["SW-BE-OFFSET", "scripts/run-phase7c-sideway-controller.mjs", "offsetPrice: breakEvenRule.breakEvenOffsetPrice,", "RUNTIME"],
+  // T2 shared BE config (TREND + SIDEWAY + SEMI), env-overridable, snapshotted at entry
+  ["BE-DEFAULT-TRIGGER", "scripts/phase7c-break-even-config.mjs", "export const DEFAULT_BREAK_EVEN_TRIGGER_PRICE = 6;", "RUNTIME"],
+  ["BE-DEFAULT-OFFSET", "scripts/phase7c-break-even-config.mjs", "export const DEFAULT_BREAK_EVEN_OFFSET_PRICE = 0;", "RUNTIME"],
   // SEMI runtime (adapter injected into TREND controller)
   ["SEMI-INIT-SL", "scripts/phase7c-semi-trend-adoption-runtime.mjs", "const INITIAL_STOP_DISTANCE = 6;", "RUNTIME"],
   // Control API (runs beside the bot; plan / replay / display, does not send management commands)

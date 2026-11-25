@@ -172,7 +172,7 @@ test("auto lot snapshot fails closed on stale or unsafe payloads", () => {
 
 test("Sideway +10 partial is locked OFF after fill; +6 BE still uses canonical event names", () => {
   const plus6Index = sidewayControllerSource.indexOf(
-    'if (!managed.breakEvenApplied && favorable >= 6)',
+    'if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed))',
   );
   const plus10Index = sidewayControllerSource.indexOf(
     'if (!brokerTpSlTrailOnly && managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1))',

@@ -4,6 +4,7 @@ import vm from "node:vm";
 import { transformPhase7CSidewayM5TrailingSource } from "./phase7c-m5-structural-trailing-source-adapter.mjs";
 import { tightestKnownStop } from "./phase7c-stop-monotonicity.mjs";
 import { evaluateM5StructuralTrail } from "./phase7c-m5-structural-trailing.mjs";
+import { evaluateBreakEvenStop, managedBreakEven, managedBreakEvenTriggerPrice } from "./phase7c-break-even-config.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +57,9 @@ function syntheticCycle({ dailyMode = "SIDEWAY_NATIVE", side = "BUY", quoteBid =
     tightestKnownStop: (side, ...stops) => side === "BUY" ? Math.max(...stops) : Math.min(...stops),
     fastMoveProfitLockCandidate: ({ entry }) => ({ active: false, peakPrice: entry }),
     canonicalHoldReason: () => null,
+    evaluateBreakEvenStop,
+    managedBreakEven,
+    managedBreakEvenTriggerPrice,
   });
   vm.runInContext(managedSource + "\nthis.managePosition = managePosition;", context);
   const position = { ticket: managed.ticket, side: side === "BUY" ? "LONG" : "SHORT", entry: managed.entry, stopLoss: side === "BUY" ? 2490 : 2510, takeProfit: side === "BUY" ? 2520 : 2480, volume: 0.03 };

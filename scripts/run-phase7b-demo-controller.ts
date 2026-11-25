@@ -26,6 +26,14 @@ import {
 } from "./phase7c-stop-monotonicity.mjs";
 import { fastMoveProfitLockCandidate } from "./phase7c-fast-move-profit-lock.mjs";
 import {
+  breakEvenSnapshot,
+  entryBreakEvenSnapshot,
+  evaluateBreakEvenStop,
+  managedBreakEven,
+  managedBreakEvenTriggerPrice,
+  resolvePhase7CBreakEvenConfig,
+} from "./phase7c-break-even-config.mjs";
+import {
   compareStrategyEntryConfigVersion,
   createVirtualStrategyEntryConditionState,
   evaluateStrategyEntryConditions,
@@ -158,6 +166,7 @@ type ManagedState = {
   fixedTpDistance: number;
   fixedTpPrice: number | null;
   breakEvenApplied: boolean;
+  breakEven?: ReturnType<typeof breakEvenSnapshot>;
   partialApplied: boolean;
   partialActivatedAt: number | null;
   lastStructuralStop: number | null;
@@ -222,6 +231,7 @@ type PendingTrendEntry = {
   fixedTpDistance: number;
   fixedTpPrice: number | null;
   createdAt: number;
+  breakEven?: ReturnType<typeof breakEvenSnapshot>;
   brokerReferenceTimestamp: number;
   dailyMode: DailyMode;
   dailyNetPnlAtEntry: number;
@@ -276,6 +286,8 @@ const MAX_INITIAL_SL_PRICE = 10;
 const FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE = 10;
 const FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE = 10;
 const pullbackWaitMinutes = 15;
+// Fail closed: an invalid ZIQ_PHASE7C_BREAK_EVEN_* value stops the controller at start.
+const breakEvenConfig = resolvePhase7CBreakEvenConfig();
 const pullbackEntryService = new Phase7BPullbackEntryService();
 const DAILY_RECOVERY_MIN_TP_DISTANCE = 6;
 const DAILY_RECOVERY_MAX_TP_DISTANCE = 10;
@@ -348,6 +360,7 @@ console.log("PHASE7B_DEMO_STRUCTURAL_SL_GT_10=WAIT_PULLBACK_NEXT_M15_WINDOW");
 console.log(`PHASE7B_DEMO_PULLBACK_WAIT_MINUTES=${pullbackWaitMinutes}`);
 console.log("PHASE7B_DEMO_PULLBACK_INVALIDATE=STRUCTURE_BREAK_OR_M15_ST_FLIP_OR_M5_ST_FLIP_OR_EXPIRY");
 console.log("PHASE7B_DEMO_PLUS6=SL_TO_ENTRY");
+console.log(`PHASE7C_TREND_BREAK_EVEN=TRIGGER_${breakEvenConfig.breakEvenTriggerPrice}|OFFSET_${breakEvenConfig.breakEvenOffsetPrice}|SOURCE=${breakEvenConfig.source}|APPLY=${breakEvenConfig.applyPolicy}`);
 console.log("PHASE7B_DEMO_PLUS10=PARTIAL_ONE_THIRD");
 console.log(`PHASE7B_DEMO_FAST_MOVE_PROFIT_LOCK=ON|ACTIVATION=+${FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE}|GIVEBACK=${FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE}|SOURCE=LIVE_BID_ASK`);
 console.log("PHASE7B_DEMO_POST_PLUS10_SL=M15_CONFIRMED_SWING_STRUCTURE_PLUS_1_BUFFER_ONLY_TIGHTEN");
@@ -1036,6 +1049,7 @@ async function submitTrendEntry(
     fixedTpDistance: fixedTpSnapshot.distance,
     fixedTpPrice: fixedTpSnapshot.targetPrice,
     createdAt: Date.now(),
+    breakEven: breakEvenSnapshot(breakEvenConfig),
     brokerReferenceTimestamp,
     dailyMode: dailyRecovery.mode,
     dailyNetPnlAtEntry: dailyRecovery.dailyNetPnl,
@@ -1167,6 +1181,7 @@ async function submitTrendEntry(
     recoveryTpDistance: dailyRecovery.tpDistance,
     recoveryTakeProfit: takeProfit,
     recoveryDayStartTime: dailyRecovery.dayStartTime,
+    breakEven: entryBreakEvenSnapshot(pendingEntry.breakEven, breakEvenConfig),
   };
   state.pendingEntry = null;
   saveState();
@@ -1905,9 +1920,22 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
   const latestM15 = m15.at(-1);
   const holdM15CloseTime = Number(latestM15?.closeTime ?? 0);
 
-  if (!managed.breakEvenApplied && favorable >= 6) {
-    const beStop = roundPrice(position.entry, spec.digits);
-    if (stopIsAtLeastAsTight(managed.side, Number(position.stopLoss), beStop)) {
+  if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed)) {
+    const breakEvenRule = managedBreakEven(managed);
+    const breakEvenDecision = evaluateBreakEvenStop({
+      side: managed.side,
+      entry: position.entry,
+      currentStop: Number(position.stopLoss),
+      offsetPrice: breakEvenRule.breakEvenOffsetPrice,
+      bid: quote.bid,
+      ask: quote.ask,
+      point: spec.point,
+      stopsLevelTicks: spec.stopsLevelTicks,
+      freezeLevelTicks: spec.freezeLevelTicks,
+      digits: spec.digits,
+    });
+    const beStop = breakEvenDecision.stopLoss;
+    if (breakEvenDecision.action === "ALREADY_AT_OR_TIGHTER") {
       managed.breakEvenApplied = true;
       managed.lastStructuralStop = Number(position.stopLoss);
       saveState();
@@ -1916,6 +1944,14 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
         favorable,
         entry: beStop,
         stopLoss: Number(position.stopLoss),
+      });
+    } else if (breakEvenDecision.action !== "MODIFY") {
+      journal("PLUS6_SL_WAIT", {
+        ticket: managed.ticket,
+        favorable,
+        stopLoss: beStop,
+        reason: breakEvenDecision.reason,
+        breakEven: breakEvenRule,
       });
     } else {
       managed.beAttempt += 1;
@@ -2561,6 +2597,7 @@ function managedFromPending(
       pending.recoveryTakeProfit,
     recoveryDayStartTime:
       pending.recoveryDayStartTime,
+    breakEven: entryBreakEvenSnapshot(pending.breakEven, breakEvenConfig),
   };
 }
 

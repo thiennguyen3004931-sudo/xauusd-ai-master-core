@@ -63,16 +63,21 @@ assert.equal(
 );
 
 // Wiring contract: both +6 paths must recognize an already-tighter broker SL before PATCHing BE.
+// Since T2 the check lives in the shared BE helper (phase7c-break-even-config.mjs).
+const breakEvenSource = fs.readFileSync(new URL("./phase7c-break-even-config.mjs", import.meta.url), "utf8");
 assert.match(
-  trendSource,
-  /stopIsAtLeastAsTight\(managed\.side,\s*Number\(position\.stopLoss\),\s*beStop\)/,
-  "RED_TARGET: Trend +6 BE must not loosen an already-tighter broker SL.",
+  breakEvenSource,
+  /stopIsAtLeastAsTight\(side,\s*Number\(currentStop\),\s*candidate\)/,
+  "RED_TARGET: shared BE helper must not loosen an already-tighter broker SL.",
 );
-assert.match(
-  sidewaySource,
-  /stopIsAtLeastAsTight\(managed\.side,\s*Number\(position\.stopLoss\),\s*beStop\)/,
-  "RED_TARGET: Sideway +6 BE must not loosen an already-tighter broker SL.",
-);
+for (const [label, source] of [["Trend", trendSource], ["Sideway", sidewaySource]]) {
+  assert.match(
+    source,
+    /evaluateBreakEvenStop\(\{[\s\S]{0,200}currentStop:\s*Number\(position\.stopLoss\),/,
+    `RED_TARGET: ${label} +6 BE must evaluate the broker SL through the shared helper before PATCHing.`,
+  );
+  assert.match(source, /breakEvenDecision\.action === "ALREADY_AT_OR_TIGHTER"/, `${label} BE must honour ALREADY_AT_OR_TIGHTER`);
+}
 
 // Trend structural trailing must compare against the tightest broker/durable stop, not broker SL alone.
 assert.match(
