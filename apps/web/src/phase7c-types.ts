@@ -565,6 +565,10 @@ export interface Phase7CDecisionMonitorSnapshot {
     favorableDistance: number | null;
     breakEvenApplied: boolean;
     partialApplied: boolean;
+    // BE rule frozen in the position's own snapshot; legacy positions show +6 / 0; null = unknown.
+    breakEvenTriggerPrice?: number | null;
+    breakEvenOffsetPrice?: number | null;
+    breakEvenSource?: "SNAPSHOT" | "LEGACY_DEFAULT" | "INVALID_SNAPSHOT" | "NONE";
     openedAt: number | null;
     entryReason: string;
     holdReasonCode: string | null;
