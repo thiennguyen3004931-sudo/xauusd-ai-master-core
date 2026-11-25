@@ -1,0 +1,40 @@
+name: Phase7C Management Constants Inventory (No MT5)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/phase7c-management-constants-inventory.test.mjs'
+      - 'docs/operations/phase7c-management-constants-inventory.md'
+      - 'scripts/run-phase7b-demo-controller.ts'
+      - 'scripts/run-phase7c-sideway-controller.mjs'
+      - 'scripts/phase7c-sideway-logic.mjs'
+      - 'scripts/phase7c-stop-monotonicity.mjs'
+      - 'scripts/phase7c-semi-trend-adoption-runtime.mjs'
+      - 'scripts/phase7c-decision-audit.mjs'
+      - 'apps/api/src/services/phase7c*.ts'
+      - 'apps/api/src/services/phase7d-*.ts'
+      - 'apps/api/src/services/phase7e-*.ts'
+      - '.github/workflows/phase7c-management-constants-inventory-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    name: SL / BE / partial / FastMove constants match inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      MT5_ORDER_PERMISSION: NONE
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Inventory guard
+        run: node --test scripts/phase7c-management-constants-inventory.test.mjs
