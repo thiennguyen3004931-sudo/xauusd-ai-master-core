@@ -121,3 +121,15 @@ test("research filters: TREND regime filter and entry spread cap block entries",
   assert.equal(simulate({ ...world(path), config: { ...noCost, trendRegimes: ["BREAKOUT"] } }).length, 0);
   assert.equal(simulate({ ...world(path, { spreadPoints: 50 }), config: { ...noCost, maxEntrySpreadPrice: 0.4 } }).length, 0);
 });
+
+test("SuperTrend toggles: entry blocked when a required timeframe disagrees, allowed when that one is off", () => {
+  const path = [...lead, [2000, 2000, 1980, 1985], flat(1985)];
+  const w = world(path);
+  w.pre.m15St = w.pre.m15St.map(() => "SELL");
+  assert.equal(simulate({ ...w, config: noCost }).length, 0);
+  assert.equal(simulate({ ...w, config: { ...noCost, requireSupertrendM15: false } }).length, 1);
+  const v = world(path);
+  v.pre.m5St = v.pre.m5St.map(() => "SELL");
+  assert.equal(simulate({ ...v, config: noCost }).length, 0);
+  assert.equal(simulate({ ...v, config: { ...noCost, requireSupertrendM5: false } }).length, 1);
+});

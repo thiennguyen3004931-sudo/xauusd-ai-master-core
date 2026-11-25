@@ -18,6 +18,8 @@ export const VARIANTS = Object.freeze([
   { id: "V2_TREND_BREAKOUT_ONLY", label: "Chỉ TREND khi BREAKOUT", config: { strategies: ["TREND"], trendRegimes: ["BREAKOUT"] } },
   { id: "V3_SIDEWAY_CONF_75", label: "SIDEWAY cần độ tin cậy ≥75", config: { sidewayMinConfidence: 75 } },
   { id: "V4_TREND_ONLY_SPREAD_050", label: "Tắt SIDEWAY + spread vào lệnh ≤0,50", config: { strategies: ["TREND"], maxEntrySpreadPrice: 0.5 } },
+  { id: "V6_ST_M5_ONLY", label: "Chỉ SuperTrend M5 (tắt M15)", config: { requireSupertrendM15: false } },
+  { id: "V7_ST_M15_ONLY", label: "Chỉ SuperTrend M15 (tắt M5)", config: { requireSupertrendM5: false } },
   { id: "V5_BREAKOUT_SPREAD_050", label: "Chỉ TREND BREAKOUT + spread ≤0,50", config: { strategies: ["TREND"], trendRegimes: ["BREAKOUT"], maxEntrySpreadPrice: 0.5 } },
 ]);
 
