@@ -1,0 +1,46 @@
+name: Phase7C One-Click Start / No Boot Autostart (No MT5)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/set-phase7c-manual-start-only-local.ps1'
+      - 'scripts/test-phase7c-manual-start-only-source.mjs'
+      - 'scripts/open-phase7c-control-center-local.ps1'
+      - 'docs/operations/phase7c-one-click-start.md'
+      - '.github/workflows/phase7c-manual-start-only-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contract:
+    name: Manual-start-only script source contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/test-phase7c-manual-start-only-source.mjs
+  powershell-parse:
+    name: PowerShell parse (no execution)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Parse only
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("scripts/set-phase7c-manual-start-only-local.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+          "PARSE=PASS"

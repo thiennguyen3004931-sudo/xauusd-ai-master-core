@@ -98,3 +98,8 @@ coverage/
 .env.*
 !.env.example
 !**/.env.example
+
+# Phase 7C offline backtest outputs and raw broker exports (never commit)
+/.runtime/backtest/
+*_M5_*.csv
+*_M15_*.csv
