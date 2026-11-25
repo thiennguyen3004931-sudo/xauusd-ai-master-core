@@ -37,6 +37,7 @@ on:
       - "apps/api/src/services/phase7c-runtime-source-attestation.service.ts"
       - "apps/api/src/services/phase7c-runtime-source-attestation.service.test.ts"
       - "apps/web/src/pages/Phase7CControlCenterShellPage.tsx"
+      - "apps/web/src/ui/Phase7CIntelligenceSection.tsx"
       - "apps/web/src/phase7c-runtime-source-attestation-api.ts"
       - "apps/web/src/phase7c-runtime-source-attestation-types.ts"
       - "apps/web/src/ui/Phase7CRuntimeSourceAttestationCard.tsx"
