@@ -330,16 +330,49 @@ async function main() {
     return { id: c.id, label: c.label, full: metrics(t), breakdown: breakdown(t), folds, positiveFolds: folds.filter((m) => m.netUsd > 0).length };
   });
 
-  // Random pool at a trade frequency close to the candidates' median.
-  const medianTrades = quantile(rows.map((r) => r.full.trades), 0.5);
+  // Random pool. The first run used a fixed rate formula that produced only ~19 trades per random
+  // candidate (far sparser than the real candidates), which makes the null too noisy. The rate is now
+  // calibrated so the median random candidate has the same 12-month trade count as the target:
+  //   null A: median trade count of the 12 candidates (the pre-registered intent)
+  //   null B: trade count of the walk-forward's most-picked candidate (sensitivity check)
   const nNulls = Number(args.nulls ?? 100);
-  const rate = Math.min(0.2, Math.max(0.002, medianTrades / m15.length * 2.2));
-  const randomPool = new Map();
-  for (let s = 0; s < nNulls; s += 1) randomPool.set(`RND_${s}`, run(randomSignal(s, rate), CFG_NO_ST));
-  const randomSingles = [...randomPool.values()].map((t) => metrics(t));
-  const nullDist = selectionNull(randomPool, CANDIDATES_R3.length, start, end, Number(args["null-draws"] ?? 400));
-  const pValuePf = nullDist.filter((d) => d.pf >= wf.pooled.profitFactor).length / nullDist.length;
-  const nullPassRate = nullDist.filter((d) => d.passes).length / nullDist.length;
+  const draws = Number(args["null-draws"] ?? 400);
+  const calibrate = (target) => {
+    let lo = 0.001; let hi = 0.2;
+    for (let it = 0; it < 14; it += 1) {
+      const mid = Math.sqrt(lo * hi);
+      const n = quantile([0, 1, 2, 3, 4].map((s) => run(randomSignal(1000 + s, mid), CFG_NO_ST).length), 0.5);
+      if (n < target) lo = mid; else hi = mid;
+    }
+    return Math.sqrt(lo * hi);
+  };
+  const buildNull = (target) => {
+    const rate = calibrate(target);
+    const pool = new Map();
+    for (let s = 0; s < nNulls; s += 1) pool.set(`RND_${s}`, run(randomSignal(s, rate), CFG_NO_ST));
+    const singles = [...pool.values()].map((t) => metrics(t));
+    const dist = selectionNull(pool, CANDIDATES_R3.length, start, end, draws);
+    return {
+      pool,
+      summary: {
+        targetTrades: target, randomRate: rate, randomCandidates: nNulls, draws: dist.length, setSize: CANDIDATES_R3.length,
+        singleRandomTradesMedian: quantile(singles.map((m) => m.trades), 0.5),
+        singleRandomPf: { p05: quantile(singles.map((m) => m.profitFactor), 0.05), p50: quantile(singles.map((m) => m.profitFactor), 0.5), p95: quantile(singles.map((m) => m.profitFactor), 0.95) },
+        wfPooledPf: { p05: quantile(dist.map((d) => d.pf), 0.05), p50: quantile(dist.map((d) => d.pf), 0.5), p95: quantile(dist.map((d) => d.pf), 0.95) },
+        wfPooledNet: { p50: quantile(dist.map((d) => d.net), 0.5), p95: quantile(dist.map((d) => d.net), 0.95) },
+        wfPositiveFolds: { p50: quantile(dist.map((d) => d.positiveFolds), 0.5), p95: quantile(dist.map((d) => d.positiveFolds), 0.95) },
+        pValuePooledPf: dist.filter((d) => d.pf >= wf.pooled.profitFactor).length / dist.length,
+        pValuePooledNet: dist.filter((d) => d.net >= wf.pooled.netUsd).length / dist.length,
+        nullPassRate: dist.filter((d) => d.passes).length / dist.length,
+      },
+    };
+  };
+  const pickCounts = new Map();
+  for (const r of wf.rows) if (r.picked) pickCounts.set(r.picked, (pickCounts.get(r.picked) ?? 0) + 1);
+  const mostPicked = [...pickCounts].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const nullA = buildNull(quantile(rows.map((r) => r.full.trades), 0.5));
+  const nullB = buildNull(mostPicked ? tradesById.get(mostPicked).length : nullA.summary.targetTrades);
+  const randomPool = nullA.pool;
 
   const mid = start + Math.round((end - start) / 2);
   const fin = (pf) => (Number.isFinite(pf) ? pf : 5);
@@ -353,15 +386,7 @@ async function main() {
     walkForward: wf,
     walkForwardPooledBreakdown: breakdown(wf.rows.flatMap((r) => (r.picked ? inWindowOf(tradesById.get(r.picked), r.test) : []))),
     split: { mid: new Date(mid).toISOString(), rows: split, pick: splitPick },
-    nullModel: {
-      randomRate: rate, randomCandidates: nNulls, draws: nullDist.length, setSize: CANDIDATES_R3.length,
-      singleRandomPf: { p05: quantile(randomSingles.map((m) => m.profitFactor), 0.05), p50: quantile(randomSingles.map((m) => m.profitFactor), 0.5), p95: quantile(randomSingles.map((m) => m.profitFactor), 0.95) },
-      singleRandomTradesMedian: quantile(randomSingles.map((m) => m.trades), 0.5),
-      wfPooledPf: { p05: quantile(nullDist.map((d) => d.pf), 0.05), p50: quantile(nullDist.map((d) => d.pf), 0.5), p95: quantile(nullDist.map((d) => d.pf), 0.95) },
-      wfPositiveFolds: { p50: quantile(nullDist.map((d) => d.positiveFolds), 0.5), p95: quantile(nullDist.map((d) => d.positiveFolds), 0.95) },
-      pValuePooledPf: pValuePf,
-      nullPassRate,
-    },
+    nullModel: { A_candidateMedianFrequency: nullA.summary, B_mostPickedFrequency: { candidate: mostPicked, ...nullB.summary } },
   };
   const out = args.out ?? ".runtime/backtest/phase7c-entry-signals-r3.json";
   fs.mkdirSync(path.dirname(out), { recursive: true });
@@ -379,7 +404,7 @@ async function main() {
   console.log(`Gộp: ${JSON.stringify(wf.pooled)} | fold dương ${wf.positiveFolds}/6 | ngưỡng: ${JSON.stringify(wf.acceptance)}`);
   console.log(`Gộp theo BUY/SELL, regime: ${JSON.stringify(report.walkForwardPooledBreakdown)}`);
   if (splitPick) console.log(`Chia 50/50: chọn ${splitPick.id} (IS PF ${pf(splitPick.is.profitFactor)}) → OOS ${JSON.stringify(splitPick.oos)}`);
-  console.log(`\nNull (ngẫu nhiên): ${JSON.stringify(report.nullModel)}`);
+  console.log(`\nNull A: ${JSON.stringify(report.nullModel.A_candidateMedianFrequency)}\nNull B: ${JSON.stringify(report.nullModel.B_mostPickedFrequency)}`);
 
   if (args.svg) {
     const firstTest = wf.rows[0].test[0];
