@@ -34,6 +34,10 @@ export const BASELINE_CONFIG = Object.freeze({
   commissionPerLotRoundTurn: 7,
   slippagePrice: 0.1,
   strategies: ["TREND", "SIDEWAY"],
+  // Research filters (defaults = production behaviour): TREND entries only in these regimes;
+  // optional max entry spread in price units (null = no extra gate).
+  trendRegimes: ["TRENDING", "BREAKOUT"],
+  maxEntrySpreadPrice: null,
 });
 
 const sideSign = (side) => (side === "BUY" ? 1 : -1);
@@ -247,7 +251,9 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
     }
 
     // ---------- TREND signal at an M15 close ----------
-    if (cfg.strategies.includes("TREND") && k >= 0 && m15[k].closeTime === bar.closeTime && regime?.recommendedMode === "TREND") {
+    if (cfg.strategies.includes("TREND") && k >= 0 && m15[k].closeTime === bar.closeTime && regime?.recommendedMode === "TREND" &&
+      cfg.trendRegimes.includes(regime.regime) &&
+      (cfg.maxEntrySpreadPrice === null || nextSpread <= cfg.maxEntrySpreadPrice + EPS)) {
       const sig = pre.trendSignals[k];
       if (sig && pre.m15St[k] === sig.side && pre.m5St[j] === sig.side) {
         const structuralStop = sig.patternExtreme - sideSign(sig.side) * cfg.structuralBufferPrice;
@@ -271,7 +277,8 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
 
     // ---------- SIDEWAY at every M5 close ----------
     if (cfg.strategies.includes("SIDEWAY") && regime && regime.regime === "RANGING" && regime.recommendedMode === "SIDEWAY" &&
-      Number(regime.confidence) >= cfg.sidewayMinConfidence && regime.range) {
+      Number(regime.confidence) >= cfg.sidewayMinConfidence && regime.range &&
+      (cfg.maxEntrySpreadPrice === null || nextSpread <= cfg.maxEntrySpreadPrice + EPS)) {
       const bid = bar.close;
       const ask = bar.close + spread;
       const side = chooseRangeSide(regime.range, bid, ask);
