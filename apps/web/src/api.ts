@@ -265,3 +265,22 @@ export async function syncMarketIntelJournal(): Promise<{ enabled: boolean; inse
     body: JSON.stringify({ days: 90 }),
   }));
 }
+
+// Market intel proposals (feature 1, C2). Write calls only change the local market-intel journal;
+// none of them deploys to the bot or sends orders.
+type MiOverview = import("./market-intel-types").MarketIntelProposalsOverview;
+const miPost = async <T,>(url: string, body: unknown): Promise<T> => read<T>(await fetch(`${API_BASE}/api/v1/market-intel/proposals${url}`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+}));
+
+export async function getMarketIntelProposals(): Promise<MiOverview> {
+  return read(await fetch(`${API_BASE}/api/v1/market-intel/proposals`, { cache: "no-store" }));
+}
+export const runMarketIntelAnalysis = () => miPost<{ ok: boolean; error?: string; fresh?: number }>("/run", {});
+export const decideMarketIntelProposal = (id: string, decision: "APPROVE" | "REJECT" | "EDIT", note: string, editedValue?: string) =>
+  miPost<unknown>(`/${encodeURIComponent(id)}/decision`, { decision, note, editedValue });
+export const rollbackMarketIntelConfig = (toVersion: number, note: string) => miPost<unknown>("/config/rollback", { toVersion, note });
+export const markMarketIntelConfigDeployed = (version: number, note: string) => miPost<unknown>(`/config/${version}/deployed`, { note });
+export const marketIntelConfigExportUrl = (version: number) => `${API_BASE}/api/v1/market-intel/proposals/config/${version}/export`;

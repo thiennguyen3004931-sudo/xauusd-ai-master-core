@@ -4,6 +4,7 @@ import { getMarketIntelSnapshot } from "../api";
 import type { MarketIntelScenario, MarketIntelSnapshot, MarketIntelState } from "../market-intel-types";
 import { ErrorState, LoadingState } from "../ui/PageState";
 import { MarketIntelJournalCard } from "./MarketIntelJournalCard";
+import { MarketIntelProposalsCard } from "./MarketIntelProposalsCard";
 
 const STATE: Record<MarketIntelState, string> = { UPTREND: "Uptrend", DOWNTREND: "Downtrend", SIDEWAY: "Sideway", TRANSITION: "Chuyển tiếp" };
 const STATE_COLOR: Record<MarketIntelState, "success" | "error" | "info" | "default"> = { UPTREND: "success", DOWNTREND: "error", SIDEWAY: "info", TRANSITION: "default" };
@@ -95,9 +96,18 @@ export function MarketIntelPage() {
     onSuccess: (data) => client.setQueryData(["market-intel-snapshot"], data),
   });
   if (query.isLoading) return <LoadingState />;
-  if (query.error) return <ErrorState message={query.error instanceof Error ? query.error.message : "Không tải được phân tích."} />;
+  if (query.error) {
+    // Journal and proposals do not depend on live candles: keep them usable when the bridge is down.
+    return (
+      <Stack spacing={2}>
+        <ErrorState message={query.error instanceof Error ? query.error.message : "Không tải được phân tích."} />
+        <MarketIntelJournalCard />
+        <MarketIntelProposalsCard />
+      </Stack>
+    );
+  }
   const snapshot = query.data;
-  if (!snapshot) return null;
+  if (!snapshot) return <Stack spacing={2}><MarketIntelJournalCard /><MarketIntelProposalsCard /></Stack>;
   const mtf = snapshot.mtf;
   return (
     <Stack spacing={2}>
@@ -124,6 +134,7 @@ export function MarketIntelPage() {
       )}
       <RegimeCard snapshot={snapshot} />
       <MarketIntelJournalCard />
+      <MarketIntelProposalsCard />
       {mtf && (
         <Card>
           <CardContent>
