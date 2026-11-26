@@ -22,6 +22,7 @@ import {
   setPhase7CBotMode,
   setPhase7CLotSettings,
 } from "../api";
+import { Phase7CDailyPnlStopCard } from "./Phase7CDailyPnlStopCard";
 
 function price(value: number | null | undefined) {
   return Number.isFinite(value) ? Number(value).toFixed(2) : "—";
@@ -353,6 +354,8 @@ export function Phase7CControlCenterCompactSection({
           </Card>
         </Grid>
       </Grid>
+
+      <Phase7CDailyPnlStopCard />
 
       <Card variant="outlined" sx={{ borderRadius: 3 }}>
         <CardContent sx={{ p: { xs: 1.7, md: 2 } }}>

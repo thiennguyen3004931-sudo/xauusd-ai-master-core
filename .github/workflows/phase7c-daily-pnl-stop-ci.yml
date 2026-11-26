@@ -1,0 +1,71 @@
+name: Phase7C Daily Loss / Profit Stop (No MT5)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/phase7c-daily-pnl-stop.mjs'
+      - 'scripts/phase7c-daily-pnl-stop.d.mts'
+      - 'scripts/phase7c-daily-pnl-stop.test.mjs'
+      - 'scripts/phase7c-daily-pnl-stop-api.test.mjs'
+      - 'scripts/run-phase7b-demo-controller.ts'
+      - 'scripts/run-phase7c-sideway-controller.mjs'
+      - 'apps/api/src/services/phase7c-daily-pnl-stop.service.ts'
+      - 'apps/api/src/routes/phase7c.route.ts'
+      - 'apps/web/src/api.ts'
+      - 'apps/web/src/ui/Phase7CDailyPnlStopCard.tsx'
+      - 'apps/web/src/ui/Phase7CControlCenterCompactSection.tsx'
+      - 'docs/operations/phase7c-daily-pnl-stop.md'
+      - '.github/workflows/phase7c-daily-pnl-stop-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  daily-pnl-stop:
+    name: Daily loss/profit stop gate, API, UI and TREND/SIDEWAY regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MT5_ORDER_PERMISSION: NONE
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Daily stop gate + runtime wiring
+        run: node --test scripts/phase7c-daily-pnl-stop.test.mjs
+      - name: Build API and Web
+        run: pnpm turbo run build --filter=@xauusd/api... --filter=@xauusd/web...
+      - name: API service (OFF path makes no broker call, fail closed when ON)
+        run: pnpm --dir apps/api exec tsx ../../scripts/phase7c-daily-pnl-stop-api.test.mjs
+      - name: TREND / SIDEWAY / SEMI regressions and canonical contracts
+        run: |
+          node --test scripts/phase7c-break-even-config.test.mjs
+          node --test scripts/phase7c-management-constants-inventory.test.mjs
+          node --test scripts/phase7c-sideway-broker-tp-sl-trail-only.test.mjs
+          node --test scripts/phase7c-sideway-execution-guards.test.mjs
+          node --test scripts/phase7c-fixed-tp-trend-exit.test.mjs
+          node --test scripts/phase7c-fixed-tp-sideway-exit.test.mjs
+          node --test scripts/phase7c-final-strategy-acceptance.test.mjs
+          node --test scripts/phase7c-semi-post-entry-contract.test.mjs
+          node --test scripts/phase7c-trend-m5-runtime-wiring.test.mjs
+          node scripts/test-phase7c-structural-sl-monotonicity.mjs
+          node scripts/test-phase7c-trend-management-path-regression.mjs
+          node scripts/test-phase7c-sideway-recovery-management-contract.mjs
+          node scripts/phase7c-semi-post-entry-contract.mjs
+          node scripts/test-phase7c-canonical-daily-recovery-executors-contract.mjs
+          node scripts/test-phase7c-canonical-deal-ledger-consumers-contract.mjs
+          node scripts/test-phase7c-control-center-v2-compact-ui-source.mjs
+          node scripts/test-phase7c-lean-ui-source.mjs

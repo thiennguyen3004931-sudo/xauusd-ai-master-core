@@ -34,6 +34,7 @@ import {
   tightestKnownStop,
 } from "./phase7c-stop-monotonicity.mjs";
 import { fastMoveProfitLockCandidate } from "./phase7c-fast-move-profit-lock.mjs";
+import { checkDailyPnlStopViaControlApi } from "./phase7c-daily-pnl-stop.mjs";
 import {
   breakEvenSnapshot,
   entryBreakEvenSnapshot,
@@ -594,6 +595,16 @@ async function cycle() {
 
   const volume = Number(autoLotValidation.recommendedLot);
   validateVolume(volume, spec);
+
+  // Daily loss limit / profit target (operator-set, default OFF): once hit,
+  // no new position until the next broker day. Open positions are untouched.
+  const dailyPnlStop = await checkDailyPnlStopViaControlApi({
+    fetchStatus: () => controlGet("/api/v1/phase7c/daily-pnl-stop"),
+  });
+  if (dailyPnlStop.blocked) {
+    journal("ENTRY_DAILY_PNL_STOP_BLOCK", { closeTime, side, volume, dailyPnlStop });
+    return;
+  }
 
   const dailyRecovery = await resolveDailyRecoveryPlan(
     freshQuote,
