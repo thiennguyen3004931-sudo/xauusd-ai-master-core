@@ -104,6 +104,15 @@ Kịch bản thay thế (2.480): TP1 trước SL 30,0%, PF 0,56.
 - Các kịch bản chồng nhau theo thời gian (mỗi 4 giờ một lần), nên các lệnh không độc lập với nhau.
 - Order block và hỗ trợ/kháng cự được định nghĩa bằng luật đơn giản, có thể khác với cách anh tự vẽ bằng mắt.
 
+## Xem trên Control Center
+
+Trang **Kỹ thuật → Phân tích thị trường** (`/market-intel`) hiện trạng thái thư viện mẫu, phân tích H4 → H1 → M15, hai kịch bản và 3 chart. Trang tự làm mới mỗi phút.
+
+- API: `GET /api/v1/market-intel/snapshot`, chỉ có route GET.
+  - Nến lấy từ MT5 bridge (`GET /v1/candles`, 400 nến M15/H1/H4), bỏ nến đang hình thành.
+  - Kết quả được cache 60 giây.
+- Bật trên máy bot, trong môi trường của API: `ZIQ_MARKET_INTEL_REGIME_LIBRARY_ENABLED=true` (trạng thái thị trường) và/hoặc `ZIQ_MARKET_INTEL_MTF_ENABLED=true` (kịch bản + chart), rồi khởi động lại API theo quy trình Phase 7C. Khi cả hai tắt, API không gọi bridge và trang chỉ báo "đang tắt".
+
 ## Chạy
 
 ```bash

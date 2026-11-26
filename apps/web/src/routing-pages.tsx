@@ -20,6 +20,10 @@ export const PerformancePage = lazy(() =>
   import("./pages/PerformancePage").then((module) => ({ default: module.PerformancePage })),
 );
 
+export const MarketIntelPage = lazy(() =>
+  import("./pages/MarketIntelPage").then((module) => ({ default: module.MarketIntelPage })),
+);
+
 export function DeferredPage({ children }: { children: ReactNode }) {
   return <Suspense fallback={<LoadingState />}>{children}</Suspense>;
 }

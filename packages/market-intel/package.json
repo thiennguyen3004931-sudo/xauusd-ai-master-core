@@ -6,9 +6,13 @@
   "description": "Read-only market intelligence: regime template library (feature 3). Advisory only; never sends, modifies or closes orders.",
   "main": "./src/index.mjs",
   "exports": {
-    ".": "./src/index.mjs"
+    ".": {
+      "types": "./src/index.d.mts",
+      "default": "./src/index.mjs"
+    }
   },
   "scripts": {
     "test": "node --test test/*.test.mjs"
-  }
+  },
+  "types": "./src/index.d.mts"
 }
