@@ -54,3 +54,40 @@ test("route and service are GET-only and never reach orders, positions or bot mo
     }
   }
 });
+
+test("real-time cadence: cache lasts until the next M15 close; refresh bypasses it", async () => {
+  let calls = 0;
+  const loader: CandleLoader = async (...args) => { calls += 1; return synthetic(...args); };
+  const env = { ZIQ_MARKET_INTEL_MTF_ENABLED: "true" };
+  const t0 = Date.UTC(2026, 2, 2, 0, 1); // synthetic bars end at 00:00
+  const a = await getMarketIntelSnapshot("XAUUSD", { env, loader, now: t0 });
+  assert.equal(a.lastM15CloseAt, Date.UTC(2026, 2, 2, 0, 0));
+  assert.equal(a.nextM15CloseAt, Date.UTC(2026, 2, 2, 0, 15));
+  const n1 = calls;
+  // Same M15 bar, 5 minutes later: cached even past the old 60 s TTL.
+  await getMarketIntelSnapshot("XAUUSD", { env, loader, now: t0 + 5 * 60_000 });
+  assert.equal(calls, n1);
+  // A new M15 bar closed: reload.
+  await getMarketIntelSnapshot("XAUUSD", { env, loader, now: Date.UTC(2026, 2, 2, 0, 15, 5) });
+  assert.ok(calls > n1);
+  const n2 = calls;
+  // Manual refresh: reload now.
+  const r = await getMarketIntelSnapshot("XAUUSD", { env, loader, now: Date.UTC(2026, 2, 2, 0, 16), refresh: true });
+  assert.ok(calls > n2);
+  assert.equal(r.refreshed, true);
+  // Refresh twice within the throttle window: served from cache.
+  const n3 = calls;
+  await getMarketIntelSnapshot("XAUUSD", { env, loader, now: Date.UTC(2026, 2, 2, 0, 16, 3), refresh: true });
+  assert.equal(calls, n3);
+});
+
+test("bridge lag: a snapshot built before the just-closed M15 bar is published is not pinned", async () => {
+  let calls = 0;
+  const loader: CandleLoader = async (...args) => { calls += 1; return synthetic(...args); };
+  const env = { ZIQ_MARKET_INTEL_MTF_ENABLED: "true" };
+  // Clock says 00:31, but the newest bar the bridge returns closed at 00:00.
+  await getMarketIntelSnapshot("XAUUSD", { env, loader, now: Date.UTC(2026, 2, 2, 0, 31) });
+  const n = calls;
+  await getMarketIntelSnapshot("XAUUSD", { env, loader, now: Date.UTC(2026, 2, 2, 0, 32) });
+  assert.ok(calls > n);
+});

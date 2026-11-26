@@ -29,6 +29,9 @@ export interface MarketIntelSnapshot {
     notes: string[];
   };
   charts: { h4: string; h1: string; m15: string } | null;
+  lastM15CloseAt: number;
+  nextM15CloseAt: number;
+  refreshed: boolean;
 }
 
 // Feature 1 (C1) journal.

@@ -26,6 +26,11 @@ export interface MarketIntelSnapshot {
   mtf: ScenarioResult | null;
   charts: { h4: string; h1: string; m15: string } | null;
   safety: { readOnly: true; advisoryOnly: true; orderMutation: false; runtimeMutation: false };
+  /** Close time of the last M15 bar at generation time, and of the next one (the auto-refresh point). */
+  lastM15CloseAt: number;
+  nextM15CloseAt: number;
+  /** True when this snapshot was rebuilt because the operator pressed "Cập nhật". */
+  refreshed: boolean;
   error?: string;
 }
 
@@ -33,8 +38,10 @@ export type CandleLoader = (symbol: string, timeframe: MarketIntelTimeframe, cou
 
 const PERIOD_MS: Record<MarketIntelTimeframe, number> = { M15: 15 * 60_000, H1: 60 * 60_000, H4: 4 * 60 * 60_000 };
 const SAFETY = { readOnly: true, advisoryOnly: true, orderMutation: false, runtimeMutation: false } as const;
-const CACHE_MS = 60_000;
-let cache: { key: string; at: number; value: MarketIntelSnapshot } | null = null;
+const M15_MS = 15 * 60_000;
+/** A manual refresh within this window is served from cache, so repeated clicks cannot flood the bridge. */
+const REFRESH_THROTTLE_MS = 10_000;
+let cache: { key: string; at: number; bar: number; value: MarketIntelSnapshot } | null = null;
 
 interface BridgeBar { openTime?: number; closeTime: number; open: number; high: number; low: number; close: number; tickVolume?: number }
 
@@ -77,31 +84,39 @@ export const bridgeCandleLoader: CandleLoader = async (symbol, timeframe, count)
 
 export async function getMarketIntelSnapshot(
   symbol = "XAUUSD",
-  { env = process.env, loader = bridgeCandleLoader, now = Date.now(), useCache = true }: {
-    env?: Record<string, string | undefined>; loader?: CandleLoader; now?: number; useCache?: boolean;
+  { env = process.env, loader = bridgeCandleLoader, now = Date.now(), useCache = true, refresh = false }: {
+    env?: Record<string, string | undefined>; loader?: CandleLoader; now?: number; useCache?: boolean; refresh?: boolean;
   } = {},
 ): Promise<MarketIntelSnapshot> {
   const enabled = { regimeLibrary: isRegimeLibraryEnabled(env), mtf: isMtfEnabled(env) };
+  const lastM15CloseAt = Math.floor(now / M15_MS) * M15_MS;
   const base: MarketIntelSnapshot = {
     enabled,
     versions: { regimeLibrary: REGIME_LIBRARY_VERSION, mtf: MTF_VERSION },
     symbol, generatedAt: now, regime: null, mtf: null, charts: null, safety: SAFETY,
+    lastM15CloseAt, nextM15CloseAt: lastM15CloseAt + M15_MS, refreshed: false,
   };
   if (!enabled.regimeLibrary && !enabled.mtf) return base;
+  // Real-time cadence: one rebuild per closed M15 bar; "Cập nhật" forces a rebuild (throttled).
   const key = `${symbol}|${enabled.regimeLibrary}|${enabled.mtf}`;
-  if (useCache && cache && cache.key === key && now - cache.at < CACHE_MS) return cache.value;
+  if (useCache && cache && cache.key === key) {
+    const sameBar = cache.bar === lastM15CloseAt;
+    if (refresh ? now - cache.at < REFRESH_THROTTLE_MS : sameBar) return cache.value;
+  }
 
   const [h4, h1, m15] = await Promise.all([
     loader(symbol, "H4", 400),
     loader(symbol, "H1", 400),
     enabled.mtf ? loader(symbol, "M15", 400) : Promise.resolve([] as Bar[]),
   ]);
-  const value: MarketIntelSnapshot = { ...base };
+  const value: MarketIntelSnapshot = { ...base, refreshed: refresh };
   value.regime = classifyMarket({ h4, h1 });
   if (enabled.mtf && m15.length > 0) {
     value.mtf = buildScenarios({ h4, h1, m15 });
     value.charts = renderScenarioCharts({ h4, h1, m15 }, value.mtf);
   }
-  cache = { key, at: now, value };
+  // If the bridge has not published the just-closed bar yet, do not pin the stale result for 15 minutes.
+  const dataBar = m15.length > 0 ? m15[m15.length - 1].closeTime : h1.length > 0 ? h1[h1.length - 1].closeTime : lastM15CloseAt;
+  if (useCache) cache = { key, at: now, bar: enabled.mtf && dataBar < lastM15CloseAt ? dataBar : lastM15CloseAt, value };
   return value;
 }

@@ -249,8 +249,8 @@ export async function runPhase7ERealignmentBacktest(input: Phase7ERealignmentReq
   }));
 }
 // Market intel (features 2 and 3): GET-only, advisory snapshot.
-export async function getMarketIntelSnapshot(): Promise<import("./market-intel-types").MarketIntelSnapshot> {
-  return read(await fetch(`${API_BASE}/api/v1/market-intel/snapshot?symbol=XAUUSD`, { cache: "no-store" }));
+export async function getMarketIntelSnapshot(refresh = false): Promise<import("./market-intel-types").MarketIntelSnapshot> {
+  return read(await fetch(`${API_BASE}/api/v1/market-intel/snapshot?symbol=XAUUSD${refresh ? "&refresh=1" : ""}`, { cache: "no-store" }));
 }
 
 // Market intel journal (feature 1, C1). Sync only copies realized trades into the local journal file.
