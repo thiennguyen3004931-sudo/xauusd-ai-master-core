@@ -613,6 +613,8 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@24.13.3)(lightningcss@1.33.0)
 
+  packages/market-intel: {}
+
   packages/mt5-broker:
     dependencies:
       '@xauusd/execution-engine':

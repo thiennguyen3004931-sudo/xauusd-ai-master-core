@@ -1,0 +1,14 @@
+{
+  "name": "@xauusd/market-intel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only market intelligence: regime template library (feature 3). Advisory only; never sends, modifies or closes orders.",
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
