@@ -3,6 +3,7 @@ import { Alert, Box, Card, CardContent, Chip, Grid, Stack, Table, TableBody, Tab
 import { getMarketIntelSnapshot } from "../api";
 import type { MarketIntelScenario, MarketIntelSnapshot, MarketIntelState } from "../market-intel-types";
 import { ErrorState, LoadingState } from "../ui/PageState";
+import { MarketIntelJournalCard } from "./MarketIntelJournalCard";
 
 const STATE: Record<MarketIntelState, string> = { UPTREND: "Uptrend", DOWNTREND: "Downtrend", SIDEWAY: "Sideway", TRANSITION: "Chuyển tiếp" };
 const STATE_COLOR: Record<MarketIntelState, "success" | "error" | "info" | "default"> = { UPTREND: "success", DOWNTREND: "error", SIDEWAY: "info", TRANSITION: "default" };
@@ -93,6 +94,7 @@ export function MarketIntelPage() {
         </Alert>
       )}
       <RegimeCard snapshot={snapshot} />
+      <MarketIntelJournalCard />
       {mtf && (
         <Card>
           <CardContent>

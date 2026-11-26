@@ -27,6 +27,7 @@ import phase7cUiRouter from "./routes/phase7c-ui.route";
 import phase7dRouter from "./routes/phase7d.route";
 import phase7eRouter from "./routes/phase7e.route";
 import marketIntelRouter from "./routes/market-intel.route";
+import marketIntelJournalRouter from "./routes/market-intel-journal.route";
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.use(
 app.use(express.json({ limit: "256kb" }));
 
 app.use("/api/v1/health", healthRouter);
+app.use("/api/v1/market-intel/journal", marketIntelJournalRouter);
 app.use("/api/v1/market-intel", marketIntelRouter);
 app.use("/api/v1/market", marketRouter);
 app.use("/api/v1/dashboard", dashboardRouter);
