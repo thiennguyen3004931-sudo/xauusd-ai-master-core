@@ -7,3 +7,7 @@ export { REGIME_LIBRARY_VERSION, REGIME_TEMPLATES, THRESHOLDS } from "./template
 export { analyzeTimeframe, featuresAt, classifyTimeframe, classifyMarket, combine, SAFETY } from "./classifier.mjs";
 export { REGIME_LIBRARY_FLAG, isRegimeLibraryEnabled, toProductionFamily, agreementMatrix } from "./shadow.mjs";
 export { renderRegimeChartSvg } from "./chart-svg.mjs";
+export { keyLevels, orderBlocks } from "./zones.mjs";
+export { m15Trigger } from "./triggers.mjs";
+export { MTF_VERSION, MTF_FLAG, isMtfEnabled, BOT_STOP_RULE, CONFIDENCE_POINTS, buildScenarios, scenariosFromAnalyses } from "./scenario.mjs";
+export { renderScenarioCharts } from "./scenario-chart.mjs";
