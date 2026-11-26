@@ -307,3 +307,7 @@ export async function runPhase7ERealignmentBacktest(input: Phase7ERealignmentReq
     body: JSON.stringify(input),
   }));
 }
+// Market intel (features 2 and 3): GET-only, advisory snapshot. No write endpoint exists.
+export async function getMarketIntelSnapshot(refresh = false): Promise<import("./market-intel-types").MarketIntelSnapshot> {
+  return read(await fetch(`${API_BASE}/api/v1/market-intel/snapshot?symbol=XAUUSD${refresh ? "&refresh=1" : ""}`, { cache: "no-store" }));
+}

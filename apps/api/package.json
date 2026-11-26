@@ -14,6 +14,7 @@
                          "@xauusd/backtest-engine":  "workspace:*",
                          "@xauusd/indicators":  "workspace:*",
                          "@xauusd/market-data":  "workspace:*",
+                         "@xauusd/market-intel":  "workspace:*",
                          "@xauusd/risk-engine":  "workspace:*",
                          "@xauusd/signal-engine":  "workspace:*",
                          "@xauusd/strategy-engine":  "workspace:*",

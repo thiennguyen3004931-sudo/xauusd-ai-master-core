@@ -45,6 +45,9 @@ importers:
       '@xauusd/market-data':
         specifier: workspace:*
         version: link:../../packages/market-data
+      '@xauusd/market-intel':
+        specifier: workspace:*
+        version: link:../../packages/market-intel
       '@xauusd/mt5-broker':
         specifier: workspace:*
         version: link:../../packages/mt5-broker

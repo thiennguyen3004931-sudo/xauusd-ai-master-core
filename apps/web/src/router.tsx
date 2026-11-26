@@ -1,4 +1,4 @@
-import { Phase7BPatternCheckPage, Phase7CAccountRiskPage, Phase7CControlCenterShellPage, Phase7CMobileReadOnlyPage, Phase7CTechnicalPage, PerformancePage, DeferredPage } from "./routing-pages";
+import { MarketIntelPage, Phase7BPatternCheckPage, Phase7CAccountRiskPage, Phase7CControlCenterShellPage, Phase7CMobileReadOnlyPage, Phase7CTechnicalPage, PerformancePage, DeferredPage } from "./routing-pages";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { DashboardLayout } from "./ui/DashboardLayout";
 import { Phase7BDemoPage } from "./pages/Phase7BDemoPage";
@@ -34,6 +34,10 @@ export const router = createBrowserRouter([
       {
         path: "performance",
         element: <DeferredPage><PerformancePage /></DeferredPage>,
+      },
+      {
+        path: "market-intel",
+        element: <DeferredPage><MarketIntelPage /></DeferredPage>,
       },
       { path: "system", element: <Navigate to="/phase7b-ops" replace /> },
       { path: "*", element: <Navigate to="/" replace /> },
