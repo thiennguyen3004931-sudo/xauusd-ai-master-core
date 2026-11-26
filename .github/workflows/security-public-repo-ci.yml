@@ -1,0 +1,63 @@
+name: Security Public Repository CI
+
+# Runs only on GitHub-hosted runners: it must never touch the bot machine.
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-public-repo-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITLEAKS_VERSION: 8.24.2
+  GITLEAKS_SHA256: fa0500f6b7e41d28791ebc680f5dd9899cd42b58629218a5f041efa899151a8e
+
+jobs:
+  fork-guard-and-secrets:
+    name: security-public-repo
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Self-hosted fork guard contract
+        run: node --test scripts/security/check-self-hosted-fork-guard.test.mjs
+
+      - name: Self-hosted fork guard on all workflows
+        run: node scripts/security/check-self-hosted-fork-guard.mjs .github/workflows
+
+      - name: Tracked secret path boundary
+        run: node scripts/security/check-private-secrets.mjs --tracked
+
+      - name: Credential remediation ledger tests
+        run: node --test scripts/security/validate-credential-remediation.test.mjs
+
+      - name: Install checksum-verified gitleaks
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" version
+
+      - name: Full git history secret scan (redacted)
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          "$RUNNER_TEMP/gitleaks" git . --redact --no-banner --log-opts="--all" \
+            --report-format json --report-path "$RUNNER_TEMP/gitleaks.json" --exit-code 0
+          node scripts/security/validate-credential-remediation.mjs "$RUNNER_TEMP/gitleaks.json" security/credential-remediation.json
