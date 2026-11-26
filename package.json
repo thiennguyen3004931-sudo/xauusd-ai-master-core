@@ -13,7 +13,8 @@
     "check:integration": "node scripts/validate-pack-12.mjs",
     "backtest": "node scripts/backtest/phase7c-backtest.mjs",
     "dev:api": "turbo run dev --filter=@xauusd/api",
-    "dev:web": "turbo run dev --filter=@xauusd/web"
+    "dev:web": "turbo run dev --filter=@xauusd/web",
+    "market-intel:regime-report": "node scripts/market-intel/regime-library-report.mjs"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

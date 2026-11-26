@@ -32,6 +32,6 @@ test("adx: strong trend reads high with +DI above -DI; flat oscillation reads lo
   assert.ok(last.adx > 30, `trend ADX ${last.adx}`);
   assert.ok(last.plusDi > last.minusDi);
 
-  const flat = adx(barsFromPath(200, rangePath(2300, 6, 20)), 14).at(-1);
+  const flat = adx(barsFromPath(200, rangePath()), 14).at(-1);
   assert.ok(flat.adx < 20, `range ADX ${flat.adx}`);
 });

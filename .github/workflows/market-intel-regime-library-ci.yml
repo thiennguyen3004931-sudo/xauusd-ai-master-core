@@ -1,0 +1,34 @@
+name: Market Intel Regime Library (No MT5)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/market-intel/**'
+      - 'scripts/market-intel/**'
+      - 'docs/market-intel/**'
+      - '.github/workflows/market-intel-regime-library-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regime-library:
+    name: Template classifier, causality, chart rendering and order-path isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      MT5_ORDER_PERMISSION: NONE
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Library tests (synthetic bars only)
+        run: node --test packages/market-intel/test/*.test.mjs
+      - name: Report script tests (synthetic CSV, no production classifier)
+        run: node --test scripts/market-intel/*.test.mjs

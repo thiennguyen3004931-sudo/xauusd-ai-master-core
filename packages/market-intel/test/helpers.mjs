@@ -31,6 +31,9 @@ export const upPath = (base = 2000, drift = 0.8, amp = 12, cycle = 24) => (i) =>
 export const downPath = (base = 2600, drift = 0.8, amp = 12, cycle = 24) => (i) =>
   base - drift * i + amp * Math.sin((2 * Math.PI * i) / cycle);
 
-/** Flat oscillation inside a band: no drift. */
-export const rangePath = (base = 2300, amp = 6, cycle = 20) => (i) =>
-  base + amp * Math.sin((2 * Math.PI * i) / cycle);
+/**
+ * Flat, irregular oscillation inside a band: no drift. Three incommensurate sine waves, because a
+ * single clean sine wave is itself a regular "trend" to ADX and EMA slope.
+ */
+export const rangePath = (base = 2300) => (i) =>
+  base + 5 * Math.sin((2 * Math.PI * i) / 20) + 3 * Math.sin((2 * Math.PI * i) / 7.3) + 2 * Math.sin((2 * Math.PI * i) / 3.1);

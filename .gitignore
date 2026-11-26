@@ -101,5 +101,6 @@ coverage/
 
 # Phase 7C offline backtest outputs and raw broker exports (never commit)
 /.runtime/backtest/
+/.runtime/market-intel/
 *_M5_*.csv
 *_M15_*.csv
