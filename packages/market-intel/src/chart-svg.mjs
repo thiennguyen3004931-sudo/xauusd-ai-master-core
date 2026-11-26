@@ -20,7 +20,7 @@ export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle 
   const lo = Math.max(0, from);
   const hi = Math.min(bars.length - 1, to);
   const view = bars.slice(lo, hi + 1);
-  const padL = 16, padR = 72, padT = 56, padB = 36;
+  const padL = 16, padR = marks.length ? 128 : 72, padT = 56, padB = 36;
   const plotW = width - padL - padR, plotH = height - padT - padB;
   let pMin = Math.min(...view.map((b) => b.low)), pMax = Math.max(...view.map((b) => b.high));
   for (const z of zones) { pMin = Math.min(pMin, z.low); pMax = Math.max(pMax, z.high); }
@@ -107,10 +107,14 @@ export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle 
     }
   }
 
-  for (const m of marks) {
+  // Level marks: line across the plot, label in the right margin (de-overlapped, on a white tag).
+  const tags = marks.map((m) => ({ ...m, y: Y(m.price) })).sort((a, b) => a.y - b.y);
+  for (let k = 1; k < tags.length; k += 1) if (tags[k].y - tags[k - 1].y < 14) tags[k].y = tags[k - 1].y + 14;
+  for (const m of tags) {
     const color = m.color ?? COLORS.text;
     out.push(`<line class="mark" x1="${padL}" x2="${padL + plotW}" y1="${Y(m.price).toFixed(1)}" y2="${Y(m.price).toFixed(1)}" stroke="${color}" stroke-width="1.2"/>`);
-    out.push(`<text x="${padL + plotW - 4}" y="${(Y(m.price) - 4).toFixed(1)}" text-anchor="end" fill="${color}">${esc(m.label)} ${m.price.toFixed(2)}</text>`);
+    out.push(`<rect x="${padL + plotW + 2}" y="${(m.y - 7).toFixed(1)}" width="${padR - 6}" height="14" fill="#ffffff"/>`);
+    out.push(`<text x="${padL + plotW + 6}" y="${(m.y + 4).toFixed(1)}" font-weight="600" fill="${color}">${esc(m.label)} ${m.price.toFixed(2)}</text>`);
   }
 
   // legend (bottom centre, between the two dates)

@@ -51,3 +51,23 @@ test("summary metrics and buckets", () => {
   assert.equal(bucketOf(72), "70-90");
   assert.equal(bucketOf(5), "5-39");
 });
+
+test("analysis markdown lists both scenarios with levels, invalidation and the score breakdown", async () => {
+  const { renderMarkdown } = await import("./mtf-scenario.mjs");
+  const s = (role, direction) => ({
+    role, direction, confidence: 60, entryZone: { low: 1, high: 2, sources: ["OB H1"] }, entry: 1.5, stopLoss: 0.5,
+    takeProfit1: 3, takeProfit2: 4, rr1: 1.5, rr2: 2.5, targetsSource: { tp1: "swing", tp2: "H4" },
+    invalidation: { price: 0.5, text: "H1 đóng dưới 0.5" }, m15: { status: "WAITING", triggers: [] },
+    confidenceBreakdown: [{ factor: "Điểm nền", points: 30 }], botStopRule: { stopDistance: 1, note: "x" },
+  });
+  const md = renderMarkdown({
+    asOf: Date.UTC(2026, 0, 5), notes: [], m15: { close: 1.6 },
+    h4: { state: "UPTREND", confidence: 80, bias: "BUY", keyLevels: [], orderBlocks: [] },
+    h1: { state: "UPTREND", confidence: 70, agreement: "AGREE", phase: "PHA_HOI" },
+    scenarios: [s("PRIMARY", "BUY"), s("ALTERNATE", "SELL")],
+  });
+  assert.match(md, /Kịch bản chính: MUA/);
+  assert.match(md, /Kịch bản thay thế: BÁN/);
+  assert.match(md, /Mất hiệu lực \| H1 đóng dưới 0.5/);
+  assert.match(md, /\+30: Điểm nền/);
+});

@@ -31,6 +31,7 @@ const STOP_BUFFER_ATR = 0.25;
 const MAX_ZONE_ATR = 1.5;
 const MAX_ZONE_DISTANCE_ATR = 4;
 const round = (v) => Math.round(v * 100) / 100;
+const VI = { UPTREND: "Uptrend", DOWNTREND: "Downtrend", SIDEWAY: "Sideway", TRANSITION: "Chuyển tiếp" };
 const trendDir = (state) => (state === "UPTREND" ? "BUY" : state === "DOWNTREND" ? "SELL" : null);
 const opposite = (d) => (d === "BUY" ? "SELL" : "BUY");
 
@@ -123,13 +124,13 @@ function buildDirectional(dir, role, ctx) {
   const rr2 = Math.abs(tp2 - entry) / risk;
 
   const breakdown = [{ factor: "Điểm nền", points: P.base }];
-  if (bias === dir) breakdown.push({ factor: `H4 ${h4State.state} cùng hướng`, points: P.h4WithTrend });
+  if (bias === dir) breakdown.push({ factor: `H4 ${VI[h4State.state]} cùng hướng`, points: P.h4WithTrend });
   else if (bias === "RANGE") breakdown.push({ factor: "H4 sideway, vào ở biên", points: P.h4RangeEdge });
   else if (bias === "NONE") breakdown.push({ factor: "H4 chưa rõ xu hướng", points: P.h4None });
   else breakdown.push({ factor: "Ngược xu hướng H4", points: P.h4Against });
   const h1Dir = trendDir(h1State.state);
   if (h1Dir === dir) breakdown.push({ factor: "H1 đồng thuận", points: P.h1Agree });
-  else if (h1Dir === null) breakdown.push({ factor: `H1 ${h1State.state}`, points: P.h1Neutral });
+  else if (h1Dir === null) breakdown.push({ factor: `H1 ${VI[h1State.state]} (trung tính)`, points: P.h1Neutral });
   else breakdown.push({ factor: "H1 ngược hướng", points: P.h1Disagree });
   let position = null;
   if (range) {
