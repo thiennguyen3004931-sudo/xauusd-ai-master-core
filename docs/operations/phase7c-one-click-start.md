@@ -50,8 +50,9 @@ Script an toàn ở các điểm sau:
    - Nếu `BLOCKED` lớn hơn 0 thì còn task đang chạy. Tắt task đó (bước 1) rồi chạy lại.
 5. Nếu thấy dòng `PHASE7C_MANUAL_START_DESKTOP_SHORTCUT=MISSING_...`, chạy thêm:
    ```powershell
-   .\scripts\install-phase7c-desktop-control-local.ps1
+   .\scripts\install-phase7c-desktop-control-local.ps1 -KeepExecutorStartup
    ```
+   Luôn kèm `-KeepExecutorStartup`. Máy cài bằng bộ cài máy mới thì thêm `-BridgeTask XAUUSD-Phase7C-Bridge -SkipMt5Panel` ([chi tiết](../phase7c-desktop-control.md)).
 6. Khởi động lại máy để kiểm tra. Sau khi đăng nhập, **không có** cửa sổ hay task XAUUSD nào tự chạy. Bấm biểu tượng **XAUUSD AI MASTER**: Control Center mở ra, và bot vẫn đứng yên cho tới khi bạn bấm BẬT BOT.
 
 ## Nếu đã chạy `-Apply` bằng bản script cũ
