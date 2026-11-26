@@ -106,11 +106,13 @@ Kịch bản thay thế (2.480): TP1 trước SL 30,0%, PF 0,56.
 
 ## Xem trên Control Center
 
-Trang **Kỹ thuật → Phân tích thị trường** (`/market-intel`) hiện trạng thái thư viện mẫu, phân tích H4 → H1 → M15, hai kịch bản và 3 chart. Trang tự làm mới mỗi phút.
+Trang **Kỹ thuật → Phân tích thị trường** (`/market-intel`) hiện trạng thái thư viện mẫu, phân tích H4 → H1 → M15, hai kịch bản và 3 chart (M15 trước).
 
-- API: `GET /api/v1/market-intel/snapshot`, chỉ có route GET.
+- **Thời gian thực:** trang tự cập nhật khoảng 20 giây sau mỗi nến M15 đóng. Nút **Cập nhật** dựng lại ngay (bấm liên tục trong 10 giây chỉ nhận lần đầu, để không dồn yêu cầu vào bridge).
+- **Chart dự kiến:** trên M15 và H1, phần nền xám bên phải nến cuối vẽ đường đi nếu kịch bản chính đúng: giá hiện tại → Entry → TP1 → TP2 (nét đứt cùng màu hướng lệnh) và nhánh Entry → SL (đỏ). Đây là hình minh hoạ để anh cân nhắc vào lệnh tay, không phải dự báo, và trang không đặt lệnh.
+- API: `GET /api/v1/market-intel/snapshot[?refresh=1]`, chỉ có route GET.
   - Nến lấy từ MT5 bridge (`GET /v1/candles`, 400 nến M15/H1/H4), bỏ nến đang hình thành.
-  - Kết quả được cache 60 giây.
+  - Mỗi nến M15 chỉ dựng một lần; nếu bridge chưa kịp trả nến vừa đóng thì lần gọi sau sẽ dựng lại.
 - Bật trên máy bot, trong môi trường của API: `ZIQ_MARKET_INTEL_REGIME_LIBRARY_ENABLED=true` (trạng thái thị trường) và/hoặc `ZIQ_MARKET_INTEL_MTF_ENABLED=true` (kịch bản + chart), rồi khởi động lại API theo quy trình Phase 7C. Khi cả hai tắt, API không gọi bridge và trang chỉ báo "đang tắt".
 
 ## Chạy

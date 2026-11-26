@@ -35,6 +35,8 @@ export function renderScenarioCharts({ h4, h1, m15 }, result, { bars = { h4: 90,
     out[key] = renderRegimeChartSvg({
       analysis, from: i - bars[key] + 1, to: i,
       zones: [...levels, ...zone], marks,
+      // The planned path is drawn on the trigger timeframe (M15) and the confirmation timeframe (H1).
+      projection: primary && key !== "h4" ? { slots: Math.round(bars[key] / 4), direction: primary.direction, entry: primary.entry, stopLoss: primary.stopLoss, takeProfit1: primary.takeProfit1, takeProfit2: primary.takeProfit2 } : null,
       title: `${label} · ${info ? STATE[info.state] ?? info.state : "điểm vào"} · đến ${fmt(result.asOf)} (giờ server)`,
       subtitle: head,
     });

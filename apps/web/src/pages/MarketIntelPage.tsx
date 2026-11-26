@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { Alert, Box, Card, CardContent, Chip, Grid, Stack, Table, TableBody, TableCell, TableRow, Typography } from "@mui/material";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Alert, Box, Button, Card, CardContent, Chip, Grid, Stack, Table, TableBody, TableCell, TableRow, Typography } from "@mui/material";
 import { getMarketIntelSnapshot } from "../api";
 import type { MarketIntelScenario, MarketIntelSnapshot, MarketIntelState } from "../market-intel-types";
 import { ErrorState, LoadingState } from "../ui/PageState";
@@ -9,6 +9,13 @@ const STATE_COLOR: Record<MarketIntelState, "success" | "error" | "info" | "defa
 const M15: Record<string, string> = { TRIGGERED: "đã có tín hiệu", TOUCHED_NO_TRIGGER: "đã chạm vùng, chưa có tín hiệu", WAITING: "chưa chạm vùng" };
 const PHASE: Record<string, string> = { PHA_HOI: "pha hồi", PHA_DAY: "pha đẩy", KHONG_RO: "chưa rõ" };
 const time = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace("T", " ");
+const localTime = (ms: number) => new Date(ms).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+/** Refetch shortly after the next M15 bar closes (bridge needs a moment to publish it). */
+function nextRefetchDelayMs(snapshot: Pick<MarketIntelSnapshot, "generatedAt" | "nextM15CloseAt"> | undefined): number {
+  if (!snapshot) return 60_000;
+  const delay = snapshot.nextM15CloseAt - snapshot.generatedAt + 20_000;
+  return Math.min(16 * 60_000, Math.max(15_000, delay));
+}
 const svgSrc = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 
 function RegimeCard({ snapshot }: { snapshot: MarketIntelSnapshot }) {
@@ -75,7 +82,17 @@ function ScenarioCard({ s }: { s: MarketIntelScenario }) {
 }
 
 export function MarketIntelPage() {
-  const query = useQuery({ queryKey: ["market-intel-snapshot"], queryFn: getMarketIntelSnapshot, refetchInterval: 60_000, retry: false });
+  const client = useQueryClient();
+  const query = useQuery({
+    queryKey: ["market-intel-snapshot"],
+    queryFn: () => getMarketIntelSnapshot(false),
+    refetchInterval: (q) => nextRefetchDelayMs(q.state.data),
+    retry: false,
+  });
+  const refresh = useMutation({
+    mutationFn: () => getMarketIntelSnapshot(true),
+    onSuccess: (data) => client.setQueryData(["market-intel-snapshot"], data),
+  });
   if (query.isLoading) return <LoadingState />;
   if (query.error) return <ErrorState message={query.error instanceof Error ? query.error.message : "Không tải được phân tích."} />;
   const snapshot = query.data;
@@ -85,8 +102,20 @@ export function MarketIntelPage() {
     <Stack spacing={2}>
       <Alert severity="info">
         Phân tích thị trường và kịch bản chỉ để tham khảo. Trang này không gửi, sửa hay đóng lệnh, không đổi chế độ bot.
-        Độ tin cậy là điểm theo luật, chưa phải xác suất: tự chấm 3 năm cho thấy TP1 đến trước SL khoảng 32%.
+        Độ tin cậy là điểm theo luật, không phải xác suất. Tự chấm 3 năm: TP1 đến trước SL khoảng 32%, PF 0,62 (giai đoạn chưa dùng 0,54),
+        tức là kịch bản chưa có lợi thế. Chart "dự kiến" chỉ minh hoạ đường đi nếu kịch bản đúng, không phải dự báo.
       </Alert>
+      {(snapshot.enabled.regimeLibrary || snapshot.enabled.mtf) && (
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+          <Button size="small" variant="contained" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
+            {refresh.isPending ? "Đang cập nhật…" : "Cập nhật"}
+          </Button>
+          <Typography variant="caption" color="text.secondary">
+            Cập nhật lúc {localTime(snapshot.generatedAt)} · tự động sau mỗi nến M15 đóng (lần tới khoảng {localTime(snapshot.nextM15CloseAt + 20_000)})
+          </Typography>
+          {refresh.error && <Typography variant="caption" color="error">{refresh.error instanceof Error ? refresh.error.message : "Cập nhật thất bại."}</Typography>}
+        </Stack>
+      )}
       {!snapshot.enabled.regimeLibrary && !snapshot.enabled.mtf && (
         <Alert severity="warning">
           Chức năng đang tắt. Đặt ZIQ_MARKET_INTEL_REGIME_LIBRARY_ENABLED=true và/hoặc ZIQ_MARKET_INTEL_MTF_ENABLED=true cho API rồi khởi động lại API.
@@ -109,7 +138,7 @@ export function MarketIntelPage() {
       )}
       {snapshot.charts && (
         <Stack spacing={2}>
-          {(["h4", "h1", "m15"] as const).map((tf) => (
+          {(["m15", "h1", "h4"] as const).map((tf) => (
             <Card key={tf}><CardContent>
               <Box component="img" alt={`Chart ${tf.toUpperCase()}`} src={svgSrc(snapshot.charts![tf])} sx={{ width: "100%", height: "auto", display: "block" }} />
             </CardContent></Card>

@@ -14,8 +14,10 @@ const COLORS = {
  * @param from first bar index shown, to last bar index shown (state "as of" `to`: only swings / events known then)
  * @param zones [{ low, high, label, color?, fromIndex?, toIndex? }] (bar indices; default: whole window)
  * @param marks [{ price, label, color? }] horizontal levels (e.g. entry / SL / TP)
+ * @param projection optional { slots, direction, entry, stopLoss, takeProfit1, takeProfit2 }: empty space after
+ *   the last closed bar with the planned path (price -> entry -> TP1 -> TP2, and entry -> SL). Illustrative only.
  */
-export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle = "", zones = [], marks = [], trendline = true, width = 960, height = 460 }) {
+export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle = "", zones = [], marks = [], trendline = true, projection = null, width = 960, height = 460 }) {
   const { bars, ema50, ema200 } = analysis;
   const lo = Math.max(0, from);
   const hi = Math.min(bars.length - 1, to);
@@ -30,7 +32,8 @@ export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle 
   }
   const pad = (pMax - pMin) * 0.06 || 1;
   pMin -= pad; pMax += pad;
-  const step = plotW / view.length;
+  const slots = projection ? Math.max(4, Math.round(projection.slots ?? 24)) : 0;
+  const step = plotW / (view.length + slots);
   const X = (i) => padL + (i - lo + 0.5) * step;
   const Y = (p) => padT + ((pMax - p) / (pMax - pMin)) * plotH;
   const out = [];
@@ -47,11 +50,16 @@ export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle 
     out.push(`<text x="${padL + plotW + 6}" y="${(Y(p) + 4).toFixed(1)}" fill="${COLORS.quiet}">${p.toFixed(2)}</text>`);
   }
   out.push(`<text x="${padL}" y="${height - 12}" fill="${COLORS.quiet}">${esc(fmtTime(view[0].openTime))}</text>`);
-  out.push(`<text x="${padL + plotW}" y="${height - 12}" text-anchor="end" fill="${COLORS.quiet}">${esc(fmtTime(view.at(-1).closeTime))}</text>`);
+  out.push(`<text x="${X(hi) + step / 2}" y="${height - 12}" text-anchor="end" fill="${COLORS.quiet}">${esc(fmtTime(view.at(-1).closeTime))}</text>`);
+  if (slots) {
+    const px = X(hi) + step / 2;
+    out.push(`<rect class="projection-area" x="${px.toFixed(1)}" y="${padT}" width="${(padL + plotW - px).toFixed(1)}" height="${plotH}" fill="#f6f8fa"/>`);
+    out.push(`<text x="${(px + 6).toFixed(1)}" y="${padT + plotH - 6}" fill="${COLORS.quiet}">Dự kiến (minh hoạ, không phải dự báo)</text>`);
+  }
 
   for (const z of zones) {
     const zx1 = X(Math.max(lo, z.fromIndex ?? lo)) - step / 2;
-    const zx2 = X(Math.min(hi, z.toIndex ?? hi)) + step / 2;
+    const zx2 = X(Math.min(hi + slots, z.toIndex ?? hi + slots)) + step / 2;
     out.push(`<rect class="zone" x="${zx1.toFixed(1)}" y="${Y(z.high).toFixed(1)}" width="${(zx2 - zx1).toFixed(1)}" height="${Math.max(1, Y(z.low) - Y(z.high)).toFixed(1)}" fill="${z.color ?? COLORS.zone}" fill-opacity="0.08" stroke="${z.color ?? COLORS.zone}" stroke-opacity="0.4" stroke-dasharray="4 3"/>`);
     if (z.label) out.push(`<text x="${(zx1 + 4).toFixed(1)}" y="${(Y(z.high) + 12).toFixed(1)}" fill="${z.color ?? COLORS.zone}">${esc(z.label)}</text>`);
   }
@@ -115,6 +123,23 @@ export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle 
     out.push(`<line class="mark" x1="${padL}" x2="${padL + plotW}" y1="${Y(m.price).toFixed(1)}" y2="${Y(m.price).toFixed(1)}" stroke="${color}" stroke-width="1.2"/>`);
     out.push(`<rect x="${padL + plotW + 2}" y="${(m.y - 7).toFixed(1)}" width="${padR - 6}" height="14" fill="#ffffff"/>`);
     out.push(`<text x="${padL + plotW + 6}" y="${(m.y + 4).toFixed(1)}" font-weight="600" fill="${color}">${esc(m.label)} ${m.price.toFixed(2)}</text>`);
+  }
+
+  if (slots) {
+    const pr = projection;
+    const last = bars[hi].close;
+    const at = (f) => X(hi) + f * slots * step;
+    const pt = (f, p) => `${at(f).toFixed(1)},${Y(p).toFixed(1)}`;
+    const win = pr.direction === "SELL" ? COLORS.down : COLORS.up;
+    out.push(`<g class="projection">`);
+    out.push(`<polyline class="projection-target" points="${pt(0, last)} ${pt(0.3, pr.entry)} ${pt(0.7, pr.takeProfit1)} ${pt(0.95, pr.takeProfit2)}" fill="none" stroke="${win}" stroke-width="2" stroke-dasharray="6 4"/>`);
+    out.push(`<polyline class="projection-stop" points="${pt(0.3, pr.entry)} ${pt(0.6, pr.stopLoss)}" fill="none" stroke="#d1242f" stroke-width="2" stroke-dasharray="3 3"/>`);
+    for (const [f, p, label, color] of [[0.3, pr.entry, "Entry", COLORS.text], [0.7, pr.takeProfit1, "TP1", "#1a7f37"], [0.95, pr.takeProfit2, "TP2", "#116329"], [0.6, pr.stopLoss, "SL", "#d1242f"]]) {
+      out.push(`<circle cx="${at(f).toFixed(1)}" cy="${Y(p).toFixed(1)}" r="3.5" fill="${color}"/>`);
+      const ly = Y(p) - 7 < padT + 4 ? Y(p) + 16 : Y(p) - 7;
+      out.push(`<text x="${at(f).toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-weight="600" fill="${color}">${label}</text>`);
+    }
+    out.push(`</g>`);
   }
 
   // legend (bottom centre, between the two dates)
