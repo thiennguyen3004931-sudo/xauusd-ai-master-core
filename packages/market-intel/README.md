@@ -4,6 +4,9 @@ Read-only market intelligence for the XAUUSD Phase 7C bot. Advisory only: nothin
 sends, modifies or closes orders, touches the MT5 broker, the network, BOT_MODE or LIVE ARM
 (`test/isolation.test.mjs` enforces this statically).
 
+- Feature 2 — top-down H4 -> H1 -> M15 scenarios (`mtf-scenario-v1`): zones (S/R, order blocks), M15 triggers,
+  primary + alternate scenarios with SL/TP/RR/invalidation and a fixed confidence score, 3 charts.
+  Flag `ZIQ_MARKET_INTEL_MTF_ENABLED` (default off). Docs: `docs/market-intel/mtf-scenarios.md`.
 - Feature 3 — regime template library (`regime-library-v1`): Uptrend / Downtrend / Sideway templates
   with weighted quantitative criteria on H1 + H4, causal features, BOS/CHoCH, annotated SVG charts.
   Flag `ZIQ_MARKET_INTEL_REGIME_LIBRARY_ENABLED` (default off). Docs: `docs/market-intel/regime-library.md`.
