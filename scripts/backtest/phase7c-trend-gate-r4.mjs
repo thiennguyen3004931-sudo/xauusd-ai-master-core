@@ -20,7 +20,7 @@ export const PLAN = Object.freeze({
   splitAt: Date.UTC(2025, 11, 31), // same cut used when the gate was chosen (proposal C2)
   volume: 0.12,
   minTrainTrades: 20,
-  baselineKey: "BE6/OFF0/SL10/TPoff",
+  baselineKey: configKey({ breakEvenTriggerPrice: 6, breakEvenOffsetPrice: 0, maxInitialStopPrice: 10, fixedTpPrice: null }),
 });
 
 /**

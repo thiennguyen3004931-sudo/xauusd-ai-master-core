@@ -1,6 +1,7 @@
 // Round 4 research helpers: causal library-state gate, acceptance thresholds, chart (synthetic, no MT5).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { configKey } from "./phase7c-management-sweep.mjs";
 import { PLAN, acceptanceOf, libraryStateLookup, renderEquitySvg, withTrendOnly } from "./phase7c-trend-gate-r4.mjs";
 
 const H1 = 3_600_000;
@@ -11,7 +12,8 @@ const bars = (n, step, from, slope) => Array.from({ length: n }, (_, i) => {
 
 test("plan is the pre-registered one", () => {
   assert.equal(new Date(PLAN.splitAt).toISOString().slice(0, 10), "2025-12-31");
-  assert.equal(PLAN.baselineKey, "BE6/OFF0/SL10/TPoff");
+  const current = { breakEvenTriggerPrice: 6, breakEvenOffsetPrice: 0, maxInitialStopPrice: 10, fixedTpPrice: null };
+  assert.equal(PLAN.baselineKey, configKey(current));
   assert.equal(PLAN.minTrainTrades, 20);
 });
 
