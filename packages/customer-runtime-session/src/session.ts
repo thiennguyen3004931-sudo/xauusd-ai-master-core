@@ -1,6 +1,7 @@
 import type { CustomerGrantRegistryRepository } from "@xauusd/customer-grant-registry";
 import {
   assertCustomerProductGrantLifecycleRecord,
+  effectiveCustomerGrantStatus,
   type CustomerProductMode,
 } from "@xauusd/customer-product-access";
 import {
@@ -85,9 +86,11 @@ export type CustomerRuntimeChallengeDecision =
         | "INVALID_CHALLENGE_REQUEST"
         | "INVALID_SESSION_CONTEXT"
         | "GRANT_NOT_FOUND"
+        | "GRANT_NOT_ACTIVE"
         | "INVALID_GRANT_SOURCE"
         | "PRODUCT_MODE_MISMATCH"
         | "LICENSE_NOT_FOUND"
+        | "LICENSE_NOT_ACTIVE"
         | "INVALID_LICENSE_SOURCE"
         | "INSTALLATION_MISMATCH"
         | "CHALLENGE_STORE_REJECTED";
@@ -134,6 +137,7 @@ async function loadBoundContext(
   licenses: CustomerLicenseResolver,
   request: { readonly grantId: string; readonly installationId: string },
   expectedMode: CustomerProductMode,
+  now: number,
 ): Promise<
   | { readonly ok: true; readonly license: LicenseRecord }
   | Exclude<CustomerRuntimeChallengeDecision, { readonly ok: true }>
@@ -157,6 +161,16 @@ async function loadBoundContext(
 
   if (lifecycle.grant.productMode !== expectedMode) {
     return { ok: false, code: "PRODUCT_MODE_MISMATCH" };
+  }
+
+  // COPY_FOLLOWER has no PAUSE-only recovery path: never mint a fresh
+  // challenge for a revoked, expired or not-yet-valid grant.
+  // SELF_MANAGED intentionally retains PAUSE-only proof after revocation.
+  if (
+    expectedMode === "COPY_FOLLOWER" &&
+    effectiveCustomerGrantStatus(lifecycle, now) !== "ACTIVE"
+  ) {
+    return { ok: false, code: "GRANT_NOT_ACTIVE" };
   }
 
   let rawLicense: unknown | null;
@@ -185,6 +199,15 @@ async function loadBoundContext(
     return { ok: false, code: "INSTALLATION_MISMATCH" };
   }
 
+  if (
+    expectedMode === "COPY_FOLLOWER" &&
+    (rawLicense.status !== "ACTIVE" ||
+      now < rawLicense.issuedAt ||
+      now >= rawLicense.expiresAt)
+  ) {
+    return { ok: false, code: "LICENSE_NOT_ACTIVE" };
+  }
+
   return { ok: true, license: rawLicense };
 }
 
@@ -210,6 +233,7 @@ async function issueChallenge(
     licenses,
     request,
     expectedMode,
+    now,
   );
   if (!context.ok) return context;
 

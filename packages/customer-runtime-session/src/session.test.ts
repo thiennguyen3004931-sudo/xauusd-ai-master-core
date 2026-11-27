@@ -373,6 +373,33 @@ describe("SELF_MANAGED runtime sessions", () => {
 });
 
 describe("COPY_FOLLOWER runtime sessions", () => {
+  it("denies COPY_FOLLOWER challenges after revocation, expiry or license suspension", async () => {
+    for (const scenario of ["revoked", "expired", "suspended"] as const) {
+      const registry = new InMemoryCustomerGrantRegistryRepository();
+      const store = new InMemoryCustomerRuntimeChallengeStore();
+      const { license } = fixture();
+      await registerCopyFollower(registry, license);
+      if (scenario === "revoked") {
+        await revokeRegisteredCustomerGrant(registry, "grant-session-copy", NOW - 1);
+      }
+      const clock = new MutableClock(scenario === "expired" ? NOW + 50_000 : NOW);
+      const boundLicense: LicenseRecord = scenario === "suspended"
+        ? { ...license, status: "SUSPENDED", revokedAt: null }
+        : license;
+      const result = await issueCopyFollowerReconnectChallenge(
+        registry,
+        resolver(boundLicense),
+        store,
+        clock,
+        { grantId: "grant-session-copy", installationId: license.installationId },
+      );
+      expect(result).toEqual({
+        ok: false,
+        code: scenario === "suspended" ? "LICENSE_NOT_ACTIVE" : "GRANT_NOT_ACTIVE",
+      });
+    }
+  });
+
   it("issues a copy challenge and activates an allowlisted sizing mode", async () => {
     const registry = new InMemoryCustomerGrantRegistryRepository();
     const store = new InMemoryCustomerRuntimeChallengeStore();

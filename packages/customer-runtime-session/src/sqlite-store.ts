@@ -192,6 +192,18 @@ export class SqliteCustomerLicenseRepository
     return row ? parseLicense(row.payload_json) : null;
   }
 
+  // Atomic first enrollment: never replace an existing license identity.
+  // Existing revoked records remain untouched; this is not an anti-rollback authority.
+  async putIfAbsent(record: LicenseRecord): Promise<boolean> {
+    assertLicenseRecord(record);
+    const result = this.db
+      .prepare(
+        "INSERT OR IGNORE INTO customer_license_records(license_id, payload_json) VALUES (?, ?)",
+      )
+      .run(record.licenseId, JSON.stringify(record));
+    return result.changes === 1;
+  }
+
   async put(record: LicenseRecord): Promise<void> {
     assertLicenseRecord(record);
 
