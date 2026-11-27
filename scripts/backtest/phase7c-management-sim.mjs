@@ -45,6 +45,9 @@ export const BASELINE_CONFIG = Object.freeze({
   // TREND only when the live regime recommends TREND and is in trendRegimes). PAUSE (REVERSAL / UNCERTAIN)
   // stays locked either way, as in LIVE AUTO.
   requireTrendMode: true,
+  // Research-only TREND entry gate: (side, signalTimeMs) => boolean, asked at the M15 signal close before an
+  // entry or a pullback wait is created. null = no gate (production behaviour).
+  trendEntryFilter: null,
 });
 
 const sideSign = (side) => (side === "BUY" ? 1 : -1);
@@ -264,7 +267,8 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
         : (regime !== null && regime.recommendedMode !== "PAUSE")) && // AUTO still PAUSEs on REVERSAL / UNCERTAIN
       (cfg.maxEntrySpreadPrice === null || nextSpread <= cfg.maxEntrySpreadPrice + EPS)) {
       const sig = pre.trendSignals[k];
-      if (sig && (!cfg.requireSupertrendM15 || pre.m15St[k] === sig.side) && (!cfg.requireSupertrendM5 || pre.m5St[j] === sig.side)) {
+      if (sig && (!cfg.requireSupertrendM15 || pre.m15St[k] === sig.side) && (!cfg.requireSupertrendM5 || pre.m5St[j] === sig.side) &&
+        (cfg.trendEntryFilter === null || cfg.trendEntryFilter(sig.side, bar.closeTime))) {
         const structuralStop = sig.patternExtreme - sideSign(sig.side) * cfg.structuralBufferPrice;
         const entry = (sig.side === "BUY" ? next.open + nextSpread : next.open) + sideSign(sig.side) * cfg.slippagePrice;
         const dist = sideSign(sig.side) * (entry - structuralStop);
