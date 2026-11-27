@@ -42,6 +42,10 @@ import {
   evaluatePhase7CStrategyEntrySaveGuard,
   phase7CStrategyEntryConditionsService,
 } from "../services/phase7c-strategy-entry-conditions.service";
+import {
+  Phase7CDailyPnlStopError,
+  phase7CDailyPnlStopService,
+} from "../services/phase7c-daily-pnl-stop.service";
 
 const router = Router();
 let lifecycleActionInProgress = false;
@@ -450,6 +454,52 @@ router.post("/strategy-entry-conditions", async (req: Request, res: Response) =>
     res.status(400).json({
       code: "ENTRY_STRATEGY_CONFIG_INVALID",
       error: error instanceof Error ? error.message : "Phase 7C strategy entry condition update failed.",
+    });
+  }
+});
+
+router.get("/daily-pnl-stop", async (_req: Request, res: Response) => {
+  const read = phase7CDailyPnlStopService.read();
+  let status = null;
+  let statusError: string | null = null;
+  try {
+    status = await phase7CDailyPnlStopService.status("XAUUSD");
+  } catch (error) {
+    // Controllers treat a missing status as "API unavailable": blocked if ON.
+    statusError = error instanceof Error ? error.message : "Daily P/L stop status failed.";
+  }
+  res.setHeader("cache-control", "no-store");
+  res.json({
+    state: read.valid ? read.state : null,
+    valid: read.valid,
+    persisted: read.persisted,
+    error: read.error,
+    status,
+    statusError,
+    appliesTo: "NEW_ENTRIES_ONLY_UNTIL_NEXT_BROKER_DAY",
+    dayBoundary: "MT5_D1_CURRENT_BAR_BROKER_SERVER_TIME",
+    closesOpenPositions: false,
+  });
+});
+
+router.post("/daily-pnl-stop", async (req: Request, res: Response) => {
+  if (!canChangeBotMode(req)) {
+    res.status(403).json({
+      code: "DAILY_PNL_STOP_MUTATION_FORBIDDEN",
+      error: "Daily P/L stop changes are restricted to localhost unless PHASE7C_BOT_MODE_TOKEN is configured.",
+    });
+    return;
+  }
+  try {
+    res.json(phase7CDailyPnlStopService.set(req.body));
+  } catch (error) {
+    if (error instanceof Phase7CDailyPnlStopError) {
+      res.status(error.code === "CONFIG_VERSION_CONFLICT" ? 409 : 400).json({ code: error.code, error: error.message });
+      return;
+    }
+    res.status(400).json({
+      code: "DAILY_PNL_STOP_CONFIG_INVALID",
+      error: error instanceof Error ? error.message : "Daily P/L stop update failed.",
     });
   }
 });

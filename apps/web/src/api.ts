@@ -201,6 +201,65 @@ export async function setPhase7CLotSettings(input: {
   }));
 }
 
+export type Phase7CDailyPnlStopUnit = "USD" | "PERCENT";
+
+export interface Phase7CDailyPnlStopState {
+  version: number;
+  updatedAt: string | null;
+  updatedBy: string;
+  enabled: boolean;
+  unit: Phase7CDailyPnlStopUnit;
+  dailyLossLimit: number | null;
+  dailyProfitTarget: number | null;
+}
+
+export interface Phase7CDailyPnlStopStatus {
+  enabled: boolean;
+  blocked: boolean;
+  reason:
+    | "DISABLED"
+    | "WITHIN_LIMITS"
+    | "DAILY_LOSS_LIMIT_HIT"
+    | "DAILY_PROFIT_TARGET_HIT"
+    | "CONFIG_INVALID"
+    | "DATA_UNAVAILABLE";
+  error?: string | null;
+  dayStartTime: number | null;
+  realizedPnl?: number;
+  floatingPnl?: number;
+  dayPnl?: number;
+  baseBalance?: number | null;
+  lossLimitUsd?: number | null;
+  profitTargetUsd?: number | null;
+}
+
+export interface Phase7CDailyPnlStopSnapshot {
+  state: Phase7CDailyPnlStopState | null;
+  valid: boolean;
+  persisted: boolean;
+  error: string | null;
+  status?: Phase7CDailyPnlStopStatus | null;
+  statusError?: string | null;
+}
+
+export async function getPhase7CDailyPnlStop(): Promise<Phase7CDailyPnlStopSnapshot> {
+  return read<Phase7CDailyPnlStopSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/daily-pnl-stop`, { cache: "no-store" }));
+}
+
+export async function setPhase7CDailyPnlStop(input: {
+  expectedVersion: number;
+  enabled: boolean;
+  unit: Phase7CDailyPnlStopUnit;
+  dailyLossLimit: number | null;
+  dailyProfitTarget: number | null;
+}): Promise<Phase7CDailyPnlStopSnapshot> {
+  return read<Phase7CDailyPnlStopSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/daily-pnl-stop`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...input, source: "web-control-center" }),
+  }));
+}
+
 export async function getPhase7CAutoLotPreview(stopDistance: number, riskPercent = 0.25, maxLot = 0.03): Promise<Phase7CAutoLotPreview> {
   return read<Phase7CAutoLotPreview>(await fetch(`${API_BASE}/api/v1/phase7c/auto-lot-preview?stopDistance=${encodeURIComponent(stopDistance)}&riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`, { cache: "no-store" }));
 }
