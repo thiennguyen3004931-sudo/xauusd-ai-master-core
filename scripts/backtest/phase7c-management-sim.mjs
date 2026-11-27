@@ -41,6 +41,10 @@ export const BASELINE_CONFIG = Object.freeze({
   // TREND entry-condition toggles (production: both ON, see createVirtualStrategyEntryConditionState)
   requireSupertrendM15: true,
   requireSupertrendM5: true,
+  // Entry-signal research: false lets a TREND-path signal fire in TREND or SIDEWAY regimes (production: true,
+  // TREND only when the live regime recommends TREND and is in trendRegimes). PAUSE (REVERSAL / UNCERTAIN)
+  // stays locked either way, as in LIVE AUTO.
+  requireTrendMode: true,
 });
 
 const sideSign = (side) => (side === "BUY" ? 1 : -1);
@@ -254,8 +258,10 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
     }
 
     // ---------- TREND signal at an M15 close ----------
-    if (cfg.strategies.includes("TREND") && k >= 0 && m15[k].closeTime === bar.closeTime && regime?.recommendedMode === "TREND" &&
-      cfg.trendRegimes.includes(regime.regime) &&
+    if (cfg.strategies.includes("TREND") && k >= 0 && m15[k].closeTime === bar.closeTime &&
+      (cfg.requireTrendMode
+        ? (regime?.recommendedMode === "TREND" && cfg.trendRegimes.includes(regime.regime))
+        : (regime !== null && regime.recommendedMode !== "PAUSE")) && // AUTO still PAUSEs on REVERSAL / UNCERTAIN
       (cfg.maxEntrySpreadPrice === null || nextSpread <= cfg.maxEntrySpreadPrice + EPS)) {
       const sig = pre.trendSignals[k];
       if (sig && (!cfg.requireSupertrendM15 || pre.m15St[k] === sig.side) && (!cfg.requireSupertrendM5 || pre.m5St[j] === sig.side)) {
@@ -264,13 +270,13 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
         const dist = sideSign(sig.side) * (entry - structuralStop);
         if (dist > 0 && dist <= cfg.maxInitialStopPrice + EPS) {
           const stop = entry - sideSign(sig.side) * Math.max(cfg.minInitialStopPrice, dist);
-          open({ strategy: "TREND", side: sig.side, entry, stop, tp: fixedTp(sig.side, entry), regime: regime.regime, time: next.openTime, signalTime: bar.closeTime });
+          open({ strategy: "TREND", side: sig.side, entry, stop, tp: fixedTp(sig.side, entry), regime: regime?.regime ?? null, time: next.openTime, signalTime: bar.closeTime });
           pending = null;
           continue;
         }
         if (dist > cfg.maxInitialStopPrice) {
           pending = {
-            side: sig.side, structuralStop, signalTime: bar.closeTime, regime: regime.regime,
+            side: sig.side, structuralStop, signalTime: bar.closeTime, regime: regime?.regime ?? null,
             expiresAt: bar.closeTime + cfg.pullbackWaitMinutes * 60_000,
           };
           continue;
