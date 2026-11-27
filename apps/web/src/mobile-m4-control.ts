@@ -31,6 +31,24 @@ export type MobileM4State = {
   };
 };
 
+export type MobileReadOnlyState = {
+  operator: string;
+  controlMode: "READ_ONLY";
+  controlsEnabled: false;
+};
+
+export type MobileGatewayState = MobileM4State | MobileReadOnlyState;
+
+// Fail closed: phone controls render only for a complete M4 state payload.
+export function isMobileControlEnabled(state: MobileGatewayState | null | undefined): state is MobileM4State {
+  if (!state || typeof state !== "object") return false;
+  if ("controlMode" in state && state.controlMode === "READ_ONLY") return false;
+  const candidate = state as Partial<MobileM4State>;
+  return typeof candidate.mode === "string" &&
+    Boolean(candidate.auto && typeof candidate.auto === "object") &&
+    Boolean(candidate.arm && typeof candidate.arm === "object");
+}
+
 export type MobileM4ModeResult = {
   action: string;
   outcome: "PASS" | "FAIL" | "AMBIGUOUS";
@@ -94,7 +112,7 @@ async function requestJson<T>(path: string, init: RequestInit, fetchImpl: FetchL
 }
 
 export function getMobileM4State(fetchImpl: FetchLike = fetch) {
-  return requestJson<MobileM4State>("/__m4/state", { method: "GET" }, fetchImpl);
+  return requestJson<MobileGatewayState>("/__m4/state", { method: "GET" }, fetchImpl);
 }
 
 export function executeMobileMode(mode: MobileM4Mode, fetchImpl: FetchLike = fetch) {

@@ -66,3 +66,30 @@ describe("mobile M4 same-origin client", () => {
     expect(seen.some((url) => url.includes("127.0.0.1:3711"))).toBe(false);
   });
 });
+
+describe("mobile phone control is fail-closed", () => {
+  it("treats READ_ONLY gateway state as no controls", async () => {
+    const { isMobileControlEnabled } = await import("../apps/web/src/mobile-m4-control");
+    expect(isMobileControlEnabled({ operator: "x", controlMode: "READ_ONLY", controlsEnabled: false })).toBe(false);
+  });
+
+  it("treats missing or malformed state as no controls", async () => {
+    const { isMobileControlEnabled } = await import("../apps/web/src/mobile-m4-control");
+    expect(isMobileControlEnabled(undefined)).toBe(false);
+    expect(isMobileControlEnabled(null)).toBe(false);
+    expect(isMobileControlEnabled({ operator: "x" } as never)).toBe(false);
+  });
+
+  it("enables controls only for a full M4 state payload", async () => {
+    const { isMobileControlEnabled } = await import("../apps/web/src/mobile-m4-control");
+    expect(isMobileControlEnabled({
+      operator: "x",
+      mode: "PAUSE",
+      auto: { approved: false, accountMode: null, botMode: "PAUSE", liveArmRequired: true, liveArmStatus: null, checks: {}, blockedBy: [] },
+      arm: {
+        accountMode: null, botMode: "PAUSE", liveArmStatus: null, liveExecutionArmed: false, bridgeSessionId: null,
+        openXauusdPositions: 0, canArm: false, canDisarm: false, armChecks: {}, armBlockedBy: [], disarmChecks: {}, disarmBlockedBy: [],
+      },
+    })).toBe(true);
+  });
+});

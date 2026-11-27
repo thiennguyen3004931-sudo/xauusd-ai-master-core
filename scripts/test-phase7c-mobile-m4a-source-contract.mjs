@@ -88,6 +88,8 @@ const validConfig = {
   auditPath: "C:\\ProgramData\\XAUUSD-AI-MASTER\\mobile-readonly-gateway\\m4-audit.jsonl",
 };
 assert.doesNotThrow(() => validateProductionConfig(validConfig));
+assert.equal(validateProductionConfig(validConfig).controlMode, "READ_ONLY", "phone control must be opt-in (READ_ONLY default)");
+assert.throws(() => validateProductionConfig({ ...validConfig, controlMode: "FULL" }), /CONTROL_MODE_INVALID/);
 assert.throws(() => validateProductionConfig({ ...validConfig, listenHost: "0.0.0.0" }), /LOOPBACK/);
 assert.throws(() => validateProductionConfig({ ...validConfig, apiOrigin: "http://0.0.0.0:3711" }), /API_ORIGIN/);
 assert.throws(() => validateProductionConfig({ ...validConfig, webOrigin: "http://0.0.0.0:5717" }), /WEB_ORIGIN/);
@@ -109,6 +111,9 @@ assert.match(preflightSource, /MERGED_SOURCE_GATE=PASS/, "merged-source proof ma
 assert.match(deploySource, /DEPLOYED_RUNTIME_HASH_MISMATCH/, "deploy must compare deployed runtime hashes to accepted source");
 assert.match(deploySource, /RUNTIME_SOURCE_ATTESTATION=PASS/, "deploy runtime-source attestation marker missing");
 assert.match(deploySource, /RUNTIME_SOURCE_COMMIT=\$ExpectedCommit/, "deploy must bind runtime attestation to expected commit");
+
+assert.match(deploySource, /\[string\]\$ControlMode = "READ_ONLY"/, "deploy must default phone control to READ_ONLY");
+assert.match(deploySource, /GATEWAY_CONTROL_MODE_MISMATCH/, "deploy must verify the running gateway control mode");
 
 assert.match(rollbackSource, /BACKUP_ROOT_NOT_ALLOWED/, "rollback must reject backup root itself");
 assert.match(rollbackSource, /BACKUP_OUTSIDE_APPROVED_ROOT/, "rollback must enforce directory-boundary containment");

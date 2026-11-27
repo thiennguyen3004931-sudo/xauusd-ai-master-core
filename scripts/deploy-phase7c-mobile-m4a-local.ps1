@@ -8,7 +8,12 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$AllowedOrigin,
 
-    [string]$ExpectedCurrentGatewayHash = "F4DC53D3E22738D26C762C78687ADBC4D20AD3DFAE8397C3C3A981884E8DB79A"
+    [string]$ExpectedCurrentGatewayHash = "F4DC53D3E22738D26C762C78687ADBC4D20AD3DFAE8397C3C3A981884E8DB79A",
+
+    # READ_ONLY (default): phone can only view; MODE/AUTO/ARM/DISARM from phone are refused by the gateway.
+    # M4: explicit opt-in to the bounded phone control allowlist.
+    [ValidateSet("READ_ONLY", "M4")]
+    [string]$ControlMode = "READ_ONLY"
 )
 
 $ErrorActionPreference = "Stop"
@@ -113,12 +118,14 @@ $Config = [ordered]@{
     allowedUsers = @($AllowedUser.Trim().ToLowerInvariant())
     allowedOrigin = $NormalizedOrigin
     auditPath = "C:\ProgramData\XAUUSD-AI-MASTER\mobile-readonly-gateway\m4-audit.jsonl"
+    controlMode = $ControlMode
 }
 $ConfigPath = Join-Path $StageDir "gateway.config.json"
 $Config | ConvertTo-Json -Depth 4 | Set-Content -Path $ConfigPath -Encoding UTF8
 Write-Host "STAGED_CONFIG=$ConfigPath"
 Write-Host "STAGED_ALLOWED_USER=$($AllowedUser.Trim().ToLowerInvariant())"
 Write-Host "STAGED_ALLOWED_ORIGIN=$NormalizedOrigin"
+Write-Host "STAGED_CONTROL_MODE=$ControlMode"
 
 foreach ($File in $RuntimeFiles) {
     & $NodeExe --check (Join-Path $StageDir $File)
@@ -178,6 +185,10 @@ Write-Host "=== 6. LOCAL SECURITY ACCEPTANCE ==="
 $Health = Invoke-WebRequest -Uri "http://127.0.0.1:5791/__m2/health" -Method GET -UseBasicParsing -TimeoutSec 5
 Write-Host "HEALTH_HTTP=$($Health.StatusCode)"
 Assert-True ($Health.StatusCode -eq 200) "M4_HEALTH_FAILED"
+$HealthMode = [string](($Health.Content | ConvertFrom-Json).mode)
+$ExpectedHealthMode = if ($ControlMode -eq "M4") { "M4" } else { "M2_READ_ONLY" }
+Write-Host "GATEWAY_CONTROL_MODE=$HealthMode"
+Assert-True ($HealthMode -eq $ExpectedHealthMode) "GATEWAY_CONTROL_MODE_MISMATCH"
 
 $NoIdentityBlocked = $false
 try {
@@ -227,6 +238,7 @@ Write-Host "=== M4-A GATEWAY DEPLOY COMPLETE ==="
 Write-Host "============================================================"
 Write-Host "BACKUP_DIR=$BackupDir"
 Write-Host "DEPLOYED_COMMIT=$ExpectedCommit"
+Write-Host "CONTROL_MODE=$ControlMode"
 Write-Host "GATEWAY_PID=$PostPid"
 Write-Host "GATEWAY_OWNER=$OwnerText"
 Write-Host "RUNTIME_SOURCE_ATTESTATION=PASS"

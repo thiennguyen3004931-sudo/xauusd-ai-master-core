@@ -7,6 +7,7 @@ import {
   executeMobileMode,
   getMobileArmStatus,
   getMobileM4State,
+  isMobileControlEnabled,
   preflightMobileArm,
   type MobileM4ArmPreflight,
   type MobileM4Mode,
@@ -31,19 +32,59 @@ function CheckRows({ checks }: { checks: Record<string, boolean> }) {
   );
 }
 
-export function Phase7CMobileM4ControlCard() {
-  const now = useNow();
-  const queryClient = useQueryClient();
-  const [preflight, setPreflight] = useState<MobileM4ArmPreflight | null>(null);
-  const [activeTransactionId, setActiveTransactionId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+function MobileReadOnlyNotice({ operator, reason }: { operator?: string; reason?: string }) {
+  return (
+    <Card variant="outlined" sx={{ borderRadius: 3, borderColor: "rgba(34,197,94,.35)" }}>
+      <CardContent sx={{ p: { xs: 1.5, sm: 1.8 }, "&:last-child": { pb: { xs: 1.5, sm: 1.8 } } }}>
+        <Stack spacing={0.8}>
+          <Typography variant="overline" color="success.main" fontWeight={950}>CHỈ XEM TỪ ĐIỆN THOẠI</Typography>
+          <Typography variant="body2">
+            Điện thoại chỉ được xem trạng thái. Đổi MODE, bật AUTO, ARM/DISARM LIVE và mọi thao tác lệnh chỉ làm trên máy chạy bot.
+          </Typography>
+          {operator ? <Typography variant="caption" color="text.secondary">Đăng nhập Tailscale: {operator}</Typography> : null}
+          {reason ? <Typography variant="caption" color="text.secondary">Lý do: {reason}</Typography> : null}
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+}
 
+export function Phase7CMobileM4ControlCard() {
   const state = useQuery({
     queryKey: ["mobile-m4-state"],
     queryFn: () => getMobileM4State(),
     refetchInterval: 3_000,
     retry: false,
   });
+
+  if (state.isLoading) return null;
+  if (!isMobileControlEnabled(state.data)) {
+    const operator = state.data && "operator" in state.data ? state.data.operator : undefined;
+    const reason = state.isError
+      ? `gateway không cấp quyền điều khiển (${state.error instanceof Error ? state.error.message : "UNKNOWN"})`
+      : undefined;
+    return <MobileReadOnlyNotice operator={operator} reason={reason} />;
+  }
+  return <Phase7CMobileM4Controls />;
+}
+
+function Phase7CMobileM4Controls() {
+  const now = useNow();
+  const queryClient = useQueryClient();
+  const [preflight, setPreflight] = useState<MobileM4ArmPreflight | null>(null);
+  const [activeTransactionId, setActiveTransactionId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const stateQuery = useQuery({
+    queryKey: ["mobile-m4-state"],
+    queryFn: () => getMobileM4State(),
+    refetchInterval: 3_000,
+    retry: false,
+  });
+  const state = {
+    ...stateQuery,
+    data: isMobileControlEnabled(stateQuery.data) ? stateQuery.data : undefined,
+  };
 
   const status = useQuery({
     queryKey: ["mobile-m4-status", activeTransactionId],
