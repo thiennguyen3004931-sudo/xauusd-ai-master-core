@@ -39,6 +39,8 @@ export function isMtfEnabled(env?: Record<string, string | undefined>): boolean;
 export function classifyMarket(input: { h4: Bar[]; h1: Bar[]; asOf?: number }): MarketClassification;
 export function buildScenarios(input: { h4: Bar[]; h1: Bar[]; m15: Bar[]; asOf?: number }): ScenarioResult;
 export function renderScenarioCharts(frames: { h4: Bar[]; h1: Bar[]; m15: Bar[] }, result: ScenarioResult, options?: { compact?: boolean; theme?: "light" | "dark"; bars?: { h4: number; h1: number; m15: number } }): { h4: string; h1: string; m15: string };
+export interface NearLevel { price: number; low: number; high: number; touches: number; tf: "H4" | "H1" | "H4+H1"; kind: "SUPPORT" | "RESISTANCE" }
+export function nearestLevels(result: ScenarioResult, options?: { perSide?: number }): { resistance: NearLevel[]; support: NearLevel[] };
 export interface FrameSummary {
   openTime: number; closeTime: number; open: number; high: number; low: number; close: number;
   change: number; changePct: number; candle: "UP" | "DOWN" | "FLAT"; state: RegimeState; confidence: number;

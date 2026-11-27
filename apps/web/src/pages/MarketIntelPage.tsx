@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Box, Button, Card, CardContent, Chip, Divider, Grid, Stack, Tab, Tabs, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import { getMarketIntelSnapshot } from "../api";
-import type { MarketIntelFrame, MarketIntelScenario, MarketIntelSnapshot, MarketIntelState } from "../market-intel-types";
+import type { MarketIntelFrame, MarketIntelLevel, MarketIntelScenario, MarketIntelSnapshot, MarketIntelState } from "../market-intel-types";
 import { ErrorState, LoadingState } from "../ui/PageState";
 import { MarketIntelJournalCard } from "./MarketIntelJournalCard";
 import { MarketIntelProposalsCard } from "./MarketIntelProposalsCard";
@@ -236,6 +236,37 @@ function ScenariosSection({ snapshot }: { snapshot: MarketIntelSnapshot }) {
   );
 }
 
+function LevelsRow({ title, levels, color }: { title: string; levels: MarketIntelLevel[]; color: string }) {
+  return (
+    <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+      <Typography variant="caption" fontWeight={800} sx={{ color, minWidth: 64 }}>{title}</Typography>
+      {levels.length === 0
+        ? <Typography variant="caption" color="text.secondary">không có vùng gần</Typography>
+        : levels.map((l) => (
+          <Chip key={`${l.kind}-${l.price}`} size="small" variant="outlined" sx={{ borderColor: color, ...mono }}
+            label={`${num(l.price)} · ${l.tf} · ${l.touches} chạm`} title={`Vùng ${num(l.low)}–${num(l.high)}`} />
+        ))}
+    </Stack>
+  );
+}
+
+/** Nearest support / resistance (H4 + H1 key levels) around the M15 close: where TP and SL usually sit. */
+function LevelsPanel({ snapshot }: { snapshot: MarketIntelSnapshot }) {
+  const lv = snapshot.levels;
+  if (!lv) return null;
+  return (
+    <Box sx={{ mt: 1, p: 1, border: 1, borderColor: "divider", borderRadius: 1 }}>
+      <Stack spacing={0.5}>
+        <LevelsRow title="Kháng cự" levels={lv.resistance} color="#e3b341" />
+        <LevelsRow title="Hỗ trợ" levels={lv.support} color="#39c5cf" />
+      </Stack>
+      <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+        Vùng gần giá nhất từ đỉnh/đáy H4 và H1 (gần → xa), cũng là các dải màu trên chart. TP thường đặt trước kháng cự (lệnh Mua) hoặc trước hỗ trợ (lệnh Bán); SL đặt phía sau vùng đối diện. Chỉ để tham khảo.
+      </Typography>
+    </Box>
+  );
+}
+
 function ChartImage({ src, alt }: { src: string; alt: string }) {
   return (
     <Box
@@ -266,6 +297,7 @@ function ChartsSection({ snapshot }: { snapshot: MarketIntelSnapshot }) {
             <Tab value="h4" label="H4 · so với mẫu" />
           </Tabs>
         </Stack>
+        <LevelsPanel snapshot={snapshot} />
         {sampleTf && shownSample ? (
           <>
             <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>

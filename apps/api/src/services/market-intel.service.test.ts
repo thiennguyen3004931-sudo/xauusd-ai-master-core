@@ -52,6 +52,9 @@ test("snapshot carries open / close and trend per timeframe (last closed bar)", 
     assert.ok(["UPTREND", "DOWNTREND", "SIDEWAY", "TRANSITION"].includes(f.state));
   }
   assert.equal(s.frames.m15.close, Math.round((s.mtf?.m15.close ?? 0) * 100) / 100);
+  assert.ok(s.levels && s.levels.resistance.length + s.levels.support.length > 0);
+  for (const l of s.levels.resistance) assert.ok(l.price >= (s.mtf?.m15.close ?? 0));
+  assert.ok(s.charts && /class="zone level-(resistance|support)"/.test(s.charts.m15));
   // Web charts are the compact dark variant.
   assert.ok(s.charts && s.charts.m15.includes('class="background"') && !s.charts.m15.includes('fill="#ffffff"'));
 });

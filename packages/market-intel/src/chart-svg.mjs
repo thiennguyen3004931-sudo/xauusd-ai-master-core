@@ -72,7 +72,7 @@ export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle 
   for (const z of zones) {
     const zx1 = X(Math.max(lo, z.fromIndex ?? lo)) - step / 2;
     const zx2 = X(Math.min(hi + slots, z.toIndex ?? hi + slots)) + step / 2;
-    out.push(`<rect class="zone" x="${zx1.toFixed(1)}" y="${Y(z.high).toFixed(1)}" width="${(zx2 - zx1).toFixed(1)}" height="${Math.max(1, Y(z.low) - Y(z.high)).toFixed(1)}" fill="${z.color ?? COLORS.zone}" fill-opacity="0.08" stroke="${z.color ?? COLORS.zone}" stroke-opacity="0.4" stroke-dasharray="4 3"/>`);
+    out.push(`<rect class="zone${z.kind ? ` level-${z.kind}` : ""}" x="${zx1.toFixed(1)}" y="${Y(z.high).toFixed(1)}" width="${(zx2 - zx1).toFixed(1)}" height="${Math.max(1, Y(z.low) - Y(z.high)).toFixed(1)}" fill="${z.color ?? COLORS.zone}" fill-opacity="0.08" stroke="${z.color ?? COLORS.zone}" stroke-opacity="0.4" stroke-dasharray="4 3"/>`);
     if (z.label) out.push(`<text x="${(zx1 + 4).toFixed(1)}" y="${(Y(z.high) + 12).toFixed(1)}" fill="${z.color ?? COLORS.zone}">${esc(z.label)}</text>`);
   }
 
