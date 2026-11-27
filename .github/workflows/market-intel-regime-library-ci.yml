@@ -18,6 +18,7 @@ on:
       - 'apps/api/src/routes/market-intel-journal.route.ts'
       - 'apps/web/src/pages/MarketIntel*.tsx'
       - 'apps/web/src/market-intel-types.ts'
+      - 'apps/web/public/market-intel-samples/**'
       - '.github/workflows/market-intel-regime-library-ci.yml'
   workflow_dispatch:
 

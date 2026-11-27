@@ -38,7 +38,12 @@ export function isRegimeLibraryEnabled(env?: Record<string, string | undefined>)
 export function isMtfEnabled(env?: Record<string, string | undefined>): boolean;
 export function classifyMarket(input: { h4: Bar[]; h1: Bar[]; asOf?: number }): MarketClassification;
 export function buildScenarios(input: { h4: Bar[]; h1: Bar[]; m15: Bar[]; asOf?: number }): ScenarioResult;
-export function renderScenarioCharts(frames: { h4: Bar[]; h1: Bar[]; m15: Bar[] }, result: ScenarioResult): { h4: string; h1: string; m15: string };
+export function renderScenarioCharts(frames: { h4: Bar[]; h1: Bar[]; m15: Bar[] }, result: ScenarioResult, options?: { compact?: boolean; theme?: "light" | "dark"; bars?: { h4: number; h1: number; m15: number } }): { h4: string; h1: string; m15: string };
+export interface FrameSummary {
+  openTime: number; closeTime: number; open: number; high: number; low: number; close: number;
+  change: number; changePct: number; candle: "UP" | "DOWN" | "FLAT"; state: RegimeState; confidence: number;
+}
+export function frameSummaries(frames: { h4?: Bar[]; h1?: Bar[]; m15?: Bar[] }, asOf?: number): { h4: FrameSummary | null; h1: FrameSummary | null; m15: FrameSummary | null };
 export function lastClosedIndex(bars: Bar[], asOf: number): number;
 
 // Feature 1 (C1): trade journal statistics.
