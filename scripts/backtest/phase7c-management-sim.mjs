@@ -16,12 +16,20 @@ import { opposingFvgRejectionAtIndex } from "./phase7c-replay-data.mjs";
 const EPS = 1e-9;
 
 export const BASELINE_CONFIG = Object.freeze({
+  breakEvenEnabled: true,
   breakEvenTriggerPrice: 6,
   breakEvenOffsetPrice: 0,
   maxInitialStopPrice: 10,
   minInitialStopPrice: 6,
   fixedTpPrice: null, // null = OFF
   partialTriggerPrice: 10,
+  // Backtest-page toggles (defaults = production). partialEnabled=false keeps the +partialTrigger stage
+  // (it still starts the M5 trail and the runner exits) but closes no volume.
+  partialEnabled: true,
+  partialFraction: 1 / 3,
+  fastMoveEnabled: true,
+  m5TrailEnabled: true,
+  runnerExitsEnabled: true,
   fastMoveActivationPrice: 10,
   fastMoveGivebackPrice: 10,
   pullbackWaitMinutes: 15,
@@ -99,7 +107,7 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
       r: pos.riskUsd > 0 ? pos.realized / pos.riskUsd : 0,
       exitReason: reason,
       breakEvenApplied: pos.beApplied,
-      partialApplied: pos.partial,
+      partialApplied: pos.partialClosed,
     });
     pos = null;
   };
@@ -113,7 +121,7 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
     pos = {
       strategy, side, entry, stop, initialStop: stop, tp, regime, entryTime: time, signalTime,
       remaining: cfg.volume, realized: 0, riskUsd, legs: [],
-      beApplied: false, partial: false, partialAt: null,
+      beApplied: false, partial: false, partialClosed: false, partialAt: null,
       peak: null, handedOff: false, anchor: 0, cycleStart: null, lastStruct: 0, latestPivot: null,
       lastM15Checked: -1,
     };
@@ -147,20 +155,20 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
         const favorable = sideSign(s) * (best - pos.entry);
 
         // 2) break-even (snapshot rule)
-        if (!pos.beApplied && favorable + EPS >= cfg.breakEvenTriggerPrice) {
+        if (cfg.breakEvenEnabled && !pos.beApplied && favorable + EPS >= cfg.breakEvenTriggerPrice) {
           const beStop = pos.entry + sideSign(s) * cfg.breakEvenOffsetPrice;
           if (strictlyTighter(s, pos.stop, beStop)) pos.stop = beStop;
           pos.beApplied = true;
         }
 
         // 3) FastMove reactivation after an M5 handoff, then FastMove profit lock
-        if (pos.handedOff && pos.anchor > 0 && sideSign(s) * (best - pos.anchor) + EPS >= cfg.fastMoveActivationPrice) {
+        if (cfg.fastMoveEnabled && pos.handedOff && pos.anchor > 0 && sideSign(s) * (best - pos.anchor) + EPS >= cfg.fastMoveActivationPrice) {
           pos.handedOff = false;
           pos.cycleStart = bar.closeTime;
           pos.peak = best;
           pos.latestPivot = null;
         }
-        if (!pos.handedOff && atLeastAsTight(s, pos.stop, pos.entry)) {
+        if (cfg.fastMoveEnabled && !pos.handedOff && atLeastAsTight(s, pos.stop, pos.entry)) {
           const ref = pos.anchor > 0 ? pos.anchor : pos.entry;
           pos.peak = pos.peak === null ? best : (s === "BUY" ? Math.max(pos.peak, best) : Math.min(pos.peak, best));
           if (s === "BUY" ? pos.peak < ref : pos.peak > ref) pos.peak = ref;
@@ -172,17 +180,21 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
 
         // 4) TREND partial 1/3 at +10 (SIDEWAY is brokerTpSlTrailOnly: no partial)
         if (pos.strategy === "TREND" && !pos.partial && favorable + EPS >= cfg.partialTriggerPrice) {
-          const vol = Math.floor((cfg.volume / 3) * 100 + EPS) / 100;
-          if (vol > 0) {
+          const vol = cfg.partialEnabled ? Math.floor(cfg.volume * cfg.partialFraction * 100 + EPS) / 100 : 0;
+          if (vol > 0 && vol < pos.remaining - EPS) {
             const price = pos.entry + sideSign(s) * cfg.partialTriggerPrice - sideSign(s) * cfg.slippagePrice;
             closeVolume(vol, price, "PARTIAL_PLUS_10", bar.closeTime);
+            pos.partialClosed = true;
             pos.partial = true;
+            pos.partialAt = bar.closeTime;
+          } else if (!cfg.partialEnabled) {
+            pos.partial = true; // stage reached, nothing closed
             pos.partialAt = bar.closeTime;
           }
         }
 
         // 5) bar-close actions: M5 structural trail
-        const trailActive = pos.strategy === "SIDEWAY" || pos.partial;
+        const trailActive = cfg.m5TrailEnabled && (pos.strategy === "SIDEWAY" || pos.partial);
         if (j >= 2 && trailActive) {
           const after = pos.cycleStart ?? pos.partialAt ?? pos.signalTime;
           const left = m5[j - 2];
@@ -211,7 +223,7 @@ export function simulate({ m15, m5, pre, config = {}, from = -Infinity, to = Inf
 
         // 6) M15-close exits (TREND only)
         const k = map[j];
-        if (pos && pos.strategy === "TREND" && k >= 0 && m15[k].closeTime === bar.closeTime && k > pos.lastM15Checked &&
+        if (pos && cfg.runnerExitsEnabled && pos.strategy === "TREND" && k >= 0 && m15[k].closeTime === bar.closeTime && k > pos.lastM15Checked &&
           m15[k].closeTime > pos.signalTime) {
           pos.lastM15Checked = k;
           const exitPrice = (s === "BUY" ? bar.close : bar.close + spread) - sideSign(s) * cfg.slippagePrice;

@@ -117,6 +117,9 @@ export function DashboardLayout() {
   } else if (location.pathname.startsWith("/performance")) {
     headerTitle = "Hiệu quả";
     headerSubtitle = `Kết quả giao dịch XAUUSD và phân tích bot của tài khoản ${runtime} hiện tại`;
+  } else if (location.pathname.startsWith("/backtest")) {
+    headerTitle = "Backtest kiểm chứng";
+    headerSubtitle = "Lịch sử MT5 · offline · không gửi lệnh";
   } else if (location.pathname.startsWith("/technical")) {
     headerTitle = "Kỹ thuật";
     headerSubtitle = `Trang chẩn đoán và trang cũ · chỉ xem · ${runtime}`;

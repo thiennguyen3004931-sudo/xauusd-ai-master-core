@@ -37,6 +37,7 @@ import type {
   Phase7ERealignmentRequest,
   Phase7ERealignmentResult,
 } from "./phase7e-realignment-types";
+import type { OfflineBacktestRequest, OfflineBacktestResult, OfflineBacktestStatus } from "./phase7c-offline-backtest-types";
 import { enablePhase7CAuto } from "./phase7c-execution-control";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
@@ -343,3 +344,18 @@ export const decideMarketIntelProposal = (id: string, decision: "APPROVE" | "REJ
 export const rollbackMarketIntelConfig = (toVersion: number, note: string) => miPost<unknown>("/config/rollback", { toVersion, note });
 export const markMarketIntelConfigDeployed = (version: number, note: string) => miPost<unknown>(`/config/${version}/deployed`, { note });
 export const marketIntelConfigExportUrl = (version: number) => `${API_BASE}/api/v1/market-intel/proposals/config/${version}/export`;
+
+// Backtest page (offline replay of MT5 CSV history; the API cannot send or change orders from here).
+export async function getPhase7COfflineBacktestStatus(): Promise<OfflineBacktestStatus> {
+  return read(await fetch(`${API_BASE}/api/v1/phase7c/offline-backtest/status`, { cache: "no-store" }));
+}
+
+export async function runPhase7COfflineBacktest(
+  input: OfflineBacktestRequest,
+): Promise<OfflineBacktestResult> {
+  return read(await fetch(`${API_BASE}/api/v1/phase7c/offline-backtest/run`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  }));
+}

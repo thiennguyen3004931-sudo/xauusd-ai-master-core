@@ -109,7 +109,11 @@ export function resolveOptions(args) {
   };
 }
 
-const MANAGEMENT_KEYS = ["breakEvenTriggerPrice", "breakEvenOffsetPrice", "maxInitialStopPrice", "fixedTpPrice"];
+export const MANAGEMENT_KEYS = [
+  "breakEvenEnabled", "breakEvenTriggerPrice", "breakEvenOffsetPrice", "maxInitialStopPrice", "fixedTpPrice",
+  "partialEnabled", "partialTriggerPrice", "partialFraction",
+  "fastMoveEnabled", "fastMoveActivationPrice", "fastMoveGivebackPrice", "m5TrailEnabled", "runnerExitsEnabled",
+];
 export const isBaselineManagement = (config) => MANAGEMENT_KEYS.every((k) => config[k] === BASELINE_CONFIG[k]);
 
 export function withMinSpread(bars, minSpreadPoints) {

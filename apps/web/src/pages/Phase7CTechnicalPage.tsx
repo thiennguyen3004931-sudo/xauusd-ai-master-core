@@ -3,6 +3,7 @@ import { Card, CardContent, List, ListItemButton, ListItemText, Stack, Typograph
 
 // "Kỹ thuật": legacy and diagnostic pages, hidden from the main menu but kept and reachable here.
 const technicalLinks: readonly (readonly [string, string, string])[] = [
+  ["/backtest", "Backtest kiểm chứng", "Chạy lại lịch sử với TP cố định, hoà vốn, chốt một phần, cách dời SL bật/tắt (offline, không gửi lệnh)"],
   ["/phase7b-dashboard", "Bảng điều khiển chi tiết", "Lý do chọn strategy, lý do chưa vào lệnh, dời SL, chốt 1/3, đóng lệnh"],
   ["/phase7b-pattern-check", "Tín hiệu", "Điều kiện tín hiệu và điều kiện vào lệnh"],
   ["/phase7c-mobile", "Điện thoại", "Trang chỉ đọc cho điện thoại"],
