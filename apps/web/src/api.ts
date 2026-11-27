@@ -307,7 +307,20 @@ export async function runPhase7ERealignmentBacktest(input: Phase7ERealignmentReq
     body: JSON.stringify(input),
   }));
 }
-// Market intel (features 2 and 3): GET-only, advisory snapshot. No write endpoint exists.
+// Market intel (features 2 and 3): GET-only, advisory snapshot.
 export async function getMarketIntelSnapshot(refresh = false): Promise<import("./market-intel-types").MarketIntelSnapshot> {
   return read(await fetch(`${API_BASE}/api/v1/market-intel/snapshot?symbol=XAUUSD${refresh ? "&refresh=1" : ""}`, { cache: "no-store" }));
+}
+
+// Market intel journal (feature 1, C1). Sync only copies realized trades into the local journal file.
+export async function getMarketIntelJournal(): Promise<import("./market-intel-types").MarketIntelJournalSummary> {
+  return read(await fetch(`${API_BASE}/api/v1/market-intel/journal`, { cache: "no-store" }));
+}
+
+export async function syncMarketIntelJournal(): Promise<{ enabled: boolean; inserted?: number; updated?: number; totalTrades?: number }> {
+  return read(await fetch(`${API_BASE}/api/v1/market-intel/journal/sync`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ days: 90 }),
+  }));
 }

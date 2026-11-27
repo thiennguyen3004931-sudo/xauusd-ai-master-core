@@ -11,3 +11,4 @@ export { keyLevels, orderBlocks } from "./zones.mjs";
 export { m15Trigger } from "./triggers.mjs";
 export { MTF_VERSION, MTF_FLAG, isMtfEnabled, BOT_STOP_RULE, CONFIDENCE_POINTS, buildScenarios, scenariosFromAnalyses } from "./scenario.mjs";
 export { renderScenarioCharts } from "./scenario-chart.mjs";
+export { JOURNAL_FLAG, JOURNAL_MIN_SAMPLE, isJournalEnabled, performanceStats, groupStats, alignmentOf, journalBreakdown, enrichTradesWithContext } from "./journal-stats.mjs";

@@ -33,3 +33,24 @@ export interface MarketIntelSnapshot {
   nextM15CloseAt: number;
   refreshed: boolean;
 }
+
+// Feature 1 (C1) journal.
+export interface JournalStats {
+  trades: number; wins: number; losses: number; breakeven: number; winRatePct: number | null;
+  profitFactor: number | null; profitFactorInfinite: boolean; netPnl: number; expectancy: number | null;
+  avgWin: number | null; avgLoss: number | null; payoffRatio: number | null; maxConsecutiveLosses: number; enoughSample: boolean;
+}
+export type JournalGroup = JournalStats & { key: string };
+export interface JournalTrade {
+  id: string; side: string | null; strategy: string | null; openedAt: number | null; closedAt: number | null;
+  netPnl: number | null; libraryState: string | null; alignment: string | null; productionRegime: string | null; correlation: string | null;
+}
+export interface MarketIntelJournalSummary {
+  enabled: boolean; totalTrades: number; minSample: number; sampleNote: string;
+  breakdown: null | {
+    overall: JournalStats; byLibraryState: JournalGroup[]; byProductionRegime: JournalGroup[]; byStrategy: JournalGroup[];
+    bySide: JournalGroup[]; byAlignment: JournalGroup[]; byStrategyAndLibraryState: JournalGroup[];
+  };
+  recentTrades: JournalTrade[];
+  audit: { seq: number; at: number; actor: string; action: string; detail: unknown }[];
+}

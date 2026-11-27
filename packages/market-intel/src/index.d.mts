@@ -40,3 +40,30 @@ export function classifyMarket(input: { h4: Bar[]; h1: Bar[]; asOf?: number }): 
 export function buildScenarios(input: { h4: Bar[]; h1: Bar[]; m15: Bar[]; asOf?: number }): ScenarioResult;
 export function renderScenarioCharts(frames: { h4: Bar[]; h1: Bar[]; m15: Bar[] }, result: ScenarioResult): { h4: string; h1: string; m15: string };
 export function lastClosedIndex(bars: Bar[], asOf: number): number;
+
+// Feature 1 (C1): trade journal statistics.
+export interface PerformanceStats {
+  trades: number; wins: number; losses: number; breakeven: number; winRatePct: number | null;
+  grossProfit: number; grossLoss: number; profitFactor: number | null; profitFactorInfinite: boolean;
+  netPnl: number; expectancy: number | null; avgWin: number | null; avgLoss: number | null;
+  payoffRatio: number | null; maxConsecutiveLosses: number; enoughSample: boolean;
+}
+export type GroupStats = PerformanceStats & { key: string };
+export type Alignment = "WITH_TREND" | "AGAINST_TREND" | "SIDEWAY" | "TRANSITION" | "UNKNOWN";
+export interface JournalTradeInput { id: string; side: string; openedAt: number }
+export interface JournalTradeContext {
+  libraryState: RegimeState | null; libraryH4: RegimeState | null; libraryH1: RegimeState | null;
+  libraryScore: number | null; libraryAsOfH1: number | null; libraryVersion: string; alignment: Alignment;
+}
+export interface JournalBreakdown {
+  overall: PerformanceStats; byLibraryState: GroupStats[]; byProductionRegime: GroupStats[]; byStrategy: GroupStats[];
+  bySide: GroupStats[]; byAlignment: GroupStats[]; byStrategyAndLibraryState: GroupStats[];
+}
+export const JOURNAL_FLAG: string;
+export const JOURNAL_MIN_SAMPLE: number;
+export function isJournalEnabled(env?: Record<string, string | undefined>): boolean;
+export function performanceStats(trades: { netPnl: number }[]): PerformanceStats;
+export function groupStats<T extends { netPnl: number }>(trades: T[], keyOf: (t: T) => unknown): GroupStats[];
+export function alignmentOf(state: string | null, side: string): Alignment;
+export function journalBreakdown(trades: object[]): JournalBreakdown;
+export function enrichTradesWithContext<T extends JournalTradeInput>(input: { trades: T[]; h4: Bar[]; h1: Bar[] }): (T & JournalTradeContext)[];

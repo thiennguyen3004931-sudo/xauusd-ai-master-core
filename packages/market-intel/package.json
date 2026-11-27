@@ -3,12 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Read-only market intelligence: regime template library (feature 3). Advisory only; never sends, modifies or closes orders.",
+  "description": "Read-only market intelligence: regime template library, MTF scenarios and trade journal. Advisory only; never sends, modifies or closes orders.",
   "main": "./src/index.mjs",
   "exports": {
     ".": {
       "types": "./src/index.d.mts",
       "default": "./src/index.mjs"
+    },
+    "./journal-store": {
+      "types": "./src/journal-store.d.mts",
+      "default": "./src/journal-store.mjs"
     }
   },
   "scripts": {
