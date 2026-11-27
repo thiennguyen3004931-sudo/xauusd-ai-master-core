@@ -10,6 +10,7 @@ export { renderRegimeChartSvg } from "./chart-svg.mjs";
 export { keyLevels, orderBlocks } from "./zones.mjs";
 export { m15Trigger } from "./triggers.mjs";
 export { MTF_VERSION, MTF_FLAG, isMtfEnabled, BOT_STOP_RULE, CONFIDENCE_POINTS, buildScenarios, scenariosFromAnalyses } from "./scenario.mjs";
-export { renderScenarioCharts } from "./scenario-chart.mjs";
+export { renderScenarioCharts, nearestLevels } from "./scenario-chart.mjs";
+export { frameSummaries } from "./frames.mjs";
 export { JOURNAL_FLAG, JOURNAL_MIN_SAMPLE, isJournalEnabled, performanceStats, groupStats, alignmentOf, journalBreakdown, enrichTradesWithContext } from "./journal-stats.mjs";
 export { PROPOSALS_FLAG, PROPOSALS_VERSION, isProposalsEnabled, PROPOSAL_PARAMETERS, BASELINE_PARAMS, EVIDENCE_RULE, ANALYSIS_CADENCE, validateParamValue, validateParams, applyParams, evaluateChange, generateProposals, proposalId, analysisDue } from "./proposals.mjs";

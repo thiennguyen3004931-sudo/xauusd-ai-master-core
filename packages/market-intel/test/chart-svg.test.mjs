@@ -40,3 +40,37 @@ test("scenario charts: M15 chart carries the projection of the primary scenario"
   assert.match(charts.m15, /class="projection"/);
   assert.ok(!charts.h4.includes('class="projection"'));
 });
+
+test("chart: compact mode keeps only the latest swing labels and structure events", () => {
+  const bars = barsFromPath(300, upPath());
+  const analysis = analyzeTimeframe(bars);
+  const full = renderRegimeChartSvg({ analysis, from: 150, to: 299 });
+  const compact = renderRegimeChartSvg({ analysis, from: 150, to: 299, compact: true });
+  const swings = (svg) => (svg.match(/class="swing"/g) ?? []).length;
+  const events = (svg) => (svg.match(/class="event"/g) ?? []).length;
+  assert.ok(swings(full) > 6, `full has ${swings(full)} swing labels`);
+  assert.ok(swings(compact) <= 6);
+  assert.ok(events(compact) <= 2);
+  assert.equal((compact.match(/class="candle"/g) ?? []).length, 150);
+});
+
+test("chart: dark theme paints a dark background, light stays default", () => {
+  const bars = barsFromPath(300, upPath());
+  const analysis = analyzeTimeframe(bars);
+  assert.match(renderRegimeChartSvg({ analysis, from: 200, to: 299 }), /class="background" width="960" height="460" fill="#ffffff"/);
+  const dark = renderRegimeChartSvg({ analysis, from: 200, to: 299, theme: "dark" });
+  assert.ok(!dark.includes('fill="#ffffff"'), "no white blocks in dark theme");
+  assert.match(dark, /class="background"/);
+});
+
+test("scenario charts: compact dark charts for the web, projection only on M15", async () => {
+  const { renderScenarioCharts } = await import("../src/scenario-chart.mjs");
+  const bars = barsFromPath(300, upPath());
+  const s = { role: "PRIMARY", direction: "BUY", entry: 2100, stopLoss: 2090, takeProfit1: 2115, takeProfit2: 2130, rr1: 1.5, rr2: 3, confidence: 50, entryZone: { low: 2098, high: 2102 } };
+  const result = { asOf: bars[299].closeTime, scenarios: [s], h4: { state: "UPTREND", keyLevels: [] }, h1: { state: "UPTREND" } };
+  const charts = renderScenarioCharts({ h4: bars, h1: bars, m15: bars }, result, { compact: true, theme: "dark" });
+  assert.match(charts.m15, /class="projection"/);
+  assert.ok(!charts.h1.includes('class="projection"'));
+  assert.ok(!charts.h4.includes('class="projection"'));
+  for (const svg of Object.values(charts)) assert.ok((svg.match(/class="swing"/g) ?? []).length <= 6);
+});

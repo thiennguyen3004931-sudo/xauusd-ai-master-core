@@ -44,6 +44,27 @@ test("MTF enabled: scenarios and three SVG charts", async () => {
   assert.ok(s.charts && s.charts.h4.startsWith("<svg") && s.charts.m15.includes("SL "));
 });
 
+test("snapshot carries open / close and trend per timeframe (last closed bar)", async () => {
+  const s = await getMarketIntelSnapshot("XAUUSD", { env: { ZIQ_MARKET_INTEL_MTF_ENABLED: "true" }, loader: synthetic, useCache: false });
+  assert.ok(s.frames && s.frames.h4 && s.frames.h1 && s.frames.m15);
+  for (const f of [s.frames.h4, s.frames.h1, s.frames.m15]) {
+    assert.ok(Number.isFinite(f.open) && Number.isFinite(f.close));
+    assert.ok(["UPTREND", "DOWNTREND", "SIDEWAY", "TRANSITION"].includes(f.state));
+  }
+  assert.equal(s.frames.m15.close, Math.round((s.mtf?.m15.close ?? 0) * 100) / 100);
+  assert.ok(s.levels && s.levels.resistance.length + s.levels.support.length > 0);
+  for (const l of s.levels.resistance) assert.ok(l.price >= (s.mtf?.m15.close ?? 0));
+  assert.ok(s.charts && /class="zone level-(resistance|support)"/.test(s.charts.m15));
+  // Web charts are the compact dark variant.
+  assert.ok(s.charts && s.charts.m15.includes('class="background"') && !s.charts.m15.includes('fill="#ffffff"'));
+});
+
+test("regime library only: H4 / H1 frames without M15", async () => {
+  const s = await getMarketIntelSnapshot("XAUUSD", { env: { ZIQ_MARKET_INTEL_REGIME_LIBRARY_ENABLED: "true" }, loader: synthetic, useCache: false });
+  assert.ok(s.frames && s.frames.h4 && s.frames.h1);
+  assert.equal(s.frames.m15, null);
+});
+
 test("route and service are GET-only and never reach orders, positions or bot mode", () => {
   const route = readFileSync(new URL("../routes/market-intel.route.ts", import.meta.url), "utf8");
   const service = readFileSync(new URL("./market-intel.service.ts", import.meta.url), "utf8");

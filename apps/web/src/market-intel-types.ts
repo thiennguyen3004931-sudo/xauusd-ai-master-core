@@ -2,8 +2,13 @@
 export type MarketIntelState = "UPTREND" | "DOWNTREND" | "SIDEWAY" | "TRANSITION";
 
 export interface MarketIntelCriterion { id: string; description: string; weight: number; passed: boolean; value: unknown }
+export interface MarketIntelFrame {
+  openTime: number; closeTime: number; open: number; high: number; low: number; close: number;
+  change: number; changePct: number; candle: "UP" | "DOWN" | "FLAT"; state: MarketIntelState; confidence: number;
+}
+export interface MarketIntelLevel { price: number; low: number; high: number; touches: number; tf: string; kind: "SUPPORT" | "RESISTANCE" }
 export interface MarketIntelTimeframe {
-  state: MarketIntelState; confidence: number; scores: Record<string, number>;
+  state: MarketIntelState; confidence: number; bestTemplate?: string; scores: Record<string, number>;
   criteria: Record<string, MarketIntelCriterion[]>; reasons: string[];
 }
 export interface MarketIntelScenario {
@@ -29,6 +34,10 @@ export interface MarketIntelSnapshot {
     notes: string[];
   };
   charts: { h4: string; h1: string; m15: string } | null;
+  /** Last closed bar and library trend per timeframe (absent on an older API). */
+  frames?: { h4: MarketIntelFrame | null; h1: MarketIntelFrame | null; m15: MarketIntelFrame | null } | null;
+  /** Nearest H4 / H1 resistance above and support below the M15 close (absent on an older API). */
+  levels?: { resistance: MarketIntelLevel[]; support: MarketIntelLevel[] } | null;
   lastM15CloseAt: number;
   nextM15CloseAt: number;
   refreshed: boolean;

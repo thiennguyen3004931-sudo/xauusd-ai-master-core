@@ -139,3 +139,33 @@ test("renderScenarioCharts: three charts with entry, SL and TP marks", () => {
     assert.match(svg, /Entry /);
   }
 });
+
+test("nearestLevels: H4 + H1 resistance above / support below the M15 close, nearest first, merged when overlapping", async () => {
+  const { nearestLevels } = await import("../src/index.mjs");
+  const { m15, h1, h4 } = frames(upM15);
+  const r = buildScenarios({ h4, h1, m15 });
+  const lv = nearestLevels(r, { perSide: 3 });
+  const close = r.m15.close;
+  assert.ok(lv.resistance.length + lv.support.length > 0);
+  assert.ok(lv.resistance.length <= 3 && lv.support.length <= 3);
+  for (const l of lv.resistance) assert.ok(l.price >= close && ["H1", "H4", "H4+H1"].includes(l.tf));
+  for (const l of lv.support) assert.ok(l.price < close);
+  for (let k = 1; k < lv.resistance.length; k += 1) assert.ok(lv.resistance[k].price > lv.resistance[k - 1].price && lv.resistance[k].low > lv.resistance[k - 1].high);
+  for (let k = 1; k < lv.support.length; k += 1) assert.ok(lv.support[k].price < lv.support[k - 1].price);
+});
+
+test("renderScenarioCharts compact: support / resistance bands drawn on every chart", () => {
+  const { m15, h1, h4 } = frames(upM15);
+  const r = buildScenarios({ h4, h1, m15 });
+  const charts = renderScenarioCharts({ h4, h1, m15 }, r, { compact: true, theme: "dark" });
+  for (const svg of Object.values(charts)) assert.match(svg, /class="zone level-(resistance|support)"/);
+  assert.match(charts.m15, /(Kháng cự|Hỗ trợ) H/);
+});
+
+test("nearestLevels: a chained wide swing cluster is drawn as a narrow band around its centre", async () => {
+  const { nearestLevels } = await import("../src/index.mjs");
+  const r = { m15: { close: 3570 }, h4: { keyLevels: [] }, h1: { keyLevels: [{ price: 3608.8, low: 3572.3, high: 3649.6, touches: 12, kind: "RESISTANCE" }] } };
+  const [l] = nearestLevels(r).resistance;
+  assert.ok(l.high - l.low <= 2 * 3608.8 * 0.0015 + 0.02, JSON.stringify(l));
+  assert.ok(l.low <= l.price && l.price <= l.high);
+});

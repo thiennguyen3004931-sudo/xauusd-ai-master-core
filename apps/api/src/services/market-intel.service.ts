@@ -7,10 +7,14 @@ import {
   REGIME_LIBRARY_VERSION,
   buildScenarios,
   classifyMarket,
+  frameSummaries,
+  nearestLevels,
   isMtfEnabled,
   isRegimeLibraryEnabled,
   renderScenarioCharts,
   type Bar,
+  type FrameSummary,
+  type NearLevel,
   type MarketClassification,
   type ScenarioResult,
 } from "@xauusd/market-intel";
@@ -25,6 +29,10 @@ export interface MarketIntelSnapshot {
   regime: MarketClassification | null;
   mtf: ScenarioResult | null;
   charts: { h4: string; h1: string; m15: string } | null;
+  /** Last closed bar (open / high / low / close) and library trend per timeframe. M15 is null unless MTF is on. */
+  frames: { h4: FrameSummary | null; h1: FrameSummary | null; m15: FrameSummary | null } | null;
+  /** Nearest H4 / H1 resistance above and support below the M15 close (null unless MTF is on). */
+  levels: { resistance: NearLevel[]; support: NearLevel[] } | null;
   safety: { readOnly: true; advisoryOnly: true; orderMutation: false; runtimeMutation: false };
   /** Close time of the last M15 bar at generation time, and of the next one (the auto-refresh point). */
   lastM15CloseAt: number;
@@ -93,7 +101,7 @@ export async function getMarketIntelSnapshot(
   const base: MarketIntelSnapshot = {
     enabled,
     versions: { regimeLibrary: REGIME_LIBRARY_VERSION, mtf: MTF_VERSION },
-    symbol, generatedAt: now, regime: null, mtf: null, charts: null, safety: SAFETY,
+    symbol, generatedAt: now, regime: null, mtf: null, charts: null, frames: null, levels: null, safety: SAFETY,
     lastM15CloseAt, nextM15CloseAt: lastM15CloseAt + M15_MS, refreshed: false,
   };
   if (!enabled.regimeLibrary && !enabled.mtf) return base;
@@ -111,9 +119,12 @@ export async function getMarketIntelSnapshot(
   ]);
   const value: MarketIntelSnapshot = { ...base, refreshed: refresh };
   value.regime = classifyMarket({ h4, h1 });
+  const asOf = m15.at(-1)?.closeTime ?? h1.at(-1)?.closeTime;
+  if (asOf !== undefined) value.frames = frameSummaries({ h4, h1, m15 }, asOf);
   if (enabled.mtf && m15.length > 0) {
     value.mtf = buildScenarios({ h4, h1, m15 });
-    value.charts = renderScenarioCharts({ h4, h1, m15 }, value.mtf);
+    value.levels = nearestLevels(value.mtf);
+    value.charts = renderScenarioCharts({ h4, h1, m15 }, value.mtf, { compact: true, theme: "dark" });
   }
   // If the bridge has not published the just-closed bar yet, do not pin the stale result for 15 minutes.
   const dataBar = m15.length > 0 ? m15[m15.length - 1].closeTime : h1.length > 0 ? h1[h1.length - 1].closeTime : lastM15CloseAt;

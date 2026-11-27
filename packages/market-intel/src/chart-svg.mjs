@@ -4,10 +4,18 @@
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const fmtTime = (ms) => new Date(ms).toISOString().slice(0, 16).replace("T", " ");
-const COLORS = {
-  up: "#26a69a", down: "#ef5350", ema50: "#2962ff", ema200: "#ff9800", text: "#1f2328", quiet: "#6e7781",
-  grid: "#eaeef2", bos: "#6f42c1", choch: "#d63384", zone: "#2962ff", trend: "#1f2328",
+const THEMES = {
+  light: {
+    up: "#26a69a", down: "#ef5350", ema50: "#2962ff", ema200: "#ff9800", text: "#1f2328", quiet: "#6e7781",
+    grid: "#eaeef2", bos: "#6f42c1", choch: "#d63384", zone: "#2962ff", trend: "#1f2328", bg: "#ffffff", panel: "#f6f8fa",
+  },
+  dark: {
+    up: "#26a69a", down: "#ef5350", ema50: "#5b9bff", ema200: "#ffb74d", text: "#e6edf3", quiet: "#8b949e",
+    grid: "#222b36", bos: "#b392f0", choch: "#f778ba", zone: "#5b9bff", trend: "#c9d1d9", bg: "#11161d", panel: "#18202a",
+  },
 };
+/** Compact mode: only the latest swing labels and structure events, so the chart stays readable. */
+const COMPACT = { swings: 6, events: 2 };
 
 /**
  * @param analysis result of analyzeTimeframe()
@@ -17,8 +25,9 @@ const COLORS = {
  * @param projection optional { slots, direction, entry, stopLoss, takeProfit1, takeProfit2 }: empty space after
  *   the last closed bar with the planned path (price -> entry -> TP1 -> TP2, and entry -> SL). Illustrative only.
  */
-export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle = "", zones = [], marks = [], trendline = true, projection = null, width = 960, height = 460 }) {
+export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle = "", zones = [], marks = [], trendline = true, projection = null, width = 960, height = 460, theme = "light", compact = false }) {
   const { bars, ema50, ema200 } = analysis;
+  const COLORS = THEMES[theme] ?? THEMES.light;
   const lo = Math.max(0, from);
   const hi = Math.min(bars.length - 1, to);
   const view = bars.slice(lo, hi + 1);
@@ -38,29 +47,32 @@ export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle 
   const Y = (p) => padT + ((pMax - p) / (pMax - pMin)) * plotH;
   const out = [];
   out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11">`);
-  out.push(`<rect width="${width}" height="${height}" fill="#ffffff"/>`);
+  out.push(`<rect class="background" width="${width}" height="${height}" fill="${COLORS.bg}"/>`);
   out.push(`<text x="${padL}" y="22" font-size="15" font-weight="600" fill="${COLORS.text}">${esc(title)}</text>`);
   if (subtitle) out.push(`<text x="${padL}" y="40" fill="${COLORS.quiet}">${esc(subtitle)}</text>`);
 
   // price grid
   const ticks = 6;
+  const markYs = marks.map((m) => Y(m.price));
   for (let k = 0; k <= ticks; k += 1) {
     const p = pMin + ((pMax - pMin) * k) / ticks;
     out.push(`<line x1="${padL}" x2="${padL + plotW}" y1="${Y(p).toFixed(1)}" y2="${Y(p).toFixed(1)}" stroke="${COLORS.grid}"/>`);
+    // Compact: skip a price label that would sit under an Entry / SL / TP tag.
+    if (compact && markYs.some((y) => Math.abs(y - Y(p)) < 12)) continue;
     out.push(`<text x="${padL + plotW + 6}" y="${(Y(p) + 4).toFixed(1)}" fill="${COLORS.quiet}">${p.toFixed(2)}</text>`);
   }
   out.push(`<text x="${padL}" y="${height - 12}" fill="${COLORS.quiet}">${esc(fmtTime(view[0].openTime))}</text>`);
   out.push(`<text x="${X(hi) + step / 2}" y="${height - 12}" text-anchor="end" fill="${COLORS.quiet}">${esc(fmtTime(view.at(-1).closeTime))}</text>`);
   if (slots) {
     const px = X(hi) + step / 2;
-    out.push(`<rect class="projection-area" x="${px.toFixed(1)}" y="${padT}" width="${(padL + plotW - px).toFixed(1)}" height="${plotH}" fill="#f6f8fa"/>`);
+    out.push(`<rect class="projection-area" x="${px.toFixed(1)}" y="${padT}" width="${(padL + plotW - px).toFixed(1)}" height="${plotH}" fill="${COLORS.panel}"/>`);
     out.push(`<text x="${(px + 6).toFixed(1)}" y="${padT + plotH - 6}" fill="${COLORS.quiet}">Dự kiến (minh hoạ, không phải dự báo)</text>`);
   }
 
   for (const z of zones) {
     const zx1 = X(Math.max(lo, z.fromIndex ?? lo)) - step / 2;
     const zx2 = X(Math.min(hi + slots, z.toIndex ?? hi + slots)) + step / 2;
-    out.push(`<rect class="zone" x="${zx1.toFixed(1)}" y="${Y(z.high).toFixed(1)}" width="${(zx2 - zx1).toFixed(1)}" height="${Math.max(1, Y(z.low) - Y(z.high)).toFixed(1)}" fill="${z.color ?? COLORS.zone}" fill-opacity="0.08" stroke="${z.color ?? COLORS.zone}" stroke-opacity="0.4" stroke-dasharray="4 3"/>`);
+    out.push(`<rect class="zone${z.kind ? ` level-${z.kind}` : ""}" x="${zx1.toFixed(1)}" y="${Y(z.high).toFixed(1)}" width="${(zx2 - zx1).toFixed(1)}" height="${Math.max(1, Y(z.low) - Y(z.high)).toFixed(1)}" fill="${z.color ?? COLORS.zone}" fill-opacity="0.08" stroke="${z.color ?? COLORS.zone}" stroke-opacity="0.4" stroke-dasharray="4 3"/>`);
     if (z.label) out.push(`<text x="${(zx1 + 4).toFixed(1)}" y="${(Y(z.high) + 12).toFixed(1)}" fill="${z.color ?? COLORS.zone}">${esc(z.label)}</text>`);
   }
 
@@ -81,9 +93,9 @@ export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle 
   }
 
   // swings known as of `hi`
-  const swings = analysis.swings.filter((s) => s.index >= lo && s.confirmIndex <= hi);
+  let swings = analysis.swings.filter((s) => s.index >= lo && s.confirmIndex <= hi && s.label !== "H" && s.label !== "L");
+  if (compact) swings = swings.slice(-COMPACT.swings);
   for (const s of swings) {
-    if (s.label === "H" || s.label === "L") continue;
     const above = s.type === "HIGH";
     const y = above ? Y(s.price) - 6 : Y(s.price) + 14;
     const color = s.label === "HH" || s.label === "HL" ? COLORS.up : s.label === "LH" || s.label === "LL" ? COLORS.down : COLORS.quiet;
@@ -91,7 +103,9 @@ export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle 
   }
 
   // BOS / CHoCH levels
-  for (const e of analysis.events.filter((ev) => ev.index >= lo && ev.index <= hi)) {
+  let events = analysis.events.filter((ev) => ev.index >= lo && ev.index <= hi);
+  if (compact) events = events.slice(-COMPACT.events);
+  for (const e of events) {
     const color = e.type === "BOS" ? COLORS.bos : COLORS.choch;
     const x1 = X(Math.max(lo, e.swingIndex)), x2 = X(e.index);
     out.push(`<line class="event" x1="${x1.toFixed(1)}" x2="${x2.toFixed(1)}" y1="${Y(e.level).toFixed(1)}" y2="${Y(e.level).toFixed(1)}" stroke="${color}" stroke-dasharray="5 3"/>`);
@@ -121,7 +135,7 @@ export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle 
   for (const m of tags) {
     const color = m.color ?? COLORS.text;
     out.push(`<line class="mark" x1="${padL}" x2="${padL + plotW}" y1="${Y(m.price).toFixed(1)}" y2="${Y(m.price).toFixed(1)}" stroke="${color}" stroke-width="1.2"/>`);
-    out.push(`<rect x="${padL + plotW + 2}" y="${(m.y - 7).toFixed(1)}" width="${padR - 6}" height="14" fill="#ffffff"/>`);
+    out.push(`<rect x="${padL + plotW + 2}" y="${(m.y - 7).toFixed(1)}" width="${padR - 6}" height="14" fill="${COLORS.bg}"/>`);
     out.push(`<text x="${padL + plotW + 6}" y="${(m.y + 4).toFixed(1)}" font-weight="600" fill="${color}">${esc(m.label)} ${m.price.toFixed(2)}</text>`);
   }
 
@@ -134,7 +148,7 @@ export function renderRegimeChartSvg({ analysis, from, to, title = "", subtitle 
     out.push(`<g class="projection">`);
     out.push(`<polyline class="projection-target" points="${pt(0, last)} ${pt(0.3, pr.entry)} ${pt(0.7, pr.takeProfit1)} ${pt(0.95, pr.takeProfit2)}" fill="none" stroke="${win}" stroke-width="2" stroke-dasharray="6 4"/>`);
     out.push(`<polyline class="projection-stop" points="${pt(0.3, pr.entry)} ${pt(0.6, pr.stopLoss)}" fill="none" stroke="#d1242f" stroke-width="2" stroke-dasharray="3 3"/>`);
-    for (const [f, p, label, color] of [[0.3, pr.entry, "Entry", COLORS.text], [0.7, pr.takeProfit1, "TP1", "#1a7f37"], [0.95, pr.takeProfit2, "TP2", "#116329"], [0.6, pr.stopLoss, "SL", "#d1242f"]]) {
+    for (const [f, p, label, color] of [[0.3, pr.entry, "Entry", COLORS.text], [0.7, pr.takeProfit1, "TP1", theme === "dark" ? "#3fb950" : "#1a7f37"], [0.95, pr.takeProfit2, "TP2", theme === "dark" ? "#2ea043" : "#116329"], [0.6, pr.stopLoss, "SL", theme === "dark" ? "#f85149" : "#d1242f"]]) {
       out.push(`<circle cx="${at(f).toFixed(1)}" cy="${Y(p).toFixed(1)}" r="3.5" fill="${color}"/>`);
       const ly = Y(p) - 7 < padT + 4 ? Y(p) + 16 : Y(p) - 7;
       out.push(`<text x="${at(f).toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-weight="600" fill="${color}">${label}</text>`);
