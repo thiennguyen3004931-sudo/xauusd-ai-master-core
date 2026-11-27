@@ -133,3 +133,19 @@ test("SuperTrend toggles: entry blocked when a required timeframe disagrees, all
   assert.equal(simulate({ ...v, config: noCost }).length, 0);
   assert.equal(simulate({ ...v, config: { ...noCost, requireSupertrendM5: false } }).length, 1);
 });
+
+test("research TREND entry filter: default null keeps entries, a rejecting filter blocks them (also the pullback path)", () => {
+  assert.equal(BASELINE_CONFIG.trendEntryFilter, null);
+  const path = [...lead, [2000, 2011, 1989, 2005], flat(2005)];
+  assert.equal(simulate({ ...world(path), config: noCost }).length, 1);
+  const seen = [];
+  const reject = (side, signalTime) => { seen.push([side, signalTime]); return false; };
+  assert.equal(simulate({ ...world(path), config: { ...noCost, trendEntryFilter: reject } }).length, 0);
+  assert.deepEqual(seen, [["BUY", T0 + 3 * M5]]); // asked once, at the M15 signal close, with the signal side
+  const accept = () => true;
+  assert.equal(simulate({ ...world(path), config: { ...noCost, trendEntryFilter: accept } }).length, 1);
+  // stop wider than the cap -> pullback pending path is filtered too
+  const wide = world([...lead, flat(2000), flat(2000)], { signal: { side: "BUY", patternExtreme: 1985 } });
+  wide.m5[3] = { ...wide.m5[3], low: 1996 };
+  assert.equal(simulate({ ...wide, config: { ...noCost, trendEntryFilter: reject } }).length, 0);
+});
