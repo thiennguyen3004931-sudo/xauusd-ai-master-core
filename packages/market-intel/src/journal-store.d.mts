@@ -12,6 +12,15 @@ export interface JournalScenarioRow {
   rr1: number; confidence: number; m15Status: string; version: string;
 }
 export interface AuditEntry { seq: number; at: number; actor: string; action: string; detail: unknown }
+export interface ConfigVersion { version: number; createdAt: number; parentVersion: number | null; params: Record<string, string>; source: string; actor: string; note: string | null }
+export type StoredProposal = import("./index.d.mts").Proposal & {
+  runSeq: number | null; status: "PENDING" | "APPROVED" | "REJECTED" | "OUTDATED" | "SUPERSEDED";
+  decision: null | { decision: "APPROVE" | "REJECT" | "EDIT"; at: number; actor: string; note: string | null; editedValue: string | null; editedEvaluation: unknown; configVersion: number | null };
+};
+export interface ConfigPackage {
+  schema: "market-intel-config-v1"; version: number; params: Record<string, string>; sha256: string; source: string; createdAt: number;
+  applyTo: "NEW_POSITIONS_ONLY"; preconditions: string[]; note: string;
+}
 export interface Journal {
   path: string;
   schemaVersion(): number;
@@ -23,5 +32,18 @@ export interface Journal {
   appendAudit(entry: { actor: string; action: string; detail?: unknown }): void;
   listAudit(opts?: { limit?: number }): AuditEntry[];
   close(): void;
+  latestConfig(): ConfigVersion;
+  deployedConfig(): ConfigVersion | null;
+  getConfigVersion(version: number): ConfigVersion | undefined;
+  listConfigVersions(): (ConfigVersion & { everDeployed: boolean; deployed: boolean })[];
+  listDeployments(): { seq: number; at: number; version: number; actor: string; note: string | null }[];
+  recordAnalysisRun(input: { reason: string; proposals?: object[]; summary?: unknown }): { seq: number; inserted: number };
+  lastAnalysisRun(): { seq: number; at: number; reason: string; proposals: number; summary: unknown } | null;
+  closedTradesSince(ts: number | null): number;
+  listProposals(): StoredProposal[];
+  decideProposal(input: { id: string; decision: "APPROVE" | "REJECT" | "EDIT"; actor: string; note?: string | null; editedValue?: string | null; editedEvaluation?: unknown }): { proposalId: string; decision: string; configVersion: ConfigVersion | null };
+  rollback(input: { toVersion: number; actor: string; note?: string | null }): ConfigVersion;
+  markDeployed(input: { version: number; actor: string; note?: string | null }): ConfigVersion | null;
+  exportConfigPackage(version: number): ConfigPackage;
 }
 export function openJournal(path?: string, opts?: { now?: () => number }): Promise<Journal>;

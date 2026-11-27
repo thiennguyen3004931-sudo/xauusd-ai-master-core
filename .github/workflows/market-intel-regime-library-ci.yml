@@ -9,6 +9,11 @@ on:
       - 'docs/market-intel/**'
       - 'apps/api/src/services/market-intel.service*.ts'
       - 'apps/api/src/services/market-intel-journal.service*.ts'
+      - 'apps/api/src/services/market-intel-proposals.service*.ts'
+      - 'apps/api/src/services/market-intel-telegram*.ts'
+      - 'apps/api/src/routes/market-intel-proposals.route.ts'
+      - 'apps/api/src/index.ts'
+      - 'apps/api/src/app.ts'
       - 'apps/api/src/routes/market-intel.route.ts'
       - 'apps/api/src/routes/market-intel-journal.route.ts'
       - 'apps/web/src/pages/MarketIntel*.tsx'
@@ -40,7 +45,7 @@ jobs:
         run: node --test scripts/market-intel/*.test.mjs
 
   api-snapshot:
-    name: Market intel API snapshot and journal (flags, read-only, synthetic data)
+    name: Market intel API snapshot, journal and proposals (flags, synthetic data)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -59,4 +64,4 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter @xauusd/api...
       - name: Market intel service tests
         working-directory: apps/api
-        run: node --import tsx --test src/services/market-intel.service.test.ts src/services/market-intel-journal.service.test.ts
+        run: node --import tsx --test src/services/market-intel.service.test.ts src/services/market-intel-journal.service.test.ts src/services/market-intel-proposals.service.test.ts src/services/market-intel-telegram.test.ts

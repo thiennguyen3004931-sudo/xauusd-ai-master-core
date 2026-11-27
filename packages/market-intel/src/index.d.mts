@@ -67,3 +67,36 @@ export function groupStats<T extends { netPnl: number }>(trades: T[], keyOf: (t:
 export function alignmentOf(state: string | null, side: string): Alignment;
 export function journalBreakdown(trades: object[]): JournalBreakdown;
 export function enrichTradesWithContext<T extends JournalTradeInput>(input: { trades: T[]; h4: Bar[]; h1: Bar[] }): (T & JournalTradeContext)[];
+
+// Feature 1 (C2): proposals.
+export type ProposalParams = Record<string, string>;
+export interface ProposalParameter { id: string; scope: "ENTRY_FILTER" | "REGIME_FILTER"; label: string; values: readonly string[]; valueLabels: Record<string, string> }
+export interface SidesStats { before: PerformanceStats; after: PerformanceStats; removed: number }
+export interface WalkForwardFold { fold: number; from: number | null; to: number | null; before: PerformanceStats; after: PerformanceStats; netDelta: number; improved: boolean }
+export interface EvidenceCheck { id: string; passed: boolean; text: string }
+export interface ChangeEvaluation {
+  parameterId: string; oldValue: string; newValue: string; splitAt: number;
+  inSample: SidesStats; outOfSample: SidesStats; full: SidesStats; removed: number; walkForward: WalkForwardFold[];
+  evidence: { label: "ENOUGH_EVIDENCE" | "NOT_ENOUGH_EVIDENCE"; checks: EvidenceCheck[] };
+}
+export interface Proposal {
+  id: string; version: string; parameterId: string; scope: string; label: string; oldValue: string; newValue: string;
+  oldLabel: string; newLabel: string; allowedValues: string[]; reason: string; evaluation: ChangeEvaluation;
+  evidenceLabel: "ENOUGH_EVIDENCE" | "NOT_ENOUGH_EVIDENCE";
+  dataWindow: { from: number | null; to: number | null; trades: number; splitAt: number; source: string };
+  applyTo: "NEW_POSITIONS_ONLY"; caveats: string[]; createdAt: number;
+}
+export const PROPOSALS_FLAG: string;
+export const PROPOSALS_VERSION: string;
+export const PROPOSAL_PARAMETERS: readonly ProposalParameter[];
+export const BASELINE_PARAMS: Readonly<ProposalParams>;
+export const EVIDENCE_RULE: Readonly<{ minInSampleTrades: number; minOutOfSampleTrades: number; minOutOfSampleProfitFactor: number; walkForwardFolds: number; minPositiveFolds: number }>;
+export const ANALYSIS_CADENCE: Readonly<{ weeklyMs: number; everyClosedTrades: number }>;
+export function isProposalsEnabled(env?: Record<string, string | undefined>): boolean;
+export function validateParamValue(id: string, value: string): { ok: boolean; error?: string };
+export function validateParams(params: ProposalParams): { ok: boolean; error?: string };
+export function applyParams<T>(trades: T[], params: ProposalParams): T[];
+export function evaluateChange(trades: object[], parameterId: string, newValue: string, opts: { splitAt: number; currentParams?: ProposalParams }): ChangeEvaluation;
+export function generateProposals(input: { trades: object[]; currentParams?: ProposalParams; splitAt: number; now?: number; source?: string }): Proposal[];
+export function proposalId(p: object): string;
+export function analysisDue(input: { lastRunAt: number | null; closedTradesSinceLastRun: number; now?: number }): { due: boolean; reason: "FIRST_RUN" | "TRADES_30" | "WEEKLY" | "NOT_DUE" };

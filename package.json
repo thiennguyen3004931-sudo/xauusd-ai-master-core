@@ -16,6 +16,7 @@
     "dev:web": "turbo run dev --filter=@xauusd/web",
     "market-intel:regime-report": "node scripts/market-intel/regime-library-report.mjs",
     "market-intel:mtf": "node scripts/market-intel/mtf-scenario.mjs",
+    "market-intel:proposal-dataset": "node scripts/market-intel/proposal-dataset.mjs",
     "market-intel:mtf-eval": "node scripts/market-intel/mtf-scenario-eval.mjs"
   },
   "devDependencies": {
