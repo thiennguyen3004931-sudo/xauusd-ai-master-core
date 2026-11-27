@@ -328,7 +328,7 @@ console.log(
  * Verify +6 BE remains before recovery return.
  */
 const plus6Index = source.indexOf(
-  "if (!managed.breakEvenApplied && favorable >= 6)",
+  "if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed))",
 );
 
 assert.ok(

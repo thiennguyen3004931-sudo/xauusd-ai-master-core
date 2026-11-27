@@ -10,6 +10,10 @@ import {
   resolvePhase7CAccountRuntime,
 } from "./phase7c-account-runtime-guard.mjs";
 import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
+import {
+  breakEvenSnapshot,
+  resolvePhase7CBreakEvenConfig,
+} from "./phase7c-break-even-config.mjs";
 
 const SYMBOL = "XAUUSD";
 const INITIAL_STOP_DISTANCE = 6;
@@ -213,6 +217,8 @@ function toManagedState(adoption, position, input) {
     exitAttempt: 0,
     structureAttempt: 0,
     dailyMode: "TREND",
+    // SEMI inherits the TREND BE rule, snapshotted when the manual position is adopted.
+    breakEven: breakEvenSnapshot(resolvePhase7CBreakEvenConfig()),
   };
 }
 

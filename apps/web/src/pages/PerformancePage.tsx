@@ -26,6 +26,7 @@ import type {
 import { ErrorState, LoadingState } from "../ui/PageState";
 import { MetricCard } from "../ui/MetricCard";
 import { Sparkline } from "../ui/Sparkline";
+import { Phase7CIntelligenceSection } from "../ui/Phase7CIntelligenceSection";
 
 function money(value: number, currency: string): string {
   return new Intl.NumberFormat("en-US", {
@@ -108,7 +109,7 @@ function BreakdownTable({ title, rows, currency, minimumSample }: { title: strin
   );
 }
 
-export function PerformancePage() {
+function PerformanceResults() {
   const [days, setDays] = useState(90);
   const query = useMt5Performance(days);
 
@@ -238,6 +239,16 @@ export function PerformancePage() {
       </Card>
 
       <Alert severity="warning">Lý do thoát hiện có thể hiển thị chưa đầy đủ nếu payload deal MT5 không cung cấp trường reason. Hệ thống không tự suy đoán SL/TP khi dữ liệu thiếu.</Alert>
+    </Stack>
+  );
+}
+
+// "Hiệu quả": account results first, then the read-only bot analysis moved off the main screen.
+export function PerformancePage() {
+  return (
+    <Stack spacing={2}>
+      <PerformanceResults />
+      <Phase7CIntelligenceSection />
     </Stack>
   );
 }

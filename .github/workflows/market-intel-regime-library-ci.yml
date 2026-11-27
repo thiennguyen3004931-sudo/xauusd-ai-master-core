@@ -1,0 +1,67 @@
+name: Market Intel Regime Library (No MT5)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/market-intel/**'
+      - 'scripts/market-intel/**'
+      - 'docs/market-intel/**'
+      - 'apps/api/src/services/market-intel.service*.ts'
+      - 'apps/api/src/services/market-intel-journal.service*.ts'
+      - 'apps/api/src/services/market-intel-proposals.service*.ts'
+      - 'apps/api/src/services/market-intel-telegram*.ts'
+      - 'apps/api/src/routes/market-intel-proposals.route.ts'
+      - 'apps/api/src/index.ts'
+      - 'apps/api/src/app.ts'
+      - 'apps/api/src/routes/market-intel.route.ts'
+      - 'apps/api/src/routes/market-intel-journal.route.ts'
+      - 'apps/web/src/pages/MarketIntel*.tsx'
+      - 'apps/web/src/market-intel-types.ts'
+      - '.github/workflows/market-intel-regime-library-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regime-library:
+    name: Template classifier, causality, chart rendering and order-path isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      MT5_ORDER_PERMISSION: NONE
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Library tests (synthetic bars only)
+        run: node --test packages/market-intel/test/*.test.mjs
+      - name: Report script tests (synthetic CSV, no production classifier)
+        run: node --test scripts/market-intel/*.test.mjs
+
+  api-snapshot:
+    name: Market intel API snapshot, journal and proposals (flags, synthetic data)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MT5_ORDER_PERMISSION: NONE
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile --filter @xauusd/api...
+      - name: Market intel service tests
+        working-directory: apps/api
+        run: node --import tsx --test src/services/market-intel.service.test.ts src/services/market-intel-journal.service.test.ts src/services/market-intel-proposals.service.test.ts src/services/market-intel-telegram.test.ts

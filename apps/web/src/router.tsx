@@ -1,4 +1,4 @@
-import { Phase7BPatternCheckPage, Phase7CAccountRiskPage, Phase7CControlCenterShellPage, Phase7CMobileReadOnlyPage, PerformancePage, DeferredPage } from "./routing-pages";
+import { MarketIntelPage, Phase7BPatternCheckPage, Phase7CAccountRiskPage, Phase7CControlCenterShellPage, Phase7CMobileReadOnlyPage, Phase7CTechnicalPage, PerformancePage, DeferredPage } from "./routing-pages";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { DashboardLayout } from "./ui/DashboardLayout";
 import { Phase7BDemoPage } from "./pages/Phase7BDemoPage";
@@ -8,8 +8,9 @@ export const router = createBrowserRouter([
     path: "/",
     element: <DashboardLayout />,
     children: [
-      { index: true, element: <Phase7BDemoPage /> },
-      { path: "phase7b-demo", element: <Navigate to="/" replace /> },
+      { index: true, element: <Navigate to="/phase7c-control-center" replace /> },
+      { path: "phase7b-dashboard", element: <Phase7BDemoPage /> },
+      { path: "phase7b-demo", element: <Navigate to="/phase7b-dashboard" replace /> },
       {
         path: "phase7b-pattern-check",
         element: <DeferredPage><Phase7BPatternCheckPage /></DeferredPage>,
@@ -27,8 +28,16 @@ export const router = createBrowserRouter([
         element: <DeferredPage><Phase7CMobileReadOnlyPage /></DeferredPage>,
       },
       {
+        path: "technical",
+        element: <DeferredPage><Phase7CTechnicalPage /></DeferredPage>,
+      },
+      {
         path: "performance",
         element: <DeferredPage><PerformancePage /></DeferredPage>,
+      },
+      {
+        path: "market-intel",
+        element: <DeferredPage><MarketIntelPage /></DeferredPage>,
       },
       { path: "system", element: <Navigate to="/phase7b-ops" replace /> },
       { path: "*", element: <Navigate to="/" replace /> },

@@ -24,6 +24,8 @@ concurrency:
 jobs:
   canonical-linux:
     name: canonical-pr-linux
+    # Public repo: never run fork PR code on the self-hosted bot machine.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 45
     steps:
@@ -128,6 +130,8 @@ jobs:
 
   canonical-windows:
     name: canonical-pr-windows
+    # Public repo: never run fork PR code on the self-hosted bot machine.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 30
     steps:

@@ -14,11 +14,10 @@ import {
   Typography,
 } from "@mui/material";
 import SmartToyRounded from "@mui/icons-material/SmartToyRounded";
-import CandlestickChartRounded from "@mui/icons-material/CandlestickChartRounded";
+import BuildRounded from "@mui/icons-material/BuildRounded";
 import PowerSettingsNewRounded from "@mui/icons-material/PowerSettingsNewRounded";
 import TuneRounded from "@mui/icons-material/TuneRounded";
 import InsightsRounded from "@mui/icons-material/InsightsRounded";
-import PhoneIphoneRounded from "@mui/icons-material/PhoneIphoneRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
 import LockRounded from "@mui/icons-material/LockRounded";
 import { useMt5Telemetry } from "../hooks";
@@ -29,13 +28,12 @@ const drawerWidth = 220;
 type LinkRow = readonly [string, string, typeof SmartToyRounded];
 type RuntimeLabel = "DEMO" | "LIVE" | "MT5 CHECK";
 
+// Lean menu: legacy pages (detailed dashboard, signals, phone) stay routable from "Kỹ thuật".
 const links: readonly LinkRow[] = [
-  ["/", "Bảng điều khiển", SmartToyRounded],
-  ["/phase7b-pattern-check", "Tín hiệu", CandlestickChartRounded],
-  ["/phase7b-ops", "Tài khoản & rủi ro", PowerSettingsNewRounded],
-  ["/phase7c-control-center", "Trung tâm điều khiển", TuneRounded],
-  ["/phase7c-mobile", "Điện thoại", PhoneIphoneRounded],
-  ["/performance", "Hiệu suất", InsightsRounded],
+  ["/phase7c-control-center", "Vận hành", TuneRounded],
+  ["/phase7b-ops", "Tài khoản & LIVE", PowerSettingsNewRounded],
+  ["/performance", "Hiệu quả", InsightsRounded],
+  ["/technical", "Kỹ thuật", BuildRounded],
 ] as const;
 
 function runtimeLabel(accountMode: string | undefined): RuntimeLabel {
@@ -64,7 +62,6 @@ function Navigation({ runtime, onNavigate }: { runtime: RuntimeLabel; onNavigate
             key={href}
             component={NavLink}
             to={href}
-            end={href === "/"}
             onClick={onNavigate}
             sx={{
               my: 0.35,
@@ -112,14 +109,17 @@ export function DashboardLayout() {
     headerTitle = "Tài khoản & rủi ro";
     headerSubtitle = `Tài khoản MT5 · khối lượng/rủi ro · an toàn · vận hành ${runtime}`;
   } else if (location.pathname.startsWith("/phase7c-control-center")) {
-    headerTitle = "Trung tâm điều khiển";
+    headerTitle = "Vận hành";
     headerSubtitle = `MT5 · bot · Telegram · quyết định giao dịch · khối lượng/rủi ro · ${runtime}`;
   } else if (location.pathname.startsWith("/phase7c-mobile")) {
     headerTitle = "Điện thoại · chỉ đọc";
     headerSubtitle = `MOBILE_REMOTE_ACCESS_M1 · trạng thái canonical · ${runtime}`;
   } else if (location.pathname.startsWith("/performance")) {
-    headerTitle = "Hiệu suất";
-    headerSubtitle = `Kết quả giao dịch XAUUSD của tài khoản ${runtime} hiện tại`;
+    headerTitle = "Hiệu quả";
+    headerSubtitle = `Kết quả giao dịch XAUUSD và phân tích bot của tài khoản ${runtime} hiện tại`;
+  } else if (location.pathname.startsWith("/technical")) {
+    headerTitle = "Kỹ thuật";
+    headerSubtitle = `Trang chẩn đoán và trang cũ · chỉ xem · ${runtime}`;
   }
 
   return (

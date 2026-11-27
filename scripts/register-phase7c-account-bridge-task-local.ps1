@@ -1,5 +1,7 @@
 param(
-  [string]$TaskName = "XAUUSD-Phase7C-Bridge"
+  [string]$TaskName = "XAUUSD-Phase7C-Bridge",
+  # Register without the AtLogOn trigger: the bridge then starts only from the desktop shortcut.
+  [switch]$ManualStartOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,7 +31,6 @@ $principal = New-ScheduledTaskPrincipal `
   -UserId $userId `
   -LogonType Interactive `
   -RunLevel Highest
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
 $settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
   -DontStopIfGoingOnBatteries `
@@ -37,13 +38,20 @@ $settings = New-ScheduledTaskSettingsSet `
   -ExecutionTimeLimit ([TimeSpan]::Zero) `
   -MultipleInstances IgnoreNew
 
-Register-ScheduledTask `
-  -TaskName $TaskName `
-  -Action $action `
-  -Trigger $trigger `
-  -Principal $principal `
-  -Settings $settings `
-  -Force | Out-Null
+$registerArgs = @{
+  TaskName = $TaskName
+  Action = $action
+  Principal = $principal
+  Settings = $settings
+  Force = $true
+}
+if ($ManualStartOnly) {
+  $triggerMode = "MANUAL_ONLY"
+} else {
+  $registerArgs.Trigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
+  $triggerMode = "AT_LOGON"
+}
+Register-ScheduledTask @registerArgs | Out-Null
 
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $actions = @($task.Actions)
@@ -63,4 +71,5 @@ Write-Host "PHASE7C_ACCOUNT_BRIDGE_TASK=$TaskName"
 Write-Host "PHASE7C_ACCOUNT_BRIDGE_TASK_STATE=$($task.State)"
 Write-Host "PHASE7C_ACCOUNT_BRIDGE_TASK_EXECUTABLE=$PowerShellExe"
 Write-Host "PHASE7C_ACCOUNT_BRIDGE_TASK_ACTION=PASS"
+Write-Host "PHASE7C_ACCOUNT_BRIDGE_TASK_TRIGGER=$triggerMode"
 Write-Host "PHASE7C_ACCOUNT_BRIDGE_TASK_STATUS=PASS"

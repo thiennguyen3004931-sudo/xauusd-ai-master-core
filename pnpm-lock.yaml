@@ -45,6 +45,9 @@ importers:
       '@xauusd/market-data':
         specifier: workspace:*
         version: link:../../packages/market-data
+      '@xauusd/market-intel':
+        specifier: workspace:*
+        version: link:../../packages/market-intel
       '@xauusd/mt5-broker':
         specifier: workspace:*
         version: link:../../packages/mt5-broker
@@ -612,6 +615,8 @@ importers:
       vitest:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@24.13.3)(lightningcss@1.33.0)
+
+  packages/market-intel: {}
 
   packages/mt5-broker:
     dependencies:

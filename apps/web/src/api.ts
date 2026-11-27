@@ -201,6 +201,65 @@ export async function setPhase7CLotSettings(input: {
   }));
 }
 
+export type Phase7CDailyPnlStopUnit = "USD" | "PERCENT";
+
+export interface Phase7CDailyPnlStopState {
+  version: number;
+  updatedAt: string | null;
+  updatedBy: string;
+  enabled: boolean;
+  unit: Phase7CDailyPnlStopUnit;
+  dailyLossLimit: number | null;
+  dailyProfitTarget: number | null;
+}
+
+export interface Phase7CDailyPnlStopStatus {
+  enabled: boolean;
+  blocked: boolean;
+  reason:
+    | "DISABLED"
+    | "WITHIN_LIMITS"
+    | "DAILY_LOSS_LIMIT_HIT"
+    | "DAILY_PROFIT_TARGET_HIT"
+    | "CONFIG_INVALID"
+    | "DATA_UNAVAILABLE";
+  error?: string | null;
+  dayStartTime: number | null;
+  realizedPnl?: number;
+  floatingPnl?: number;
+  dayPnl?: number;
+  baseBalance?: number | null;
+  lossLimitUsd?: number | null;
+  profitTargetUsd?: number | null;
+}
+
+export interface Phase7CDailyPnlStopSnapshot {
+  state: Phase7CDailyPnlStopState | null;
+  valid: boolean;
+  persisted: boolean;
+  error: string | null;
+  status?: Phase7CDailyPnlStopStatus | null;
+  statusError?: string | null;
+}
+
+export async function getPhase7CDailyPnlStop(): Promise<Phase7CDailyPnlStopSnapshot> {
+  return read<Phase7CDailyPnlStopSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/daily-pnl-stop`, { cache: "no-store" }));
+}
+
+export async function setPhase7CDailyPnlStop(input: {
+  expectedVersion: number;
+  enabled: boolean;
+  unit: Phase7CDailyPnlStopUnit;
+  dailyLossLimit: number | null;
+  dailyProfitTarget: number | null;
+}): Promise<Phase7CDailyPnlStopSnapshot> {
+  return read<Phase7CDailyPnlStopSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/daily-pnl-stop`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...input, source: "web-control-center" }),
+  }));
+}
+
 export async function getPhase7CAutoLotPreview(stopDistance: number, riskPercent = 0.25, maxLot = 0.03): Promise<Phase7CAutoLotPreview> {
   return read<Phase7CAutoLotPreview>(await fetch(`${API_BASE}/api/v1/phase7c/auto-lot-preview?stopDistance=${encodeURIComponent(stopDistance)}&riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`, { cache: "no-store" }));
 }
@@ -248,3 +307,39 @@ export async function runPhase7ERealignmentBacktest(input: Phase7ERealignmentReq
     body: JSON.stringify(input),
   }));
 }
+// Market intel (features 2 and 3): GET-only, advisory snapshot.
+export async function getMarketIntelSnapshot(refresh = false): Promise<import("./market-intel-types").MarketIntelSnapshot> {
+  return read(await fetch(`${API_BASE}/api/v1/market-intel/snapshot?symbol=XAUUSD${refresh ? "&refresh=1" : ""}`, { cache: "no-store" }));
+}
+
+// Market intel journal (feature 1, C1). Sync only copies realized trades into the local journal file.
+export async function getMarketIntelJournal(): Promise<import("./market-intel-types").MarketIntelJournalSummary> {
+  return read(await fetch(`${API_BASE}/api/v1/market-intel/journal`, { cache: "no-store" }));
+}
+
+export async function syncMarketIntelJournal(): Promise<{ enabled: boolean; inserted?: number; updated?: number; totalTrades?: number }> {
+  return read(await fetch(`${API_BASE}/api/v1/market-intel/journal/sync`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ days: 90 }),
+  }));
+}
+
+// Market intel proposals (feature 1, C2). Write calls only change the local market-intel journal;
+// none of them deploys to the bot or sends orders.
+type MiOverview = import("./market-intel-types").MarketIntelProposalsOverview;
+const miPost = async <T,>(url: string, body: unknown): Promise<T> => read<T>(await fetch(`${API_BASE}/api/v1/market-intel/proposals${url}`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+}));
+
+export async function getMarketIntelProposals(): Promise<MiOverview> {
+  return read(await fetch(`${API_BASE}/api/v1/market-intel/proposals`, { cache: "no-store" }));
+}
+export const runMarketIntelAnalysis = () => miPost<{ ok: boolean; error?: string; fresh?: number }>("/run", {});
+export const decideMarketIntelProposal = (id: string, decision: "APPROVE" | "REJECT" | "EDIT", note: string, editedValue?: string) =>
+  miPost<unknown>(`/${encodeURIComponent(id)}/decision`, { decision, note, editedValue });
+export const rollbackMarketIntelConfig = (toVersion: number, note: string) => miPost<unknown>("/config/rollback", { toVersion, note });
+export const markMarketIntelConfigDeployed = (version: number, note: string) => miPost<unknown>(`/config/${version}/deployed`, { note });
+export const marketIntelConfigExportUrl = (version: number) => `${API_BASE}/api/v1/market-intel/proposals/config/${version}/export`;

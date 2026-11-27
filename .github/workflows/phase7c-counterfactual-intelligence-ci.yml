@@ -20,6 +20,7 @@ on:
       - "apps/web/src/phase7c-counterfactual-intelligence-api.ts"
       - "apps/web/src/ui/Phase7CCounterfactualIntelligenceCard.tsx"
       - "apps/web/src/pages/Phase7CControlCenterShellPage.tsx"
+      - "apps/web/src/ui/Phase7CIntelligenceSection.tsx"
       - "scripts/phase7c-counterfactual-evaluator.test.ts"
       - "scripts/phase7c-counterfactual-intelligence.test.ts"
       - "scripts/phase7c-ordered-exit-side-evidence.test.ts"
@@ -52,6 +53,8 @@ env:
 
 jobs:
   contract-and-build:
+    # Public repo: never run fork PR code on the self-hosted bot machine.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 18
     steps:
@@ -116,6 +119,8 @@ jobs:
         run: pnpm --filter @xauusd/web... build
 
   production-acceptance-source-contract:
+    # Public repo: never run fork PR code on the self-hosted bot machine.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 8
     steps:

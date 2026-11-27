@@ -6,6 +6,9 @@ import {
 } from "./services/auto-execution-soak.service";
 import { warmPhase7CCanonicalDealLedgerOnStartup } from "./services/phase7c-canonical-deal-ledger.service";
 import { writePhase7CApiRuntimeSourceAttestation } from "./services/phase7c-runtime-source-attestation.service";
+import { startMarketIntelProposalScheduler } from "./services/market-intel-proposals.service";
+import { startMarketIntelScenarioAlerts } from "./services/market-intel-telegram";
+import { getMarketIntelSnapshot } from "./services/market-intel.service";
 
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -27,6 +30,9 @@ app.listen(PORT, HOST, () => {
   }
 });
 startAutoExecutionSoak();
+// Market intel (advisory, default OFF): proposal cadence and notify-only scenario alerts.
+startMarketIntelProposalScheduler();
+startMarketIntelScenarioAlerts(() => getMarketIntelSnapshot("XAUUSD"));
 
 void warmPhase7CCanonicalDealLedgerOnStartup()
   .then((result) => {

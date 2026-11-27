@@ -46,7 +46,7 @@ function requireOrdered(source, needles, label) {
 
 function assertTrendManagementMarkers(source, prefix) {
   const required = [
-    ["if (!managed.breakEvenApplied && favorable >= 6)", `${prefix} +6 milestone`],
+    ["if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed))", `${prefix} +6 milestone`],
     ["if (!managed.partialApplied && favorable >= 10)", `${prefix} +10 milestone`],
     ["const raw = initial / 3;", `${prefix} one-third sizing`],
     ["closeFixedTpIfTriggered(position, quote)", `${prefix} fixed TP management`],
@@ -179,7 +179,7 @@ export function assertPhase7CSemiPostEntryContract({
   // Boundary 4: prove the canonical Trend engine itself still has the intended
   // +6/+10 behavior. Everything below is then inherited by the transformed
   // SEMI runtime because Boundary 2 hands the position into managePosition().
-  const plus6Marker = "if (!managed.breakEvenApplied && favorable >= 6)";
+  const plus6Marker = "if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed))";
   const plus10Marker = "if (!managed.partialApplied && favorable >= 10)";
   const [plus6Index, plus10Index] = requireOrdered(
     legacyTrendSource,
@@ -190,7 +190,7 @@ export function assertPhase7CSemiPostEntryContract({
   const plus6Segment = legacyTrendSource.slice(plus6Index, plus10Index);
   requireIncludes(
     plus6Segment,
-    "const beStop = roundPrice(position.entry, spec.digits);",
+    "const beStop = breakEvenDecision.stopLoss;",
     "Trend +6 BE stop",
   );
   requireIncludes(plus6Segment, "PLUS6_SL_TO_ENTRY", "Trend +6 BE journal");

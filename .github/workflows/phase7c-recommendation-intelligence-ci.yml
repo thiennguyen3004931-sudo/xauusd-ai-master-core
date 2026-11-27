@@ -12,6 +12,7 @@ on:
       - "apps/web/src/phase7c-recommendation-intelligence-api.ts"
       - "apps/web/src/ui/Phase7CRecommendationIntelligenceCard.tsx"
       - "apps/web/src/pages/Phase7CControlCenterShellPage.tsx"
+      - "apps/web/src/ui/Phase7CIntelligenceSection.tsx"
       - "scripts/test-phase7c-recommendation-intelligence-source.mjs"
       - "scripts/test-phase7c-recommendation-api-source.mjs"
       - "scripts/phase7c-recommendation-evaluator.test.ts"
@@ -34,6 +35,8 @@ env:
 
 jobs:
   contract-and-build:
+    # Public repo: never run fork PR code on the self-hosted bot machine.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 22
     steps:
@@ -100,6 +103,8 @@ jobs:
         run: git diff --check origin/${{ github.base_ref }}...HEAD
 
   production-acceptance-source-contract:
+    # Public repo: never run fork PR code on the self-hosted bot machine.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64, xauusd-core-ci]
     timeout-minutes: 8
     steps:

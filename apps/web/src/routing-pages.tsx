@@ -13,8 +13,15 @@ export const Phase7CControlCenterShellPage = lazy(() =>
 export const Phase7CMobileReadOnlyPage = lazy(() =>
   import("./pages/Phase7CMobileReadOnlyPage").then((module) => ({ default: module.Phase7CMobileReadOnlyPage })),
 );
+export const Phase7CTechnicalPage = lazy(() =>
+  import("./pages/Phase7CTechnicalPage").then((module) => ({ default: module.Phase7CTechnicalPage })),
+);
 export const PerformancePage = lazy(() =>
   import("./pages/PerformancePage").then((module) => ({ default: module.PerformancePage })),
+);
+
+export const MarketIntelPage = lazy(() =>
+  import("./pages/MarketIntelPage").then((module) => ({ default: module.MarketIntelPage })),
 );
 
 export function DeferredPage({ children }: { children: ReactNode }) {

@@ -12,7 +12,7 @@ const appPath = path.join(root, "apps/api/src/app.ts");
 const webApiPath = path.join(root, "apps/web/src/phase7c-performance-intelligence-api.ts");
 const webTypesPath = path.join(root, "apps/web/src/phase7c-performance-intelligence-types.ts");
 const webCardPath = path.join(root, "apps/web/src/ui/Phase7CPerformanceIntelligenceCard.tsx");
-const webShellPath = path.join(root, "apps/web/src/pages/Phase7CControlCenterShellPage.tsx");
+const webShellPath = path.join(root, "apps/web/src/ui/Phase7CIntelligenceSection.tsx"); // lean UI: Intelligence on "Hiệu quả"
 const workflowPath = path.join(root, ".github/workflows/phase7c-performance-intelligence-ci.yml");
 
 function fail(message) {

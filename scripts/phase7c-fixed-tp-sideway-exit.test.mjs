@@ -80,7 +80,7 @@ test("Sideway broker-native Fixed TP/SL cannot be overridden by obsolete softwar
   const legacyTimeGuard = manage.indexOf("if (!brokerTpSlTrailOnly) {");
   const timeIndex = manage.indexOf("if (Date.now() >= managed.timeStopAt)");
   const regimeIndex = manage.indexOf('await closeAll(position, "REGIME_LEFT_RANGE")');
-  const breakEvenIndex = manage.indexOf("if (!managed.breakEvenApplied && favorable >= 6)");
+  const breakEvenIndex = manage.indexOf("if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed))");
   const recoveryIndex = manage.indexOf('if (managed.dailyMode === "RECOVERY_TP")');
   const partialIndex = manage.indexOf("if (!brokerTpSlTrailOnly && managed.breakEvenApplied && !managed.partialApplied && targetReached(");
   const holdIndex = manage.indexOf('journal("SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY"');

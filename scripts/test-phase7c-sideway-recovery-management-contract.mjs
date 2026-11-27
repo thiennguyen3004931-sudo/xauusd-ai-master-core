@@ -28,7 +28,7 @@ const manageStart = source.indexOf("async function managePosition(");
 const manageEnd = source.indexOf("async function closeAll(", manageStart);
 assert.ok(manageStart >= 0 && manageEnd > manageStart);
 const manage = source.slice(manageStart, manageEnd);
-const plus6Index = manage.indexOf("if (!managed.breakEvenApplied && favorable >= 6)");
+const plus6Index = manage.indexOf("if (!managed.breakEvenApplied && favorable >= managedBreakEvenTriggerPrice(managed))");
 const recoveryGuardIndex = manage.indexOf('if (managed.dailyMode === "RECOVERY_TP")');
 const partialIndex = manage.indexOf("if (!brokerTpSlTrailOnly && managed.breakEvenApplied");
 const holdIndex = manage.indexOf('journal("SIDEWAY_HOLD_BROKER_TP_SL_TRAIL_ONLY"');
