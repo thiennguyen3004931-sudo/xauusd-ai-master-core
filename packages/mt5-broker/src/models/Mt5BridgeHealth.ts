@@ -1,6 +1,8 @@
 export interface Mt5BridgeHealth {
   status: "ok" | "degraded";
   connected: boolean;
+  /** MT5 terminal's connection to the broker trade server, when reported. */
+  brokerConnected?: boolean | null;
   tradingEnabled: boolean;
   terminalTradeAllowed: boolean;
   expertTradeAllowed: boolean;

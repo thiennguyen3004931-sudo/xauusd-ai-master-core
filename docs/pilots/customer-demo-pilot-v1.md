@@ -26,6 +26,20 @@ Status: **prepared for controlled customer-machine testing**, not executed on a 
 
 For any P5/P6 follow-on, the owner must explicitly approve the intended DEMO account, broker and risk budget and verify a flat state, unless the plan explicitly covers existing exposure. Do **not** reuse Master production login or attempt LIVE ARM.
 
+## P5 account and exposure preflight
+
+Use the approved Windows pilot host and an already running, isolated loopback DEMO bridge from the pilot revision. Its health response includes `brokerConnected` from the terminal. Keep bridge trading and terminal Algo Trading disabled during P5. Confirm the intended account and exact broker server from the pilot approval before running the check.
+
+From the repository root, substitute the approved DEMO bridge port and server in this example. Enter the approved account number and local bridge key at the hidden console prompts.
+
+```powershell
+py -3 .\packages\mt5-broker\bridge\customer_demo_preflight.py --confirm-isolated-demo --port 8765 --expected-server 'Approved-Broker-Demo'
+```
+
+The preflight requests fresh health, all open positions, and all active orders with reconnect disabled. It verifies the same bridge session, DEMO account and disabled trading again after reading the counts. `PASS` records a matching, connected, flat DEMO account. `BLOCKED` records a reason code. Save only the JSON result and approved masked account and machine references in the restricted acceptance record.
+
+Complete P5 by matching the approved XAUUSD broker symbol in MT5 and recording its minimum, maximum and step volumes from Market Watch → Specification. Record the pilot source revision, operator approval and those symbol checks alongside the account and exposure result. The terminal view supplies specification evidence without the bridge symbol-selection path.
+
 ## Exit criteria
 
 - No unresolved high-severity security or execution defects.

@@ -75,6 +75,7 @@ class Mt5Gateway:
             return {
                 "status": "degraded",
                 "connected": False,
+                "brokerConnected": None,
                 "tradingEnabled": self.settings.trading_enabled,
                 "terminalTradeAllowed": False,
                 "expertTradeAllowed": False,
@@ -107,10 +108,12 @@ class Mt5Gateway:
             self._lock.release()
 
         connected = terminal is not None and account is not None
+        broker_connected = getattr(terminal, "connected", None)
         mode = self._account_mode(getattr(account, "trade_mode", None)) if account else None
         snapshot = {
             "status": "ok" if connected else "degraded",
             "connected": connected,
+            "brokerConnected": broker_connected if isinstance(broker_connected, bool) else None,
             "tradingEnabled": self.settings.trading_enabled,
             "terminalTradeAllowed": bool(getattr(terminal, "trade_allowed", False)),
             "expertTradeAllowed": bool(getattr(account, "trade_expert", False)),
