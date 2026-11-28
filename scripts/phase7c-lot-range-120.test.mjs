@@ -38,6 +38,8 @@ test("Trend and Sideway lot controls accept 0.03 through 1.20 only in 0.03 incre
         trendFixedTpDistance: 0,
         sidewayFixedTpEnabled: false,
         sidewayFixedTpDistance: 0,
+        breakEvenTriggerPrice: 6, // BE defaults: frozen baseline +6 -> entry
+        breakEvenOffsetPrice: 0,
       },
       `lot ${lot} must be accepted for both Trend and Sideway with additive Fixed TP defaulting OFF`,
     );

@@ -159,6 +159,8 @@ test("canonical lot bounds allow Trend and Sideway from 0.03 to 1.20 in 0.03 inc
       trendFixedTpDistance: 0,
       sidewayFixedTpEnabled: false,
       sidewayFixedTpDistance: 0,
+      breakEvenTriggerPrice: 6, // BE defaults: frozen baseline +6 -> entry
+      breakEvenOffsetPrice: 0,
     });
   }
   for (const lot of [0.04, 0.05, 1.21, 1.23]) {

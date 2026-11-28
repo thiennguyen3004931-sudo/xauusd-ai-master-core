@@ -193,6 +193,8 @@ export async function setPhase7CLotSettings(input: {
   trendFixedTpDistance: number;
   sidewayFixedTpEnabled: boolean;
   sidewayFixedTpDistance: number;
+  breakEvenTriggerPrice?: number;
+  breakEvenOffsetPrice?: number;
 }): Promise<Phase7CLotSettingsSnapshot> {
   return read<Phase7CLotSettingsSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/lot-settings`, {
     method: "POST",

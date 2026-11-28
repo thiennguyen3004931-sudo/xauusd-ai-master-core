@@ -186,6 +186,24 @@ function Assert-Phase7CRiskProfile($Profile, [string]$Label = "Phase7C risk prof
     throw "$Label Sideway fixed TP distance must be finite and non-negative."
   }
 
+  # Break-even (BE): optional in v2. Missing = frozen baseline +6 -> entry. Same ranges as
+  # scripts/phase7c-break-even-config.mjs (trigger 4..15, offset 0..3, offset < trigger).
+  $breakEvenTriggerPrice = 6.0
+  $breakEvenOffsetPrice = 0.0
+  $beTriggerProperty = $Profile.PSObject.Properties["breakEvenTriggerPrice"]
+  $beOffsetProperty = $Profile.PSObject.Properties["breakEvenOffsetPrice"]
+  if ($null -ne $beTriggerProperty -and $null -ne $beTriggerProperty.Value) { $breakEvenTriggerPrice = [double]$beTriggerProperty.Value }
+  if ($null -ne $beOffsetProperty -and $null -ne $beOffsetProperty.Value) { $breakEvenOffsetPrice = [double]$beOffsetProperty.Value }
+  if ([double]::IsNaN($breakEvenTriggerPrice) -or $breakEvenTriggerPrice -lt 4 -or $breakEvenTriggerPrice -gt 15) {
+    throw "$Label breakEvenTriggerPrice must be between 4 and 15."
+  }
+  if ([double]::IsNaN($breakEvenOffsetPrice) -or $breakEvenOffsetPrice -lt 0 -or $breakEvenOffsetPrice -gt 3) {
+    throw "$Label breakEvenOffsetPrice must be between 0 and 3."
+  }
+  if ($breakEvenOffsetPrice -ge $breakEvenTriggerPrice) {
+    throw "$Label breakEvenOffsetPrice must be lower than breakEvenTriggerPrice."
+  }
+
   return [pscustomobject]@{
     version = 2
     trendFixedLot = $trend
@@ -195,6 +213,8 @@ function Assert-Phase7CRiskProfile($Profile, [string]$Label = "Phase7C risk prof
     trendFixedTpDistance = $trendFixedTpDistance
     sidewayFixedTpEnabled = $sidewayFixedTpEnabled
     sidewayFixedTpDistance = $sidewayFixedTpDistance
+    breakEvenTriggerPrice = $breakEvenTriggerPrice
+    breakEvenOffsetPrice = $breakEvenOffsetPrice
   }
 }
 

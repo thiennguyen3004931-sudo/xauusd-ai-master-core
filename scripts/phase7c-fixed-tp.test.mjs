@@ -89,6 +89,8 @@ test("Fixed TP settings validate independently and remain backward compatible", 
       trendFixedTpDistance: 8,
       sidewayFixedTpEnabled: true,
       sidewayFixedTpDistance: 6.5,
+      breakEvenTriggerPrice: 6, // BE defaults: frozen baseline +6 -> entry
+      breakEvenOffsetPrice: 0,
     },
     "RED_TARGET: validator must preserve independent Trend/Sideway Fixed TP settings.",
   );
@@ -107,6 +109,8 @@ test("Fixed TP settings validate independently and remain backward compatible", 
       trendFixedTpDistance: 0,
       sidewayFixedTpEnabled: false,
       sidewayFixedTpDistance: 0,
+      breakEvenTriggerPrice: 6, // BE defaults: frozen baseline +6 -> entry
+      breakEvenOffsetPrice: 0,
     },
     "legacy callers must canonicalize to Fixed TP disabled rather than break",
   );

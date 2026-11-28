@@ -445,6 +445,9 @@ export interface Phase7CLotSettingsState {
   trendFixedTpDistance: number;
   sidewayFixedTpEnabled: boolean;
   sidewayFixedTpDistance: number;
+  /** Absent on older API builds (treat as 6 / 0). */
+  breakEvenTriggerPrice: number;
+  breakEvenOffsetPrice: number;
   updatedAt: string;
   updatedBy: string;
 }
@@ -459,6 +462,8 @@ export interface Phase7CActiveLotSettings {
   trendFixedTpDistance: number;
   sidewayFixedTpEnabled: boolean;
   sidewayFixedTpDistance: number;
+  breakEvenTriggerPrice?: number;
+  breakEvenOffsetPrice?: number;
   armed: boolean;
   supervisorPid: number;
   appliedAt: string;

@@ -57,6 +57,8 @@ test("PowerShell v1 risk profile migrates to canonical v2 with Fixed TP disabled
     trendFixedTpDistance: 0,
     sidewayFixedTpEnabled: false,
     sidewayFixedTpDistance: 0,
+    breakEvenTriggerPrice: 6, // BE defaults: frozen baseline +6 -> entry
+    breakEvenOffsetPrice: 0,
   }, "RED_TARGET: PowerShell v1 risk profiles must canonicalize to schema v2 without changing lot/risk values.");
 });
 
@@ -82,7 +84,26 @@ test("PowerShell v2 risk profile preserves independent Trend and Sideway Fixed T
     trendFixedTpDistance: 8,
     sidewayFixedTpEnabled: true,
     sidewayFixedTpDistance: 6.5,
+    breakEvenTriggerPrice: 6,
+    breakEvenOffsetPrice: 0,
   }, "RED_TARGET: PowerShell risk-profile validation must preserve independent Fixed TP settings.");
+});
+
+test("PowerShell v2 keeps a saved BE trigger/offset and rejects out-of-range BE (fail closed)", () => {
+  const base = { version: 2, trendFixedLot: 0.03, sidewayRiskPercent: 0.25, sidewayMaxLot: 0.03 };
+  const ok = assertPowerShellSuccess(runRiskProfile({ ...base, breakEvenTriggerPrice: 8, breakEvenOffsetPrice: 1 }), "v2 BE 8/1");
+  assert.equal(ok.breakEvenTriggerPrice, 8);
+  assert.equal(ok.breakEvenOffsetPrice, 1);
+  for (const bad of [
+    { breakEvenTriggerPrice: 3 },
+    { breakEvenTriggerPrice: 16 },
+    { breakEvenOffsetPrice: 4 },
+    { breakEvenTriggerPrice: 4, breakEvenOffsetPrice: 3.5 },
+  ]) {
+    const result = runRiskProfile({ ...base, ...bad });
+    assert.notEqual(result.status, 0, `BE ${JSON.stringify(bad)} must fail closed`);
+    assert.match(`${result.stdout}\n${result.stderr}`, /breakEven/i);
+  }
 });
 
 test("PowerShell v2 rejects enabled non-positive or non-finite Fixed TP distances", () => {

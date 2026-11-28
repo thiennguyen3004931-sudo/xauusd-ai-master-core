@@ -352,7 +352,11 @@ router.post("/lot-settings", async (req: Request, res: Response) => {
       return;
     }
 
+    // Clients that do not send BE (older web, scripts) keep the currently saved BE values.
+    const currentLotState = phase7CLotSettingsService.getState();
     const input = validatePhase7CLotSettings({
+      breakEvenTriggerPrice: req.body?.breakEvenTriggerPrice ?? currentLotState.breakEvenTriggerPrice,
+      breakEvenOffsetPrice: req.body?.breakEvenOffsetPrice ?? currentLotState.breakEvenOffsetPrice,
       trendFixedLot: Number(req.body?.trendFixedLot),
       sidewayRiskPercent: Number(req.body?.sidewayRiskPercent),
       sidewayMaxLot: Number(req.body?.sidewayMaxLot),
