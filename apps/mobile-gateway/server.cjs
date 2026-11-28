@@ -156,7 +156,10 @@ function createMobileGatewayServer({ config, broker = null, fetchImpl = fetch } 
       if (String(req.headers.origin ?? "") !== String(config.allowedOrigin ?? "")) {
         return writeJson(res, 403, { error: "ORIGIN_NOT_ALLOWED" }, method);
       }
-      if (!broker) return writeJson(res, 503, { error: "M4_NOT_ENABLED" }, method);
+      if (!broker) {
+        req.resume();
+        return writeJson(res, 403, { error: "MOBILE_CONTROL_READ_ONLY" }, method);
+      }
       try {
         const body = await readStrictJson(req);
         const result = await broker.handleAction(identity, body);
@@ -174,7 +177,9 @@ function createMobileGatewayServer({ config, broker = null, fetchImpl = fetch } 
       if (method !== "GET") return writeJson(res, 405, { error: "METHOD_NOT_ALLOWED" }, method);
       const identity = getAllowedIdentity(req, config);
       if (!identity) return writeJson(res, 403, { error: "TAILSCALE_IDENTITY_REQUIRED" }, method);
-      if (!broker) return writeJson(res, 503, { error: "M4_NOT_ENABLED" }, method);
+      if (!broker) {
+        return writeJson(res, 200, { operator: identity, controlMode: "READ_ONLY", controlsEnabled: false }, method);
+      }
       try {
         return writeJson(res, 200, await broker.getState(identity), method);
       } catch (error) {
@@ -186,7 +191,7 @@ function createMobileGatewayServer({ config, broker = null, fetchImpl = fetch } 
       if (method !== "GET") return writeJson(res, 405, { error: "METHOD_NOT_ALLOWED" }, method);
       const identity = getAllowedIdentity(req, config);
       if (!identity) return writeJson(res, 403, { error: "TAILSCALE_IDENTITY_REQUIRED" }, method);
-      if (!broker) return writeJson(res, 503, { error: "M4_NOT_ENABLED" }, method);
+      if (!broker) return writeJson(res, 403, { error: "MOBILE_CONTROL_READ_ONLY" }, method);
       const transactionId = String(requestUrl.searchParams.get("transactionId") ?? "").trim();
       if (!transactionId) return writeJson(res, 400, { error: "TRANSACTION_ID_REQUIRED" }, method);
       try {

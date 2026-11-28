@@ -135,11 +135,11 @@ export function Phase7CMobileReadOnlyPage() {
           <Box>
             <Typography variant="h5" fontWeight={950}>XAUUSD AI MASTER</Typography>
             <Typography variant="caption" color="text.secondary" display="block" mt={0.25}>
-              MOBILE_REMOTE_ACCESS_M4-A · trạng thái + điều khiển bảo mật
+              MOBILE_REMOTE_ACCESS_M4-A · mặc định chỉ xem qua Tailscale
             </Typography>
           </Box>
           <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap">
-            <Chip label="M4 SECURE CONTROL" color="warning" size="small" variant="outlined" sx={{ fontWeight: 950 }} />
+            <Chip label="TAILNET ONLY" color="success" size="small" variant="outlined" sx={{ fontWeight: 950 }} />
             <Chip label={`MODE ${activeMode}`} size="small" variant="outlined" sx={{ fontWeight: 900 }} />
             <Chip label={ui?.safety.readOnly === true ? "READ DATA CANONICAL ✓" : "READ DATA CHECK"} size="small" color="success" variant="outlined" sx={{ fontWeight: 900 }} />
           </Stack>

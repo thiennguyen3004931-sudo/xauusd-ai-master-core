@@ -11,8 +11,20 @@ const { createM4ActionBroker } = require("./m4-action-broker.cjs");
 const CONFIG_PATH = process.env.XAUUSD_MOBILE_GATEWAY_CONFIG ||
   "C:\\ProgramData\\XAUUSD-AI-MASTER\\mobile-readonly-gateway\\gateway.config.json";
 
+const CONTROL_MODES = new Set(["READ_ONLY", "M4"]);
+
+// Phone control is opt-in. A config without controlMode is READ_ONLY:
+// no MODE/AUTO/ARM/DISARM action can be brokered from the phone.
+function resolveControlMode(config) {
+  if (!Object.prototype.hasOwnProperty.call(config ?? {}, "controlMode")) return "READ_ONLY";
+  const value = config.controlMode;
+  if (typeof value !== "string" || !CONTROL_MODES.has(value)) throw new Error("GATEWAY_CONTROL_MODE_INVALID");
+  return value;
+}
+
 function validateProductionConfig(config) {
   if (!config || typeof config !== "object") throw new Error("GATEWAY_CONFIG_REQUIRED");
+  const controlMode = resolveControlMode(config);
   if (config.listenHost !== "127.0.0.1") throw new Error("GATEWAY_LISTEN_HOST_MUST_BE_LOOPBACK");
   if (!Number.isInteger(config.listenPort) || config.listenPort <= 0 || config.listenPort > 65535) {
     throw new Error("GATEWAY_LISTEN_PORT_INVALID");
@@ -40,6 +52,7 @@ function validateProductionConfig(config) {
     ...config,
     allowedUsers: normalizedUsers,
     allowedOrigin: allowedOrigin.origin,
+    controlMode,
   };
 }
 
@@ -49,6 +62,9 @@ function loadConfig(filePath = CONFIG_PATH) {
 }
 
 function buildServer(config, { fetchImpl = fetch } = {}) {
+  if (resolveControlMode(config) !== "M4") {
+    return createMobileGatewayServer({ config, broker: null, fetchImpl });
+  }
   const canonical = createCanonicalClient({ apiOrigin: config.apiOrigin, fetchImpl });
   const transactions = createTransactionStore();
   const audit = createAuditSink({ auditPath: config.auditPath });
@@ -61,7 +77,8 @@ function start() {
   const server = buildServer(config);
   server.listen(config.listenPort, config.listenHost, () => {
     process.stdout.write(`MOBILE_GATEWAY_LISTENING=${config.listenHost}:${config.listenPort}\n`);
-    process.stdout.write("MOBILE_GATEWAY_M4=ENABLED\n");
+    process.stdout.write(`MOBILE_GATEWAY_CONTROL_MODE=${config.controlMode}\n`);
+    process.stdout.write(config.controlMode === "M4" ? "MOBILE_GATEWAY_M4=ENABLED\n" : "MOBILE_GATEWAY_M4=DISABLED_READ_ONLY\n");
   });
   return server;
 }
@@ -70,4 +87,4 @@ if (require.main === module) {
   start();
 }
 
-module.exports = { CONFIG_PATH, validateProductionConfig, loadConfig, buildServer, start };
+module.exports = { CONFIG_PATH, resolveControlMode, validateProductionConfig, loadConfig, buildServer, start };
