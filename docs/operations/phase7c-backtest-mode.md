@@ -82,3 +82,34 @@ stop/freeze level của broker, lot SIDEWAY theo rủi ro 1% (backtest dùng lot
   walk-forward: `node scripts/backtest/phase7c-management-sweep.mjs` (xem `phase7c-management-sweep-report.md`).
 - Backtest không phải bằng chứng sinh lời và không đủ để bật LIVE. Theo phiếu giao việc: DEMO ≥ 30 lệnh trước.
 - Báo cáo không bao giờ tự đổi cấu hình bot. Muốn đổi, mở PR riêng và chờ chủ dự án duyệt.
+
+## 7. Chạy trên web (trang Backtest, dùng được trên điện thoại)
+
+Trang `/backtest` (menu **Kỹ thuật → Backtest kiểm chứng**) chạy cùng bộ mô phỏng này với các công tắc:
+
+| Nhóm | Công tắc / tham số | Mặc định (= bot đang chạy) |
+|---|---|---|
+| SL ban đầu | SL tối đa 6–20 | 10 |
+| Hoà vốn | bật/tắt, khi đạt +4..15, SL = entry + 0..3 | bật, +6, +0 |
+| TP cố định | bật/tắt, 5–100 | tắt |
+| Chốt một phần (TREND) | bật/tắt, mốc +4..30, tỷ lệ 1/4 · 1/3 · 1/2 | bật, +10, 1/3 |
+| FastMove | bật/tắt, kích hoạt A, lùi B | bật, 10/10 |
+| Dời SL theo cấu trúc M5 | bật/tắt | bật |
+| Thoát phần còn lại theo FVG ngược / MA50 | bật/tắt | bật |
+| Chi phí | phí/lot, trượt giá, spread tối thiểu | 7 · 0,10 · 0 |
+
+Khi tắt chốt một phần, mốc +10 vẫn được dùng để bắt đầu dời SL M5 và xét thoát runner, chỉ là không đóng khối lượng.
+Khi cấu hình khác bot đang chạy, trang tự chạy thêm cấu hình đang chạy trên cùng dữ liệu để so sánh.
+
+Chuẩn bị một lần trên máy chạy API:
+
+1. Đặt `XAUUSD_M5.csv` và `XAUUSD_M15.csv` (xuất từ MT5) vào `backtest-data/` ở thư mục repo
+   (hoặc đặt biến `PHASE7C_BACKTEST_DATA_DIR`). Tên kiểu `XAUUSD.G_M5_....csv` cũng được nhận.
+2. Chạy `pnpm backtest --m5 backtest-data/XAUUSD_M5.csv --m15 backtest-data/XAUUSD_M15.csv` một lần để tạo cache regime
+   (3 năm dữ liệu ≈ 1,5 phút CPU; nên chạy khi bot PAUSE hoặc trên máy khác rồi chép cache sang).
+
+An toàn: API chỉ đọc CSV và cache, chạy trong worker thread (một lần chạy mỗi lúc, tối đa 90 giây), không import broker,
+không ghi file, không đổi BOT_MODE / LIVE ARM / lot. API chỉ có `GET /api/v1/phase7c/offline-backtest/status` và
+`POST /api/v1/phase7c/offline-backtest/run`; yêu cầu có tham số lạ bị từ chối.
+
+Không mô phỏng thêm: dời SL theo swing M15 (chỉ có cấu trúc M5).

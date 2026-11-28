@@ -24,6 +24,10 @@ export const MarketIntelPage = lazy(() =>
   import("./pages/MarketIntelPage").then((module) => ({ default: module.MarketIntelPage })),
 );
 
+export const Phase7COfflineBacktestPage = lazy(() =>
+  import("./pages/Phase7COfflineBacktestPage").then((module) => ({ default: module.Phase7COfflineBacktestPage })),
+);
+
 export function DeferredPage({ children }: { children: ReactNode }) {
   return <Suspense fallback={<LoadingState />}>{children}</Suspense>;
 }

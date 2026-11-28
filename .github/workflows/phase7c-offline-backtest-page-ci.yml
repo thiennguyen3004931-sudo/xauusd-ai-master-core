@@ -1,0 +1,46 @@
+name: Phase7C Offline Backtest Page (No MT5)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/backtest/**'
+      - 'apps/api/src/services/phase7c-offline-backtest.service*.ts'
+      - 'apps/api/src/routes/phase7c-offline-backtest.route.ts'
+      - 'apps/api/src/app.ts'
+      - 'apps/web/src/pages/Phase7COfflineBacktestPage.tsx'
+      - 'apps/web/src/phase7c-offline-backtest-types.ts'
+      - '.github/workflows/phase7c-offline-backtest-page-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  page:
+    name: Toggles, request validation, worker, API and builds (synthetic bars only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MT5_ORDER_PERMISSION: NONE
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Simulator, toggles and web request tests
+        run: node --test scripts/backtest/*.test.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: API service tests
+        working-directory: apps/api
+        run: node --import tsx --test src/services/phase7c-offline-backtest.service.test.ts
+      - name: Build API
+        run: pnpm --filter @xauusd/api... build
+      - name: Build Web
+        run: pnpm --filter @xauusd/web... build
