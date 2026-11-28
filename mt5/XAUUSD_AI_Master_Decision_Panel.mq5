@@ -29,6 +29,20 @@ const int REASON_ROW_HEIGHT = 64;
 const int REASON_ROW_GAP = 6;
 // Required installer safety marker: READ ONLY | DEMO/LIVE | ORDER PERMISSION = NONE
 
+// Industrial palette shared with the web (apps/web/src/ui/industrial-theme.ts): graphite panels,
+// one gold accent, signal colours only for state. Display only; no trading function in this panel.
+#define UI_BG     C'10,13,18'
+#define UI_PANEL  C'17,22,30'
+#define UI_PANEL2 C'22,28,38'
+#define UI_LINE   C'46,56,70'
+#define UI_TEXT   C'230,235,242'
+#define UI_MUTED  C'133,146,163'
+#define UI_GOLD   C'233,185,73'
+#define UI_OK     C'60,207,122'
+#define UI_WARN   C'245,166,35'
+#define UI_BAD    C'242,100,90'
+#define UI_INFO   C'74,163,255'
+
 CCanvas g_canvas;
 bool g_canvas_ready = false;
 int g_canvas_width = 0;
@@ -260,6 +274,9 @@ void Card(const int x, const int y, const int width, const int height, const col
 {
    g_canvas.FillRectangle(x, y, x + width, y + height, A(fill, 252));
    g_canvas.Rectangle(x, y, x + width, y + height, A(border, 235));
+   // Gold corner bracket, same mark as the web cards.
+   g_canvas.FillRectangle(x, y, x + 10, y + 1, A(UI_GOLD));
+   g_canvas.FillRectangle(x, y, x + 1, y + 10, A(UI_GOLD));
 }
 
 void VerticalDivider(const int x, const int y1, const int y2, const color tone)
@@ -269,19 +286,19 @@ void VerticalDivider(const int x, const int y1, const int y2, const color tone)
 
 color ModeTone(const string mode, const string strategy)
 {
-   if(mode == "PAUSE" || strategy == "PAUSE") return clrOrange;
-   if(mode == "AUTO") return clrLimeGreen;
-   if(mode == "TREND") return clrDeepSkyBlue;
-   if(mode == "SIDEWAY") return clrAqua;
-   return clrGold;
+   if(mode == "PAUSE" || strategy == "PAUSE") return UI_WARN;
+   if(mode == "AUTO") return UI_OK;
+   if(mode == "TREND") return UI_INFO;
+   if(mode == "SIDEWAY") return UI_GOLD;
+   return UI_GOLD;
 }
 
 color RegimeTone(const string regime)
 {
-   if(regime == "REVERSAL") return clrOrange;
-   if(regime == "TREND") return clrDeepSkyBlue;
-   if(regime == "SIDEWAY") return clrAqua;
-   return clrSilver;
+   if(regime == "REVERSAL") return UI_WARN;
+   if(regime == "TREND") return UI_INFO;
+   if(regime == "SIDEWAY") return UI_GOLD;
+   return UI_MUTED;
 }
 
 string ModeVi(const string value)
@@ -347,10 +364,10 @@ string ReasonVi(const string value, const string fallback="Chưa có dữ liệu
 
 void BeginPanel(const int width, const int height)
 {
-   g_canvas.Erase(A(C'3,10,18', 255));
-   g_canvas.FillRectangle(0, 0, width - 1, height - 1, A(C'3,10,18', 255));
-   g_canvas.Rectangle(0, 0, width - 1, height - 1, A(C'0,160,200'));
-   g_canvas.FillRectangle(8, 6, width - 9, 8, A(C'0,210,255'));
+   g_canvas.Erase(A(UI_BG, 255));
+   g_canvas.FillRectangle(0, 0, width - 1, height - 1, A(UI_BG, 255));
+   g_canvas.Rectangle(0, 0, width - 1, height - 1, A(UI_LINE));
+   g_canvas.FillRectangle(8, 6, width - 9, 8, A(UI_GOLD));
 }
 
 void DrawHeader(const string payload, const int width, const string mode, const string strategy, const string regime, const string confidence)
@@ -358,14 +375,14 @@ void DrawHeader(const string payload, const int width, const string mode, const 
    const int x = 10;
    const int y = 14;
    const int w = width - 20;
-   Card(x, y, w, HEADER_HEIGHT, C'7,20,30', C'0,72,102');
+   Card(x, y, w, HEADER_HEIGHT, UI_PANEL, UI_LINE);
 
    string runtime_mode = Clean(Field(payload, "accountMode"), "CHECK");
    string local_mode = LocalAccountMode();
-   color account_tone = RuntimeMatchesTerminal(payload) ? clrLimeGreen : clrTomato;
+   color account_tone = RuntimeMatchesTerminal(payload) ? UI_OK : UI_BAD;
    int half = (w - 48) / 2;
 
-   Text(x + 18, y + 12, "XAUUSD AI MASTER", clrDeepSkyBlue, TITLE_FONT_SIZE);
+   Text(x + 18, y + 12, "XAUUSD AI MASTER", UI_GOLD, TITLE_FONT_SIZE);
    TextRight(x + w - 18, y + 14, FitText(runtime_mode + " · CHỈ ĐỌC", half, BODY_FONT_SIZE), account_tone, BODY_FONT_SIZE);
    Text(x + 18, y + 42, FitText("Chế độ: " + ModeVi(mode), half, BODY_FONT_SIZE), ModeTone(mode, strategy), BODY_FONT_SIZE);
    TextRight(x + w - 18, y + 42, FitText("Đang áp dụng: " + ModeVi(strategy), half, BODY_FONT_SIZE), ModeTone(mode, strategy), BODY_FONT_SIZE);
@@ -375,7 +392,7 @@ void DrawHeader(const string payload, const int width, const string mode, const 
 
 void DrawStatusItem(const int x, const int y, const int cell_width, const int cell_height, const string label, const bool on)
 {
-   color tone = on ? clrLimeGreen : clrTomato;
+   color tone = on ? UI_OK : UI_BAD;
    int text_height = TextHeightPx(BODY_FONT_SIZE);
    int gap = 4;
    int block_height = text_height * 2 + gap;
@@ -383,7 +400,7 @@ void DrawStatusItem(const int x, const int y, const int cell_width, const int ce
    int label_y = start_y;
    int value_y = start_y + text_height + gap;
    g_canvas.FillCircle(x + 6, label_y + text_height / 2, 4, A(tone));
-   Text(x + 20, label_y, FitText(label, cell_width - 28, BODY_FONT_SIZE), clrSilver, BODY_FONT_SIZE);
+   Text(x + 20, label_y, FitText(label, cell_width - 28, BODY_FONT_SIZE), UI_MUTED, BODY_FONT_SIZE);
    Text(x + 20, value_y, on ? "ON" : "OFF", tone, BODY_FONT_SIZE);
 }
 
@@ -392,8 +409,8 @@ void DrawSystemStatus(const string payload, const int width)
    const int x = 10;
    const int y = 126;
    const int w = width - 20;
-   Card(x, y, w, STATUS_HEIGHT, C'7,21,30', C'0,72,102');
-   Text(x + 18, CenteredTextY(y + 6, 28, SECTION_FONT_SIZE), "TRẠNG THÁI HỆ THỐNG", clrAqua, SECTION_FONT_SIZE);
+   Card(x, y, w, STATUS_HEIGHT, UI_PANEL, UI_LINE);
+   Text(x + 18, CenteredTextY(y + 6, 28, SECTION_FONT_SIZE), "TRẠNG THÁI HỆ THỐNG", UI_MUTED, SECTION_FONT_SIZE);
 
    int content_x = x + 18;
    int content_w = w - 36;
@@ -401,7 +418,7 @@ void DrawSystemStatus(const string payload, const int width)
    int cell_top = y + 36;
    int cell_height = STATUS_HEIGHT - 44;
    for(int divider = 1; divider < STATUS_COLUMN_COUNT; divider++)
-      VerticalDivider(content_x + col * divider, cell_top + 2, y + STATUS_HEIGHT - 8, C'80,105,120');
+      VerticalDivider(content_x + col * divider, cell_top + 2, y + STATUS_HEIGHT - 8, UI_LINE);
 
    DrawStatusItem(content_x, cell_top, col, cell_height, "MT5", BoolField(payload, "mt5Connected") && RuntimeMatchesTerminal(payload));
    DrawStatusItem(content_x + col, cell_top, col, cell_height, "An toàn", BoolField(payload, "accountGuardValid"));
@@ -414,12 +431,12 @@ void DrawStateStrip(const string payload, const int width, const string title, c
    const int x = 10;
    const int y = 220;
    const int w = width - 20;
-   Card(x, y, w, STATE_STRIP_HEIGHT, C'9,24,34', tone);
+   Card(x, y, w, STATE_STRIP_HEIGHT, UI_PANEL2, tone);
    int top_y = CenteredTextY(y + 4, 27, SECTION_FONT_SIZE);
    int bottom_y = CenteredTextY(y + 31, STATE_STRIP_HEIGHT - 35, BODY_FONT_SIZE);
    Text(x + 18, top_y, FitText(title, w * 2 / 3, SECTION_FONT_SIZE), tone, SECTION_FONT_SIZE);
-   TextRight(x + w - 18, top_y, FitText(StageVi(Field(payload, "stage")), w / 4, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
-   Text(x + 18, bottom_y, FitText("Khuyến nghị: " + ModeVi(Field(payload, "recommendedMode")), w - 36, BODY_FONT_SIZE), clrSilver, BODY_FONT_SIZE);
+   TextRight(x + w - 18, top_y, FitText(StageVi(Field(payload, "stage")), w / 4, BODY_FONT_SIZE), UI_TEXT, BODY_FONT_SIZE);
+   Text(x + 18, bottom_y, FitText("Khuyến nghị: " + ModeVi(Field(payload, "recommendedMode")), w - 36, BODY_FONT_SIZE), UI_MUTED, BODY_FONT_SIZE);
 }
 
 void DrawReasonRowCard(
@@ -432,9 +449,9 @@ void DrawReasonRowCard(
    const string fallback
 )
 {
-   Card(x, y, width, REASON_ROW_HEIGHT, C'8,24,34', C'0,72,102');
+   Card(x, y, width, REASON_ROW_HEIGHT, UI_PANEL2, UI_LINE);
    int label_width = ReasonLabelColumnWidth();
-   VerticalDivider(x + label_width, y + 10, y + REASON_ROW_HEIGHT - 10, C'90,110,122');
+   VerticalDivider(x + label_width, y + 10, y + REASON_ROW_HEIGHT - 10, UI_LINE);
 
    int label_y = CenteredTextY(y, REASON_ROW_HEIGHT, BODY_FONT_SIZE);
    Text(x + 14, label_y, FitText(label, label_width - 28, BODY_FONT_SIZE), tone, BODY_FONT_SIZE);
@@ -449,9 +466,9 @@ void DrawReasonRowCard(
    int line_count = line2 == "" ? 1 : 2;
    int block_height = line_count == 1 ? text_height : text_height * 2 + line_gap;
    int text_y = y + (int)MathMax(0, (REASON_ROW_HEIGHT - block_height) / 2);
-   Text(content_x, text_y, line1, clrWhite, BODY_FONT_SIZE);
+   Text(content_x, text_y, line1, UI_TEXT, BODY_FONT_SIZE);
    if(line2 != "")
-      Text(content_x, text_y + text_height + line_gap, line2, clrWhite, BODY_FONT_SIZE);
+      Text(content_x, text_y + text_height + line_gap, line2, UI_TEXT, BODY_FONT_SIZE);
 }
 
 int ReasonSummaryHeight(const string state)
@@ -465,8 +482,8 @@ void DrawReasonSummary(const string payload, const int width, const int y, const
    const int x = 10;
    const int w = width - 20;
    int h = ReasonSummaryHeight(state);
-   Card(x, y, w, h, C'7,21,30', C'0,72,102');
-   Text(x + 18, CenteredTextY(y + 4, 28, SECTION_FONT_SIZE), "LÝ DO QUYẾT ĐỊNH", clrAqua, SECTION_FONT_SIZE);
+   Card(x, y, w, h, UI_PANEL, UI_LINE);
+   Text(x + 18, CenteredTextY(y + 4, 28, SECTION_FONT_SIZE), "LÝ DO QUYẾT ĐỊNH", UI_MUTED, SECTION_FONT_SIZE);
 
    int row_x = x + 10;
    int row_w = w - 20;
@@ -474,21 +491,21 @@ void DrawReasonSummary(const string payload, const int width, const int y, const
 
    if(state == "WAITING")
    {
-      DrawReasonRowCard(row_x, row_y, row_w, "AUTO/REGIME", Field(payload, "autoReason1"), clrOrange, "AUTO chưa có dữ liệu chọn strategy.");
-      DrawReasonRowCard(row_x, row_y + REASON_ROW_HEIGHT + REASON_ROW_GAP, row_w, "KẾT LUẬN", Field(payload, "waitReason1"), clrGold, "Bot đang chờ setup hợp lệ.");
+      DrawReasonRowCard(row_x, row_y, row_w, "AUTO/REGIME", Field(payload, "autoReason1"), UI_WARN, "AUTO chưa có dữ liệu chọn strategy.");
+      DrawReasonRowCard(row_x, row_y + REASON_ROW_HEIGHT + REASON_ROW_GAP, row_w, "KẾT LUẬN", Field(payload, "waitReason1"), UI_GOLD, "Bot đang chờ setup hợp lệ.");
    }
    else if(state == "SETUP_READY")
    {
-      DrawReasonRowCard(row_x, row_y, row_w, "VÀO LỆNH", Field(payload, "entryReason1"), clrLimeGreen, "Setup đã được duyệt.");
-      DrawReasonRowCard(row_x, row_y + REASON_ROW_HEIGHT + REASON_ROW_GAP, row_w, "AUTO/REGIME", Field(payload, "autoReason1"), clrOrange, "Không có dữ liệu AUTO/Regime.");
+      DrawReasonRowCard(row_x, row_y, row_w, "VÀO LỆNH", Field(payload, "entryReason1"), UI_OK, "Setup đã được duyệt.");
+      DrawReasonRowCard(row_x, row_y + REASON_ROW_HEIGHT + REASON_ROW_GAP, row_w, "AUTO/REGIME", Field(payload, "autoReason1"), UI_WARN, "Không có dữ liệu AUTO/Regime.");
    }
    else
    {
-      DrawReasonRowCard(row_x, row_y, row_w, "VÀO LỆNH", Field(payload, "entryReason1"), clrLimeGreen, "Không có dữ liệu lý do vào lệnh.");
-      DrawReasonRowCard(row_x, row_y + (REASON_ROW_HEIGHT + REASON_ROW_GAP), row_w, "GIỮ LỆNH", Field(payload, "holdReason1"), clrDeepSkyBlue, "Không có dữ liệu lý do giữ lệnh.");
-      DrawReasonRowCard(row_x, row_y + (REASON_ROW_HEIGHT + REASON_ROW_GAP) * 2, row_w, "DỜI SL", Field(payload, "stopMoveReason1"), clrLimeGreen, "Chưa phát sinh dời SL.");
-      DrawReasonRowCard(row_x, row_y + (REASON_ROW_HEIGHT + REASON_ROW_GAP) * 3, row_w, "CHỐT 1/3", Field(payload, "partialReason1"), clrAqua, "Chưa phát sinh partial.");
-      DrawReasonRowCard(row_x, row_y + (REASON_ROW_HEIGHT + REASON_ROW_GAP) * 4, row_w, "ĐÓNG TOÀN BỘ", Field(payload, "exitReason1"), clrGold, "Chưa phát sinh điều kiện đóng toàn bộ.");
+      DrawReasonRowCard(row_x, row_y, row_w, "VÀO LỆNH", Field(payload, "entryReason1"), UI_OK, "Không có dữ liệu lý do vào lệnh.");
+      DrawReasonRowCard(row_x, row_y + (REASON_ROW_HEIGHT + REASON_ROW_GAP), row_w, "GIỮ LỆNH", Field(payload, "holdReason1"), UI_INFO, "Không có dữ liệu lý do giữ lệnh.");
+      DrawReasonRowCard(row_x, row_y + (REASON_ROW_HEIGHT + REASON_ROW_GAP) * 2, row_w, "DỜI SL", Field(payload, "stopMoveReason1"), UI_OK, "Chưa phát sinh dời SL.");
+      DrawReasonRowCard(row_x, row_y + (REASON_ROW_HEIGHT + REASON_ROW_GAP) * 3, row_w, "CHỐT 1/3", Field(payload, "partialReason1"), UI_INFO, "Chưa phát sinh partial.");
+      DrawReasonRowCard(row_x, row_y + (REASON_ROW_HEIGHT + REASON_ROW_GAP) * 4, row_w, "ĐÓNG TOÀN BỘ", Field(payload, "exitReason1"), UI_GOLD, "Chưa phát sinh điều kiện đóng toàn bộ.");
    }
 }
 
@@ -498,7 +515,7 @@ void DrawTradePlan(const string payload, const int width, const bool managing)
    const int y = 220;
    const int w = width - 20;
    const int h = 88;
-   Card(x, y, w, h, C'6,18,27', C'0,72,102');
+   Card(x, y, w, h, UI_PANEL, UI_LINE);
 
    int gap = 10;
    int box_w = (w - 36 - gap * 2) / 3;
@@ -515,23 +532,23 @@ void DrawTradePlan(const string payload, const int width, const bool managing)
    string tp = position_unmanaged ? "n/a" : (EmptyValue(tp2) ? tp1 : tp2);
    string tp_label = position_unmanaged ? "TP KHÔNG QUẢN LÝ" : (strategy == "TREND" && EmptyValue(tp2) ? "MỐC +10" : "TP");
 
-   Card(bx1, y + 12, box_w, 64, C'7,25,38', C'0,110,155');
+   Card(bx1, y + 12, box_w, 64, UI_PANEL2, UI_INFO);
    Card(bx2, y + 12, box_w, 64, C'30,14,22', C'140,45,60');
-   Card(bx3, y + 12, box_w, 64, position_unmanaged ? C'35,18,18' : C'12,28,20', position_unmanaged ? clrTomato : C'45,140,70');
-   Text(bx1 + 12, CenteredTextY(y + 14, 22, BODY_FONT_SIZE), "ENTRY", clrDeepSkyBlue, BODY_FONT_SIZE);
-   Text(bx2 + 12, CenteredTextY(y + 14, 22, BODY_FONT_SIZE), "STOPLOSS", clrTomato, BODY_FONT_SIZE);
-   Text(bx3 + 12, CenteredTextY(y + 14, 22, BODY_FONT_SIZE), tp_label, position_unmanaged ? clrTomato : clrLimeGreen, BODY_FONT_SIZE);
-   Text(bx1 + 12, CenteredTextY(y + 38, 32, BODY_FONT_SIZE), FitText(Clean(entry), box_w - 24, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
-   Text(bx2 + 12, CenteredTextY(y + 38, 32, BODY_FONT_SIZE), FitText(Clean(stop), box_w - 24, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
-   Text(bx3 + 12, CenteredTextY(y + 38, 32, BODY_FONT_SIZE), FitText(Clean(tp), box_w - 24, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
+   Card(bx3, y + 12, box_w, 64, position_unmanaged ? C'35,18,18' : C'12,28,20', position_unmanaged ? UI_BAD : C'45,140,70');
+   Text(bx1 + 12, CenteredTextY(y + 14, 22, BODY_FONT_SIZE), "ENTRY", UI_INFO, BODY_FONT_SIZE);
+   Text(bx2 + 12, CenteredTextY(y + 14, 22, BODY_FONT_SIZE), "STOPLOSS", UI_BAD, BODY_FONT_SIZE);
+   Text(bx3 + 12, CenteredTextY(y + 14, 22, BODY_FONT_SIZE), tp_label, position_unmanaged ? UI_BAD : UI_OK, BODY_FONT_SIZE);
+   Text(bx1 + 12, CenteredTextY(y + 38, 32, BODY_FONT_SIZE), FitText(Clean(entry), box_w - 24, BODY_FONT_SIZE), UI_TEXT, BODY_FONT_SIZE);
+   Text(bx2 + 12, CenteredTextY(y + 38, 32, BODY_FONT_SIZE), FitText(Clean(stop), box_w - 24, BODY_FONT_SIZE), UI_TEXT, BODY_FONT_SIZE);
+   Text(bx3 + 12, CenteredTextY(y + 38, 32, BODY_FONT_SIZE), FitText(Clean(tp), box_w - 24, BODY_FONT_SIZE), UI_TEXT, BODY_FONT_SIZE);
 }
 
 color EntryCheckTone(const string status)
 {
-   if(status == "PASS") return clrLimeGreen;
-   if(status == "FAIL" || status == "BLOCKED") return clrTomato;
-   if(status == "WAIT") return clrGold;
-   return clrSilver;
+   if(status == "PASS") return UI_OK;
+   if(status == "FAIL" || status == "BLOCKED") return UI_BAD;
+   if(status == "WAIT") return UI_GOLD;
+   return UI_MUTED;
 }
 
 string EntryCheckStatusVi(const string status)
@@ -626,8 +643,8 @@ void DrawEntryCheckRow(
 {
    const int row_height = 30;
    int label_width = EntryStrategyColumnWidth();
-   Card(x, y, width, row_height, C'8,24,34', C'0,58,82');
-   VerticalDivider(x + label_width, y + 6, y + row_height - 6, C'75,100,115');
+   Card(x, y, width, row_height, UI_PANEL2, UI_LINE);
+   VerticalDivider(x + label_width, y + 6, y + row_height - 6, UI_LINE);
    int text_y = CenteredTextY(y, row_height, BODY_FONT_SIZE);
    Text(x + 10, text_y, FitText(strategy_label, label_width - 18, BODY_FONT_SIZE), strategy_tone, BODY_FONT_SIZE);
    Text(x + label_width + 14, text_y, FitText(CompactEntryCheckText(status, label, actual), width - label_width - 24, BODY_FONT_SIZE), EntryCheckTone(status), BODY_FONT_SIZE);
@@ -638,21 +655,21 @@ void DrawEntryCheckSummary(const string payload, const int width, const int y)
    const int x = 10;
    const int w = width - 20;
 
-   Card(x, y, w, ENTRY_CHECK_HEIGHT, C'7,21,30', C'0,72,102');
-   Text(x + 18, CenteredTextY(y + 4, 28, SECTION_FONT_SIZE), "ĐIỀU KIỆN CHẶN ENTRY", clrAqua, SECTION_FONT_SIZE);
+   Card(x, y, w, ENTRY_CHECK_HEIGHT, UI_PANEL, UI_LINE);
+   Text(x + 18, CenteredTextY(y + 4, 28, SECTION_FONT_SIZE), "ĐIỀU KIỆN CHẶN ENTRY", UI_MUTED, SECTION_FONT_SIZE);
 
    string trend_label, trend_status, trend_actual;
    string sideway_label, sideway_status, sideway_actual;
    FirstEntryBlocker(payload, "trend", trend_label, trend_status, trend_actual);
    FirstEntryBlocker(payload, "sideway", sideway_label, sideway_status, sideway_actual);
 
-   DrawEntryCheckRow(x + 10, y + 38, w - 20, "TREND", trend_status, trend_label, trend_actual, clrDeepSkyBlue);
-   DrawEntryCheckRow(x + 10, y + 74, w - 20, "SIDEWAY", sideway_status, sideway_label, sideway_actual, clrAqua);
+   DrawEntryCheckRow(x + 10, y + 38, w - 20, "TREND", trend_status, trend_label, trend_actual, UI_INFO);
+   DrawEntryCheckRow(x + 10, y + 74, w - 20, "SIDEWAY", sideway_status, sideway_label, sideway_actual, UI_GOLD);
 }
 
 void DrawWaiting(const string payload, const int width)
 {
-   DrawStateStrip(payload, width, "BOT ĐANG CHỜ TÍN HIỆU", clrOrange);
+   DrawStateStrip(payload, width, "BOT ĐANG CHỜ TÍN HIỆU", UI_WARN);
    DrawEntryCheckSummary(payload, width, 286);
    DrawReasonSummary(payload, width, 406, "WAITING");
 }
@@ -664,11 +681,11 @@ void DrawSetup(const string payload, const int width)
 
    const int x = 10;
    const int w = width - 20;
-   Card(x, 506, w, 72, C'7,21,30', C'0,72,102');
-   Text(x + 18, CenteredTextY(512, 24, BODY_FONT_SIZE), FitText("Chiến lược: " + ModeVi(Field(payload, "setupStrategy")), w / 2 - 30, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
-   TextRight(x + w - 18, CenteredTextY(512, 24, BODY_FONT_SIZE), FitText("Hướng: " + SideVi(Field(payload, "setupSide")), w / 2 - 30, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
-   Text(x + 18, CenteredTextY(542, 24, BODY_FONT_SIZE), FitText("Lot: " + Clean(Field(payload, "setupFinalLot")), w / 2 - 30, BODY_FONT_SIZE), clrSilver, BODY_FONT_SIZE);
-   TextRight(x + w - 18, CenteredTextY(542, 24, BODY_FONT_SIZE), FitText("Risk: " + Clean(Field(payload, "setupRiskPercent")) + "%", w / 2 - 30, BODY_FONT_SIZE), clrSilver, BODY_FONT_SIZE);
+   Card(x, 506, w, 72, UI_PANEL, UI_LINE);
+   Text(x + 18, CenteredTextY(512, 24, BODY_FONT_SIZE), FitText("Chiến lược: " + ModeVi(Field(payload, "setupStrategy")), w / 2 - 30, BODY_FONT_SIZE), UI_TEXT, BODY_FONT_SIZE);
+   TextRight(x + w - 18, CenteredTextY(512, 24, BODY_FONT_SIZE), FitText("Hướng: " + SideVi(Field(payload, "setupSide")), w / 2 - 30, BODY_FONT_SIZE), UI_TEXT, BODY_FONT_SIZE);
+   Text(x + 18, CenteredTextY(542, 24, BODY_FONT_SIZE), FitText("Lot: " + Clean(Field(payload, "setupFinalLot")), w / 2 - 30, BODY_FONT_SIZE), UI_MUTED, BODY_FONT_SIZE);
+   TextRight(x + w - 18, CenteredTextY(542, 24, BODY_FONT_SIZE), FitText("Risk: " + Clean(Field(payload, "setupRiskPercent")) + "%", w / 2 - 30, BODY_FONT_SIZE), UI_MUTED, BODY_FONT_SIZE);
 }
 
 void DrawManaging(const string payload, const int width)
@@ -680,7 +697,7 @@ void DrawManaging(const string payload, const int width)
    string position_state = Clean(Field(payload, "positionState"), "UNMANAGED");
    string position_count = Clean(Field(payload, "positionCount"), "?");
    bool position_unmanaged = position_state == "UNMANAGED";
-   color position_tone = position_unmanaged ? clrTomato : clrLimeGreen;
+   color position_tone = position_unmanaged ? UI_BAD : UI_OK;
    string position_title = position_unmanaged
       ? "CẢNH BÁO: " + position_count + " VỊ THẾ CHƯA ĐƯỢC QUẢN LÝ"
       : "ĐANG GIỮ LỆNH";
@@ -689,9 +706,9 @@ void DrawManaging(const string payload, const int width)
    int bottom_y = CenteredTextY(348, 24, BODY_FONT_SIZE);
    Text(x + 18, top_y, FitText(position_title, w / 2 - 30, SECTION_FONT_SIZE), position_tone, SECTION_FONT_SIZE);
    string pnl_label = position_unmanaged ? "P/L tham chiếu: " : "Lãi/lỗ: ";
-   TextRight(x + w - 18, top_y, FitText(pnl_label + Clean(Field(payload, "floatingPnlUsd")) + " USD", w / 2 - 30, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
-   Text(x + 18, bottom_y, FitText("Hướng: " + SideVi(Field(payload, "positionSide")) + " · Lot: " + Clean(Field(payload, "positionVolume")), w / 2 - 30, BODY_FONT_SIZE), clrSilver, BODY_FONT_SIZE);
-   TextRight(x + w - 18, bottom_y, FitText(Clean(Field(payload, "floatingPnlPercent")) + "%", w / 3, BODY_FONT_SIZE), clrSilver, BODY_FONT_SIZE);
+   TextRight(x + w - 18, top_y, FitText(pnl_label + Clean(Field(payload, "floatingPnlUsd")) + " USD", w / 2 - 30, BODY_FONT_SIZE), UI_TEXT, BODY_FONT_SIZE);
+   Text(x + 18, bottom_y, FitText("Hướng: " + SideVi(Field(payload, "positionSide")) + " · Lot: " + Clean(Field(payload, "positionVolume")), w / 2 - 30, BODY_FONT_SIZE), UI_MUTED, BODY_FONT_SIZE);
+   TextRight(x + w - 18, bottom_y, FitText(Clean(Field(payload, "floatingPnlPercent")) + "%", w / 3, BODY_FONT_SIZE), UI_MUTED, BODY_FONT_SIZE);
 
    DrawReasonSummary(payload, width, 388, "MANAGING");
 }
@@ -728,14 +745,14 @@ void RenderError(const string title, const string message)
    if(!EnsureCanvas(width, 250))
       return;
    BeginPanel(width, 250);
-   Card(10, 14, width - 20, 222, C'12,18,26', C'180,60,60');
-   Text(28, 30, "XAUUSD AI MASTER", clrDeepSkyBlue, TITLE_FONT_SIZE);
-   TextRight(width - 28, 32, LocalAccountMode() + " · CHỈ ĐỌC", clrSilver, BODY_FONT_SIZE);
-   Text(28, 74, title, clrTomato, SECTION_FONT_SIZE);
-   Text(28, 108, FitText(message, width - 56, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
-   Text(28, 148, "Cho phép WebRequest tới http://127.0.0.1:3711", clrSilver, BODY_FONT_SIZE);
-   Text(28, 178, "Kiểm tra API điều khiển và cầu nối MT5.", clrSilver, BODY_FONT_SIZE);
-   TextCenter(width / 2, 210, "ORDER PERMISSION = NONE", clrSilver, BODY_FONT_SIZE);
+   Card(10, 14, width - 20, 222, UI_PANEL, UI_BAD);
+   Text(28, 30, "XAUUSD AI MASTER", UI_GOLD, TITLE_FONT_SIZE);
+   TextRight(width - 28, 32, LocalAccountMode() + " · CHỈ ĐỌC", UI_MUTED, BODY_FONT_SIZE);
+   Text(28, 74, title, UI_BAD, SECTION_FONT_SIZE);
+   Text(28, 108, FitText(message, width - 56, BODY_FONT_SIZE), UI_TEXT, BODY_FONT_SIZE);
+   Text(28, 148, "Cho phép WebRequest tới http://127.0.0.1:3711", UI_MUTED, BODY_FONT_SIZE);
+   Text(28, 178, "Kiểm tra API điều khiển và cầu nối MT5.", UI_MUTED, BODY_FONT_SIZE);
+   TextCenter(width / 2, 210, "ORDER PERMISSION = NONE", UI_MUTED, BODY_FONT_SIZE);
    g_canvas.Update(true);
 }
 

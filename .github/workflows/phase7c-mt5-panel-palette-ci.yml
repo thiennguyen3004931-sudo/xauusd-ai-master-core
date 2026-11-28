@@ -1,0 +1,31 @@
+name: Phase7C MT5 panel industrial palette (No MT5)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mt5/XAUUSD_AI_Master_Decision_Panel.mq5'
+      - 'apps/web/src/ui/industrial-theme.ts'
+      - 'scripts/test-phase7c-mt5-panel-industrial-palette.mjs'
+      - '.github/workflows/phase7c-mt5-panel-palette-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  palette:
+    name: MT5 panel palette matches web, display only
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/test-phase7c-mt5-panel-industrial-palette.mjs
+      - run: node scripts/test-phase7c-web-mt5-sync-source.mjs
+      - run: node --test scripts/phase7c-mt5-unmanaged-diagnostic-details.test.mjs
