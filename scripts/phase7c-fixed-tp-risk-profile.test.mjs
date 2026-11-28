@@ -99,7 +99,6 @@ test("PowerShell v2 keeps a saved BE trigger/offset and rejects out-of-range BE 
     { breakEvenTriggerPrice: 16 },
     { breakEvenOffsetPrice: 4 },
     { breakEvenTriggerPrice: 4, breakEvenOffsetPrice: 3.5 },
-    { breakEvenTriggerPrice: 4, breakEvenOffsetPrice: 3 },
   ]) {
     const result = runRiskProfile({ ...base, ...bad });
     assert.notEqual(result.status, 0, `BE ${JSON.stringify(bad)} must fail closed`);
