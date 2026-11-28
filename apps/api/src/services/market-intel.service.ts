@@ -11,13 +11,16 @@ import {
   nearestLevels,
   isMtfEnabled,
   isRegimeLibraryEnabled,
+  managementPlan,
   renderScenarioCharts,
   type Bar,
   type FrameSummary,
+  type ManagementPlan,
   type NearLevel,
   type MarketClassification,
   type ScenarioResult,
 } from "@xauusd/market-intel";
+import { phase7CLotSettingsService } from "./phase7c-lot-settings.service.js";
 
 export type MarketIntelTimeframe = "M15" | "H1" | "H4";
 
@@ -33,6 +36,8 @@ export interface MarketIntelSnapshot {
   frames: { h4: FrameSummary | null; h1: FrameSummary | null; m15: FrameSummary | null } | null;
   /** Nearest H4 / H1 resistance above and support below the M15 close (null unless MTF is on). */
   levels: { resistance: NearLevel[]; support: NearLevel[] } | null;
+  /** Advisory stop / partial-close plan per scenario (same order as mtf.scenarios). Never an order. */
+  managementPlans: ManagementPlan[] | null;
   safety: { readOnly: true; advisoryOnly: true; orderMutation: false; runtimeMutation: false };
   /** Close time of the last M15 bar at generation time, and of the next one (the auto-refresh point). */
   lastM15CloseAt: number;
@@ -40,6 +45,23 @@ export interface MarketIntelSnapshot {
   /** True when this snapshot was rebuilt because the operator pressed "Cập nhật". */
   refreshed: boolean;
   error?: string;
+}
+
+/** BE rule and lot used to phrase the plan; read from saved lot settings, falling back to the bot defaults. */
+export interface ManagementContext { breakEvenTriggerPrice: number; breakEvenOffsetPrice: number; lot: number | null }
+export type ManagementContextLoader = () => ManagementContext;
+
+function defaultManagementContext(): ManagementContext {
+  try {
+    const state = phase7CLotSettingsService.getState() as Partial<{ trendFixedLot: number; breakEvenTriggerPrice: number; breakEvenOffsetPrice: number }>;
+    return {
+      breakEvenTriggerPrice: Number(state.breakEvenTriggerPrice ?? 6),
+      breakEvenOffsetPrice: Number(state.breakEvenOffsetPrice ?? 0),
+      lot: Number.isFinite(Number(state.trendFixedLot)) ? Number(state.trendFixedLot) : null,
+    };
+  } catch {
+    return { breakEvenTriggerPrice: 6, breakEvenOffsetPrice: 0, lot: null };
+  }
 }
 
 export type CandleLoader = (symbol: string, timeframe: MarketIntelTimeframe, count: number) => Promise<Bar[]>;
@@ -92,8 +114,9 @@ export const bridgeCandleLoader: CandleLoader = async (symbol, timeframe, count)
 
 export async function getMarketIntelSnapshot(
   symbol = "XAUUSD",
-  { env = process.env, loader = bridgeCandleLoader, now = Date.now(), useCache = true, refresh = false }: {
+  { env = process.env, loader = bridgeCandleLoader, now = Date.now(), useCache = true, refresh = false, management = defaultManagementContext }: {
     env?: Record<string, string | undefined>; loader?: CandleLoader; now?: number; useCache?: boolean; refresh?: boolean;
+    management?: ManagementContextLoader;
   } = {},
 ): Promise<MarketIntelSnapshot> {
   const enabled = { regimeLibrary: isRegimeLibraryEnabled(env), mtf: isMtfEnabled(env) };
@@ -101,7 +124,7 @@ export async function getMarketIntelSnapshot(
   const base: MarketIntelSnapshot = {
     enabled,
     versions: { regimeLibrary: REGIME_LIBRARY_VERSION, mtf: MTF_VERSION },
-    symbol, generatedAt: now, regime: null, mtf: null, charts: null, frames: null, levels: null, safety: SAFETY,
+    symbol, generatedAt: now, regime: null, mtf: null, charts: null, frames: null, levels: null, managementPlans: null, safety: SAFETY,
     lastM15CloseAt, nextM15CloseAt: lastM15CloseAt + M15_MS, refreshed: false,
   };
   if (!enabled.regimeLibrary && !enabled.mtf) return base;
@@ -124,6 +147,8 @@ export async function getMarketIntelSnapshot(
   if (enabled.mtf && m15.length > 0) {
     value.mtf = buildScenarios({ h4, h1, m15 });
     value.levels = nearestLevels(value.mtf);
+    const ctx = management();
+    value.managementPlans = value.mtf.scenarios.map((s) => managementPlan(s, { m15, ...ctx }));
     value.charts = renderScenarioCharts({ h4, h1, m15 }, value.mtf, { compact: true, theme: "dark" });
   }
   // If the bridge has not published the just-closed bar yet, do not pin the stale result for 15 minutes.
