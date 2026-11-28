@@ -10,6 +10,7 @@ on:
       - 'scripts/test-phase7c-counterfactual-intelligence-source.mjs'
       - 'scripts/test-phase7c-recommendation-intelligence-source.mjs'
       - 'scripts/test-phase7c-mobile-readonly-m1.mjs'
+      - 'scripts/test-phase7c-industrial-ui-source.mjs'
       - '.github/workflows/phase7c-lean-ui-ci.yml'
   workflow_dispatch:
 
@@ -34,3 +35,4 @@ jobs:
       - run: node scripts/test-phase7c-counterfactual-intelligence-source.mjs
       - run: node scripts/test-phase7c-recommendation-intelligence-source.mjs
       - run: node scripts/test-phase7c-mobile-readonly-m1.mjs
+      - run: node scripts/test-phase7c-industrial-ui-source.mjs

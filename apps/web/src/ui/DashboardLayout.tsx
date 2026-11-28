@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   AppBar,
+  BottomNavigation,
+  BottomNavigationAction,
   Box,
   Drawer,
   IconButton,
@@ -22,6 +24,8 @@ import MenuRounded from "@mui/icons-material/MenuRounded";
 import LockRounded from "@mui/icons-material/LockRounded";
 import { useMt5Telemetry } from "../hooks";
 import { StatusChip } from "./StatusChip";
+import { Phase7CStatusStrip } from "./Phase7CStatusStrip";
+import { tokens } from "./industrial-theme";
 
 const drawerWidth = 220;
 
@@ -66,12 +70,13 @@ function Navigation({ runtime, onNavigate }: { runtime: RuntimeLabel; onNavigate
             sx={{
               my: 0.35,
               px: 1.25,
-              borderRadius: 2,
+              borderRadius: 1,
               color: "text.secondary",
+              borderLeft: "3px solid transparent",
               "&.active": {
-                color: "text.primary",
-                backgroundColor: "rgba(233,185,73,.09)",
-                border: "1px solid rgba(233,185,73,.14)",
+                color: tokens.gold,
+                backgroundColor: "rgba(233,185,73,.08)",
+                borderLeftColor: tokens.gold,
               },
             }}
           >
@@ -81,7 +86,13 @@ function Navigation({ runtime, onNavigate }: { runtime: RuntimeLabel; onNavigate
         ))}
       </List>
 
-      <Box sx={{ mt: "auto", p: 1.6, borderRadius: 3, border: "1px solid rgba(148,163,184,.12)", bgcolor: "rgba(255,255,255,.02)" }}>
+      <Box className="hazard" sx={{ mt: "auto", mb: 1.2, p: 1.4, borderRadius: 1 }}>
+        <Typography variant="caption" fontWeight={900} sx={{ color: tokens.warn, display: "block" }}>⚠ CHƯA CÓ LỢI THẾ</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.4, lineHeight: 1.45 }}>
+          Backtest chưa đạt ngưỡng PF &gt; 1,20 ngoài mẫu. Chưa có bằng chứng sinh lời.
+        </Typography>
+      </Box>
+      <Box sx={{ p: 1.6, borderRadius: 1, border: `1px solid ${tokens.line2}`, bgcolor: tokens.panel }}>
         <Stack direction="row" spacing={0.8} alignItems="center">
           <LockRounded fontSize="small" color="primary" />
           <Typography variant="caption" fontWeight={900}>MT5 PANEL · CHỈ ĐỌC</Typography>
@@ -91,6 +102,37 @@ function Navigation({ runtime, onNavigate }: { runtime: RuntimeLabel; onNavigate
         </Typography>
       </Box>
     </Box>
+  );
+}
+
+/** Phone: thumb-reachable tab bar with the same four destinations as the sidebar. */
+function PhoneTabBar({ pathname }: { pathname: string }) {
+  const navigate = useNavigate();
+  const current = links.find(([href]) => pathname.startsWith(href))?.[0] ?? false;
+  return (
+    <BottomNavigation
+      value={current}
+      onChange={(_event, href: string) => navigate(href)}
+      showLabels
+      sx={{
+        display: { xs: "flex", lg: "none" },
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: (theme) => theme.zIndex.appBar,
+        height: 62,
+        pb: "env(safe-area-inset-bottom)",
+        bgcolor: tokens.bgRaised,
+        borderTop: `1px solid ${tokens.line2}`,
+        "& .MuiBottomNavigationAction-root": { minWidth: 0, color: tokens.muted },
+        "& .Mui-selected": { color: tokens.gold },
+      }}
+    >
+      {links.map(([href, label, Icon]) => (
+        <BottomNavigationAction key={href} value={href} label={label} icon={<Icon fontSize="small" />} />
+      ))}
+    </BottomNavigation>
   );
 }
 
@@ -131,8 +173,8 @@ export function DashboardLayout() {
           display: { xs: "none", lg: "block" },
           "& .MuiDrawer-paper": {
             width: drawerWidth,
-            bgcolor: "#08111f",
-            borderRightColor: "rgba(148,163,184,.12)",
+            bgcolor: tokens.bgRaised,
+            borderRightColor: tokens.line2,
           },
         }}
       >
@@ -143,7 +185,7 @@ export function DashboardLayout() {
         onClose={() => setMobileOpen(false)}
         sx={{
           display: { xs: "block", lg: "none" },
-          "& .MuiDrawer-paper": { width: drawerWidth, bgcolor: "#08111f" },
+          "& .MuiDrawer-paper": { width: drawerWidth, bgcolor: tokens.bgRaised },
         }}
       >
         <Navigation runtime={runtime} onNavigate={() => setMobileOpen(false)} />
@@ -154,9 +196,9 @@ export function DashboardLayout() {
           position="sticky"
           elevation={0}
           sx={{
-            bgcolor: "rgba(6,11,20,.88)",
+            bgcolor: "rgba(10,13,18,.9)",
             backdropFilter: "blur(14px)",
-            borderBottom: "1px solid rgba(148,163,184,.10)",
+            borderBottom: `1px solid ${tokens.line2}`,
           }}
         >
           <Toolbar sx={{ minHeight: { xs: 58, md: 62 } }}>
@@ -167,10 +209,14 @@ export function DashboardLayout() {
             </Box>
             <StatusChip value={runtime} />
           </Toolbar>
+          {/* Desktop: the strip stays pinned with the header. Phone: it scrolls with the page (below). */}
+          <Box sx={{ display: { xs: "none", md: "block" } }}><Phase7CStatusStrip /></Box>
         </AppBar>
-        <Box component="main" sx={{ p: { xs: 1.5, md: 2.2 }, maxWidth: 1780, mx: "auto", width: "100%" }}>
+        <Box sx={{ display: { xs: "block", md: "none" }, pt: 1.2 }}><Phase7CStatusStrip /></Box>
+        <Box component="main" sx={{ p: { xs: 1.5, md: 2.2 }, pb: { xs: 10, lg: 2.2 }, maxWidth: 1780, mx: "auto", width: "100%" }}>
           <Outlet />
         </Box>
+        <PhoneTabBar pathname={location.pathname} />
       </Box>
     </Box>
   );
