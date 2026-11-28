@@ -112,3 +112,35 @@ test("bridge lag: a snapshot built before the just-closed M15 bar is published i
   await getMarketIntelSnapshot("XAUUSD", { env, loader, now: Date.UTC(2026, 2, 2, 0, 32) });
   assert.ok(calls > n);
 });
+
+test("MTF on: one advisory management plan per scenario, using the saved BE rule and lot", async () => {
+  const env = { ZIQ_MARKET_INTEL_MTF_ENABLED: "true" };
+  const management = () => ({ breakEvenTriggerPrice: 8, breakEvenOffsetPrice: 1, lot: 0.12 });
+  const s = await getMarketIntelSnapshot("XAUUSD", { env, loader: synthetic, useCache: false, management });
+  assert.ok(s.mtf);
+  assert.ok(s.managementPlans);
+  assert.ok(s.mtf.scenarios.length > 0, "synthetic data must produce at least one scenario");
+  assert.equal(s.managementPlans.length, s.mtf.scenarios.length);
+  s.managementPlans.forEach((plan, i) => {
+    const sc = s.mtf!.scenarios[i];
+    assert.equal(plan.direction, sc.direction);
+    const sign = sc.direction === "BUY" ? 1 : -1;
+    const be = plan.stopSteps.find((st) => st.id === "BREAK_EVEN");
+    if (Math.abs(sc.takeProfit1 - sc.entry) > 8) {
+      assert.ok(be, "BE step expected when TP1 is beyond the BE trigger");
+      assert.equal(be.triggerPrice, Math.round((sc.entry + sign * 8) * 100) / 100);
+      assert.equal(be.newStop, Math.round((sc.entry + sign * 1) * 100) / 100);
+    } else {
+      // TP1 nearer than the BE trigger: the TP1 lock already sits beyond entry + offset.
+      assert.equal(plan.stopSteps[0].id, "AFTER_TP1");
+      assert.ok(sign * ((plan.stopSteps[0].newStop ?? 0) - (sc.entry + sign * 1)) > 0);
+    }
+    assert.ok(Math.abs(plan.partials.reduce((a, p) => a + (p.lot ?? 0), 0) - 0.12) < 1e-9);
+    assert.deepEqual(plan.safety, { readOnly: true, advisoryOnly: true, orderMutation: false, runtimeMutation: false });
+  });
+});
+
+test("MTF off: no management plans", async () => {
+  const s = await getMarketIntelSnapshot("XAUUSD", { env: { ZIQ_MARKET_INTEL_REGIME_LIBRARY_ENABLED: "true" }, loader: synthetic, useCache: false });
+  assert.equal(s.managementPlans, null);
+});

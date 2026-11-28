@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Box, Button, Card, CardContent, Chip, Divider, Grid, Stack, Tab, Tabs, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import { getMarketIntelSnapshot } from "../api";
-import type { MarketIntelFrame, MarketIntelLevel, MarketIntelScenario, MarketIntelSnapshot, MarketIntelState } from "../market-intel-types";
+import type { MarketIntelFrame, MarketIntelLevel, MarketIntelManagementPlan, MarketIntelScenario, MarketIntelSnapshot, MarketIntelState } from "../market-intel-types";
 import { ErrorState, LoadingState } from "../ui/PageState";
 import { MarketIntelJournalCard } from "./MarketIntelJournalCard";
 import { MarketIntelProposalsCard } from "./MarketIntelProposalsCard";
@@ -156,7 +156,44 @@ function reasonsOf(s: MarketIntelScenario): { pro: string[]; con: string[] } {
   return { pro, con };
 }
 
-function ScenarioCard({ s }: { s: MarketIntelScenario }) {
+const FRACTION_LABEL = (f: number) => (Math.abs(f - 1 / 3) < 1e-6 ? "1/3" : Math.abs(f - 1 / 2) < 1e-6 ? "1/2" : `${Math.round(f * 100)}%`);
+
+/** "Gồng lệnh": where to move the stop and how much to close at each target. Advisory only. */
+function ManagementPlanBox({ plan }: { plan: MarketIntelManagementPlan }) {
+  return (
+    <Box sx={{ mt: 1.5, p: 1.2, border: "1px dashed", borderColor: "divider", borderRadius: 1 }}>
+      <Typography variant="body2" fontWeight={900}>Gợi ý quản lý lệnh (gồng trend)</Typography>
+      <Typography variant="caption" fontWeight={800} color="text.secondary" display="block" sx={{ mt: 0.8 }}>CHỐT VOL</Typography>
+      <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+        {plan.partials.map((p) => (
+          <Typography key={p.id} component="li" variant="body2">
+            <b>{FRACTION_LABEL(p.fraction)}{p.lot !== null ? ` (${p.lot.toFixed(2)} lot)` : ""}</b> ở {p.label} <Box component="span" sx={mono}>{num(p.price)}</Box> · {p.reason}
+          </Typography>
+        ))}
+      </Box>
+      <Typography variant="caption" fontWeight={800} color="text.secondary" display="block" sx={{ mt: 0.8 }}>DỜI SL (CHỈ SIẾT)</Typography>
+      <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+        {plan.stopSteps.map((st) => (
+          <Typography key={st.id} component="li" variant="body2">
+            <b>{st.when}</b>
+            {st.triggerPrice !== null ? <> (<Box component="span" sx={mono}>{num(st.triggerPrice)}</Box>)</> : null}
+            {st.newStop !== null ? <> → SL <Box component="span" sx={{ ...mono, fontWeight: 800 }}>{num(st.newStop)}</Box></> : null}
+            {" · "}{st.reason}
+            {st.id === "TRAIL_M15_SWING" ? (
+              st.currentCandidate != null
+                ? <> Hiện tại: {plan.direction === "BUY" ? "đáy" : "đỉnh"} M15 <Box component="span" sx={mono}>{num(st.swingPrice ?? 0)}</Box> → SL gợi ý <Box component="span" sx={{ ...mono, fontWeight: 800 }}>{num(st.currentCandidate)}</Box>.</>
+                : <> Hiện chưa có {plan.direction === "BUY" ? "đáy" : "đỉnh"} M15 nào đủ xa entry để dời.</>
+            ) : null}
+          </Typography>
+        ))}
+      </Box>
+      <Typography variant="body2" sx={{ mt: 0.8 }}><b>Thoát phần còn lại:</b> {plan.exit.text}</Typography>
+      {plan.notes.map((n) => <Typography key={n} variant="caption" color="text.secondary" display="block" sx={{ mt: 0.4 }}>{n}</Typography>)}
+    </Box>
+  );
+}
+
+function ScenarioCard({ s, plan }: { s: MarketIntelScenario; plan?: MarketIntelManagementPlan }) {
   const buy = s.direction === "BUY";
   const m15 = M15_STATUS[s.m15.status] ?? { label: s.m15.status, color: "default" as const };
   const { pro, con } = reasonsOf(s);
@@ -201,6 +238,7 @@ function ScenarioCard({ s }: { s: MarketIntelScenario }) {
           </>
         )}
         <Typography variant="body2" sx={{ mt: 1 }}><b>Huỷ kịch bản:</b> {s.invalidation.text}</Typography>
+        {plan ? <ManagementPlanBox plan={plan} /> : null}
         <Divider sx={{ my: 1 }} />
         <Typography variant="caption" color="text.secondary" display="block">
           Tham khảo, không phải lệnh. Điểm là điểm theo luật cố định, không phải xác suất. {s.botStopRule.withinRule ? s.botStopRule.note : ""}
@@ -228,7 +266,7 @@ function ScenariosSection({ snapshot }: { snapshot: MarketIntelSnapshot }) {
           <Alert severity="info" sx={{ mt: 1 }}>Chưa có đề xuất: thị trường chưa rõ hướng hoặc chưa có vùng vào phù hợp.</Alert>
         ) : (
           <Grid container spacing={1.5} sx={{ mt: 0.5 }}>
-            {mtf.scenarios.map((s) => <Grid key={s.role} size={{ xs: 12, lg: 6 }}><ScenarioCard s={s} /></Grid>)}
+            {mtf.scenarios.map((s, i) => <Grid key={s.role} size={{ xs: 12, lg: 6 }}><ScenarioCard s={s} plan={snapshot.managementPlans?.[i]} /></Grid>)}
           </Grid>
         )}
       </CardContent>

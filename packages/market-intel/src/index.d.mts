@@ -48,6 +48,22 @@ export interface FrameSummary {
 export function frameSummaries(frames: { h4?: Bar[]; h1?: Bar[]; m15?: Bar[] }, asOf?: number): { h4: FrameSummary | null; h1: FrameSummary | null; m15: FrameSummary | null };
 export function lastClosedIndex(bars: Bar[], asOf: number): number;
 
+// Advisory trade management: stop steps and partial closes for a scenario. Never an order.
+export interface ManagementPartial { id: "PLUS_10" | "TP1" | "TP2"; label: string; price: number; fraction: number; lot: number | null; reason: string }
+export interface ManagementStopStep {
+  id: "BREAK_EVEN" | "AFTER_TP1" | "TRAIL_M15_SWING"; when: string; triggerPrice: number | null; newStop: number | null;
+  swingPrice?: number | null; currentCandidate?: number | null; reason: string;
+}
+export interface ManagementPlan {
+  version: string; role: "PRIMARY" | "ALTERNATE"; direction: "BUY" | "SELL"; entry: number; initialStop: number;
+  partials: ManagementPartial[]; stopSteps: ManagementStopStep[]; exit: { text: string }; notes: string[]; safety: Safety;
+}
+export const MANAGEMENT_PLAN_VERSION: string;
+export function managementPlan(
+  scenario: Pick<Scenario, "role" | "direction" | "entry" | "stopLoss" | "takeProfit1" | "takeProfit2" | "invalidation">,
+  options?: { m15?: Bar[]; breakEvenTriggerPrice?: number; breakEvenOffsetPrice?: number; lot?: number | null; swingBars?: number },
+): ManagementPlan;
+
 // Feature 1 (C1): trade journal statistics.
 export interface PerformanceStats {
   trades: number; wins: number; losses: number; breakeven: number; winRatePct: number | null;

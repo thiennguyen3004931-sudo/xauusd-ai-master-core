@@ -19,6 +19,22 @@ export interface MarketIntelScenario {
   confidence: number; confidenceBreakdown: { factor: string; points: number }[]; confidenceNote: string;
   botStopRule: { stopDistance: number; withinRule: boolean; note: string };
 }
+/** Advisory stop / partial-close plan for one scenario (never an order). */
+export interface MarketIntelManagementPlan {
+  version: string;
+  role: "PRIMARY" | "ALTERNATE";
+  direction: "BUY" | "SELL";
+  entry: number;
+  initialStop: number;
+  partials: { id: "PLUS_10" | "TP1" | "TP2"; label: string; price: number; fraction: number; lot: number | null; reason: string }[];
+  stopSteps: {
+    id: "BREAK_EVEN" | "AFTER_TP1" | "TRAIL_M15_SWING"; when: string; triggerPrice: number | null; newStop: number | null;
+    swingPrice?: number | null; currentCandidate?: number | null; reason: string;
+  }[];
+  exit: { text: string };
+  notes: string[];
+}
+
 export interface MarketIntelSnapshot {
   enabled: { regimeLibrary: boolean; mtf: boolean };
   versions: { regimeLibrary: string; mtf: string };
@@ -38,6 +54,8 @@ export interface MarketIntelSnapshot {
   frames?: { h4: MarketIntelFrame | null; h1: MarketIntelFrame | null; m15: MarketIntelFrame | null } | null;
   /** Nearest H4 / H1 resistance above and support below the M15 close (absent on an older API). */
   levels?: { resistance: MarketIntelLevel[]; support: MarketIntelLevel[] } | null;
+  /** Advisory management plan per scenario, same order as mtf.scenarios (absent on an older API). */
+  managementPlans?: MarketIntelManagementPlan[] | null;
   lastM15CloseAt: number;
   nextM15CloseAt: number;
   refreshed: boolean;
