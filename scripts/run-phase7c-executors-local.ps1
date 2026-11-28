@@ -69,6 +69,10 @@ if (-not [System.IO.Path]::IsPathRooted($WorkDir)) { $WorkDir = Join-Path $Proje
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 $WorkDir = (Resolve-Path $WorkDir).Path
 $LotSettingsPath = Join-Path $WorkDir "phase7c-lot-settings.json"
+# BE defaults to whatever the environment already says (frozen baseline 6/0 when unset);
+# a saved lot-settings file (web "Lot / Fixed TP / BE" card) overrides it below.
+$BreakEvenTriggerPrice = if ($env:ZIQ_PHASE7C_BREAK_EVEN_TRIGGER_PRICE) { [double]$env:ZIQ_PHASE7C_BREAK_EVEN_TRIGGER_PRICE } else { 6.0 }
+$BreakEvenOffsetPrice = if ($env:ZIQ_PHASE7C_BREAK_EVEN_OFFSET_PRICE) { [double]$env:ZIQ_PHASE7C_BREAK_EVEN_OFFSET_PRICE } else { 0.0 }
 if (Test-Path $LotSettingsPath) {
   try {
     $lotSettings = Get-Content -LiteralPath $LotSettingsPath -Raw | ConvertFrom-Json
@@ -80,6 +84,10 @@ if (Test-Path $LotSettingsPath) {
     $SidewayMaxLot = [double]$runtimeSettings.sidewayMaxLot
     $SidewayFixedTpEnabled = [bool]$runtimeSettings.sidewayFixedTpEnabled
     $SidewayFixedTpDistance = [double]$runtimeSettings.sidewayFixedTpDistance
+    if ($null -ne $lotSettings.PSObject.Properties["breakEvenTriggerPrice"]) {
+      $BreakEvenTriggerPrice = [double]$runtimeSettings.breakEvenTriggerPrice
+      $BreakEvenOffsetPrice = [double]$runtimeSettings.breakEvenOffsetPrice
+    }
   } catch {
     throw "Phase 7C lot settings are invalid at $LotSettingsPath. $($_.Exception.Message)"
   }
@@ -344,6 +352,11 @@ try {
   Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_SUPERVISOR=DEGRADED|PID=$PID"
 }
 
+# TREND and SIDEWAY inherit these; each controller validates them again at start (fail closed)
+# and snapshots them per new position (NEW_POSITIONS_ONLY). Open positions keep their own snapshot.
+$env:ZIQ_PHASE7C_BREAK_EVEN_TRIGGER_PRICE = $BreakEvenTriggerPrice.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+$env:ZIQ_PHASE7C_BREAK_EVEN_OFFSET_PRICE = $BreakEvenOffsetPrice.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+
 $common = @("-NoProfile", "-ExecutionPolicy", "Bypass")
 $trendArgs = @(
   "-File", ('"{0}"' -f $TrendLauncher),
@@ -413,6 +426,7 @@ Write-Host "PHASE7C_SIDEWAY_RISK_PERCENT=$SidewayRiskPercent"
 Write-Host "PHASE7C_SIDEWAY_MAX_LOT=$SidewayMaxLot"
 Write-Host "PHASE7C_SIDEWAY_FIXED_TP_ENABLED=$SidewayFixedTpEnabled"
 Write-Host "PHASE7C_SIDEWAY_FIXED_TP_DISTANCE=$SidewayFixedTpDistance"
+Write-Host "PHASE7C_BREAK_EVEN=TRIGGER_$BreakEvenTriggerPrice|OFFSET_$BreakEvenOffsetPrice|APPLY=NEW_POSITIONS_ONLY"
 
 function Write-ActiveLotSettings {
   $activeLotSettings = [pscustomobject]@{
@@ -425,6 +439,8 @@ function Write-ActiveLotSettings {
     trendFixedTpDistance = $TrendFixedTpDistance
     sidewayFixedTpEnabled = $SidewayFixedTpEnabled
     sidewayFixedTpDistance = $SidewayFixedTpDistance
+    breakEvenTriggerPrice = $BreakEvenTriggerPrice
+    breakEvenOffsetPrice = $BreakEvenOffsetPrice
     armed = $Armed.IsPresent
     supervisorPid = $PID
     appliedAt = [DateTimeOffset]::UtcNow.ToString("o")

@@ -107,23 +107,40 @@ export function Phase7CControlCenterCompactSection({
   const configuredTrendFixedTpDistance = lotSettings.data?.state.trendFixedTpDistance ?? 0;
   const configuredSidewayFixedTpEnabled = lotSettings.data?.state.sidewayFixedTpEnabled ?? false;
   const configuredSidewayFixedTpDistance = lotSettings.data?.state.sidewayFixedTpDistance ?? 0;
+  // Older API builds omit BE: show the frozen baseline (+6 -> entry).
+  const configuredBreakEvenTrigger = lotSettings.data?.state.breakEvenTriggerPrice ?? 6;
+  const configuredBreakEvenOffset = lotSettings.data?.state.breakEvenOffsetPrice ?? 0;
 
   const [fixedTpDraft, setFixedTpDraft] = useState<{
     trendFixedTpEnabled: boolean;
     trendFixedTpDistance: number;
     sidewayFixedTpEnabled: boolean;
     sidewayFixedTpDistance: number;
+    breakEvenTriggerPrice: number;
+    breakEvenOffsetPrice: number;
   } | null>(null);
   const trendFixedTpEnabled = fixedTpDraft?.trendFixedTpEnabled ?? configuredTrendFixedTpEnabled;
   const trendFixedTpDistance = fixedTpDraft?.trendFixedTpDistance ?? configuredTrendFixedTpDistance;
   const sidewayFixedTpEnabled = fixedTpDraft?.sidewayFixedTpEnabled ?? configuredSidewayFixedTpEnabled;
   const sidewayFixedTpDistance = fixedTpDraft?.sidewayFixedTpDistance ?? configuredSidewayFixedTpDistance;
+  const breakEvenTriggerPrice = fixedTpDraft?.breakEvenTriggerPrice ?? configuredBreakEvenTrigger;
+  const breakEvenOffsetPrice = fixedTpDraft?.breakEvenOffsetPrice ?? configuredBreakEvenOffset;
+  const breakEvenError =
+    !Number.isFinite(breakEvenTriggerPrice) || breakEvenTriggerPrice < 4 || breakEvenTriggerPrice > 15
+      ? "BE kích hoạt phải trong 4–15 giá."
+      : !Number.isFinite(breakEvenOffsetPrice) || breakEvenOffsetPrice < 0 || breakEvenOffsetPrice > 3
+        ? "Offset phải trong 0–3 giá."
+        : breakEvenOffsetPrice >= breakEvenTriggerPrice
+          ? "Offset phải nhỏ hơn mốc kích hoạt."
+          : null;
   const updateFixedTpDraft = (patch: Partial<NonNullable<typeof fixedTpDraft>>) => {
     setFixedTpDraft((current) => ({
       trendFixedTpEnabled: current?.trendFixedTpEnabled ?? configuredTrendFixedTpEnabled,
       trendFixedTpDistance: current?.trendFixedTpDistance ?? configuredTrendFixedTpDistance,
       sidewayFixedTpEnabled: current?.sidewayFixedTpEnabled ?? configuredSidewayFixedTpEnabled,
       sidewayFixedTpDistance: current?.sidewayFixedTpDistance ?? configuredSidewayFixedTpDistance,
+      breakEvenTriggerPrice: current?.breakEvenTriggerPrice ?? configuredBreakEvenTrigger,
+      breakEvenOffsetPrice: current?.breakEvenOffsetPrice ?? configuredBreakEvenOffset,
       ...patch,
     }));
   };
@@ -269,7 +286,7 @@ export function Phase7CControlCenterCompactSection({
               <Stack spacing={1.3}>
                 <Stack direction="row" justifyContent="space-between" gap={1} alignItems="center">
                   <Box>
-                    <Typography variant="h6" fontWeight={950}>Lot / Fixed TP</Typography>
+                    <Typography variant="h6" fontWeight={950}>Lot / Fixed TP / BE</Typography>
                     <Typography variant="caption" color="text.secondary">
                       Chỉnh Fixed TP ngay tại Trung tâm điều khiển; Lot/Risk được gửi lại nguyên giá trị canonical hiện hành.
                     </Typography>
@@ -319,12 +336,46 @@ export function Phase7CControlCenterCompactSection({
                       />
                     </Box>
                   </Grid>
+                  <Grid size={{ xs: 12 }}>
+                    <Box sx={{ p: 1.2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+                      <Typography variant="subtitle2" fontWeight={900}>Hoà vốn (BE) · TREND, SIDEWAY, SEMI</Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                        Khi lời đạt mốc kích hoạt, SL dời về entry + offset (chỉ siết). Mặc định +6 → entry.
+                      </Typography>
+                      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2}>
+                        <TextField
+                          fullWidth
+                          size="small"
+                          type="number"
+                          label="BE kích hoạt (giá)"
+                          value={breakEvenTriggerPrice}
+                          onChange={(event) => updateFixedTpDraft({ breakEvenTriggerPrice: Number(event.target.value) })}
+                          slotProps={{ htmlInput: { min: 4, max: 15, step: 0.5 } }}
+                          helperText="4–15 giá"
+                        />
+                        <TextField
+                          fullWidth
+                          size="small"
+                          type="number"
+                          label="SL dời về entry + (giá)"
+                          value={breakEvenOffsetPrice}
+                          onChange={(event) => updateFixedTpDraft({ breakEvenOffsetPrice: Number(event.target.value) })}
+                          slotProps={{ htmlInput: { min: 0, max: 3, step: 0.5 } }}
+                          helperText="0–3 giá, nhỏ hơn mốc kích hoạt"
+                        />
+                      </Stack>
+                      {breakEvenError ? <Alert severity="error" sx={{ mt: 1, py: 0.2 }}>{breakEvenError}</Alert> : null}
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.8 }}>
+                        Chỉ áp dụng cho lệnh mới. Lệnh đang mở giữ mốc BE lúc vào lệnh. Chưa có backtest nào cho thấy mốc khác +6 tốt hơn rõ rệt.
+                      </Typography>
+                    </Box>
+                  </Grid>
                 </Grid>
 
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
                   <Button
                     variant="contained"
-                    disabled={!canChangeFixedTp || saveLotSettings.isPending || !lotSettings.data}
+                    disabled={!canChangeFixedTp || saveLotSettings.isPending || !lotSettings.data || breakEvenError !== null}
                     onClick={() => saveLotSettings.mutate({
                       trendFixedLot: configuredTrendLot,
                       sidewayRiskPercent: configuredSidewayRisk,
@@ -333,6 +384,8 @@ export function Phase7CControlCenterCompactSection({
                       trendFixedTpDistance,
                       sidewayFixedTpEnabled,
                       sidewayFixedTpDistance,
+                      breakEvenTriggerPrice: breakEvenTriggerPrice,
+                      breakEvenOffsetPrice: breakEvenOffsetPrice,
                     })}
                     sx={{ fontWeight: 950 }}
                   >

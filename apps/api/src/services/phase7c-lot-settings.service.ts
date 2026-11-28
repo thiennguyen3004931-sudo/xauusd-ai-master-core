@@ -4,6 +4,15 @@ import {
   getPhase7CAccountModeState,
   type Phase7CAccountMode,
 } from "./phase7c-account-mode.service.js";
+import {
+  BREAK_EVEN_OFFSET_MAX_PRICE,
+  BREAK_EVEN_OFFSET_MIN_PRICE,
+  BREAK_EVEN_TRIGGER_MAX_PRICE,
+  BREAK_EVEN_TRIGGER_MIN_PRICE,
+  DEFAULT_BREAK_EVEN_OFFSET_PRICE,
+  DEFAULT_BREAK_EVEN_TRIGGER_PRICE,
+  validateBreakEvenConfig,
+} from "../../../../scripts/phase7c-break-even-config.mjs";
 
 export interface Phase7CLotSettingsState {
   version: 2;
@@ -14,6 +23,8 @@ export interface Phase7CLotSettingsState {
   trendFixedTpDistance: number;
   sidewayFixedTpEnabled: boolean;
   sidewayFixedTpDistance: number;
+  breakEvenTriggerPrice: number;
+  breakEvenOffsetPrice: number;
   updatedAt: string;
   updatedBy: string;
 }
@@ -28,6 +39,8 @@ export interface Phase7CActiveLotSettings {
   trendFixedTpDistance: number;
   sidewayFixedTpEnabled: boolean;
   sidewayFixedTpDistance: number;
+  breakEvenTriggerPrice: number;
+  breakEvenOffsetPrice: number;
   armed: boolean;
   supervisorPid: number;
   appliedAt: string;
@@ -41,6 +54,9 @@ export interface Phase7CLotSettingsInput {
   trendFixedTpDistance?: number;
   sidewayFixedTpEnabled?: boolean;
   sidewayFixedTpDistance?: number;
+  /** Omitted = frozen baseline (+6 -> entry). Optional so v2 files and old clients stay valid. */
+  breakEvenTriggerPrice?: number;
+  breakEvenOffsetPrice?: number;
 }
 
 export interface Phase7CNormalizedLotSettings {
@@ -51,6 +67,27 @@ export interface Phase7CNormalizedLotSettings {
   trendFixedTpDistance: number;
   sidewayFixedTpEnabled: boolean;
   sidewayFixedTpDistance: number;
+  breakEvenTriggerPrice: number;
+  breakEvenOffsetPrice: number;
+}
+
+export const PHASE7C_BREAK_EVEN_LIMITS = {
+  defaultTriggerPrice: DEFAULT_BREAK_EVEN_TRIGGER_PRICE,
+  defaultOffsetPrice: DEFAULT_BREAK_EVEN_OFFSET_PRICE,
+  minTriggerPrice: BREAK_EVEN_TRIGGER_MIN_PRICE,
+  maxTriggerPrice: BREAK_EVEN_TRIGGER_MAX_PRICE,
+  minOffsetPrice: BREAK_EVEN_OFFSET_MIN_PRICE,
+  maxOffsetPrice: BREAK_EVEN_OFFSET_MAX_PRICE,
+  appliesTo: "NEW_POSITIONS_ONLY",
+} as const;
+
+function normalizeBreakEven(triggerValue: unknown, offsetValue: unknown): { trigger: number; offset: number } {
+  const empty = (v: unknown) => v === undefined || v === null || v === "";
+  const trigger = empty(triggerValue) ? DEFAULT_BREAK_EVEN_TRIGGER_PRICE : Number(triggerValue);
+  const offset = empty(offsetValue) ? DEFAULT_BREAK_EVEN_OFFSET_PRICE : Number(offsetValue);
+  const validation = validateBreakEvenConfig(trigger, offset);
+  if (!validation.valid) throw new Error(validation.reason);
+  return { trigger: round(validation.breakEvenTriggerPrice, 2), offset: round(validation.breakEvenOffsetPrice, 2) };
 }
 
 export const PHASE7C_LOT_LIMITS = {
@@ -80,6 +117,8 @@ function defaultState(): Phase7CLotSettingsState {
     trendFixedTpDistance: 0,
     sidewayFixedTpEnabled: false,
     sidewayFixedTpDistance: 0,
+    breakEvenTriggerPrice: DEFAULT_BREAK_EVEN_TRIGGER_PRICE,
+    breakEvenOffsetPrice: DEFAULT_BREAK_EVEN_OFFSET_PRICE,
     updatedAt: new Date(0).toISOString(),
     updatedBy: "safe-default",
   };
@@ -156,6 +195,7 @@ export function validatePhase7CLotSettings(
     input.sidewayFixedTpDistance,
     "Sideway",
   );
+  const breakEven = normalizeBreakEven(input.breakEvenTriggerPrice, input.breakEvenOffsetPrice);
 
   return {
     trendFixedLot: round(trendFixedLot, 2),
@@ -165,6 +205,8 @@ export function validatePhase7CLotSettings(
     trendFixedTpDistance: trendFixedTp.distance,
     sidewayFixedTpEnabled: sidewayFixedTp.enabled,
     sidewayFixedTpDistance: sidewayFixedTp.distance,
+    breakEvenTriggerPrice: breakEven.trigger,
+    breakEvenOffsetPrice: breakEven.offset,
   };
 }
 
@@ -184,6 +226,8 @@ function parseState(value: unknown): Phase7CLotSettingsState | null {
       trendFixedTpDistance: version >= 2 ? Number(raw.trendFixedTpDistance ?? 0) : 0,
       sidewayFixedTpEnabled: version >= 2 ? raw.sidewayFixedTpEnabled === true : false,
       sidewayFixedTpDistance: version >= 2 ? Number(raw.sidewayFixedTpDistance ?? 0) : 0,
+      breakEvenTriggerPrice: version >= 2 ? raw.breakEvenTriggerPrice : undefined,
+      breakEvenOffsetPrice: version >= 2 ? raw.breakEvenOffsetPrice : undefined,
     });
     return {
       version: 2,
@@ -217,6 +261,8 @@ function parseActive(value: unknown): Phase7CActiveLotSettings | null {
       trendFixedTpDistance: version >= 2 ? Number(raw.trendFixedTpDistance ?? 0) : 0,
       sidewayFixedTpEnabled: version >= 2 ? raw.sidewayFixedTpEnabled === true : false,
       sidewayFixedTpDistance: version >= 2 ? Number(raw.sidewayFixedTpDistance ?? 0) : 0,
+      breakEvenTriggerPrice: version >= 2 ? raw.breakEvenTriggerPrice : undefined,
+      breakEvenOffsetPrice: version >= 2 ? raw.breakEvenOffsetPrice : undefined,
     });
     const supervisorPid = Number(raw.supervisorPid);
     if (!Number.isInteger(supervisorPid) || supervisorPid <= 0) return null;
@@ -319,7 +365,9 @@ export class Phase7CLotSettingsService {
       active.trendFixedTpEnabled !== state.trendFixedTpEnabled ||
       active.trendFixedTpDistance !== state.trendFixedTpDistance ||
       active.sidewayFixedTpEnabled !== state.sidewayFixedTpEnabled ||
-      active.sidewayFixedTpDistance !== state.sidewayFixedTpDistance;
+      active.sidewayFixedTpDistance !== state.sidewayFixedTpDistance ||
+      active.breakEvenTriggerPrice !== state.breakEvenTriggerPrice ||
+      active.breakEvenOffsetPrice !== state.breakEvenOffsetPrice;
 
     return {
       state,
@@ -338,6 +386,7 @@ export class Phase7CLotSettingsService {
         recoveryLotEscalation: false,
       },
       limits: PHASE7C_LOT_LIMITS,
+      breakEvenLimits: PHASE7C_BREAK_EVEN_LIMITS,
     };
   }
 
